@@ -4,6 +4,7 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Label } from "@/components/ui/label";
 import { 
   Search, MapPin, TrendingUp, CheckCircle, AlertTriangle, 
   FileText, ArrowLeft, Calendar, User, Layers, Map
@@ -23,6 +24,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import AssetConditionReport from "@/components/AssetConditionReport";
 
 export default function AssetRegister() {
   const [searchQuery, setSearchQuery] = useState("");
@@ -258,9 +260,9 @@ export default function AssetRegister() {
         </Card>
       </div>
 
-      {/* Detailed Assets Dialog */}
+      {/* Detailed Asset Condition Report Dialog */}
       <Dialog open={isDetailDialogOpen} onOpenChange={setIsDetailDialogOpen}>
-        <DialogContent className="max-w-7xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-[95vw] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <div className="flex items-center gap-3 mb-2">
               <Button
@@ -270,12 +272,12 @@ export default function AssetRegister() {
               >
                 <ArrowLeft className="h-5 w-5" />
               </Button>
-              <div>
-                <DialogTitle className="text-2xl">
-                  {detailedData?.roadName} - Asset Details
+              <div className="flex-1">
+                <DialogTitle className="text-xl">
+                  Asset Condition Report - Route {detailedData?.routeId}
                 </DialogTitle>
-                <DialogDescription className="text-base">
-                  Route {detailedData?.routeId} • Surveyed on {detailedData?.surveyDate} by {detailedData?.surveyorName}
+                <DialogDescription className="text-sm">
+                  Surveyed by {detailedData?.surveyorName} on {detailedData?.surveyDate}
                 </DialogDescription>
               </div>
             </div>
@@ -284,9 +286,12 @@ export default function AssetRegister() {
           {selectedSummary && selectedSummary.surveys.length > 1 && (
             <Card className="p-4 bg-primary/5 border-primary/20">
               <div className="flex items-center gap-4">
-                <Label className="font-semibold">Select Survey:</Label>
+                <Label className="font-semibold flex items-center gap-2">
+                  <Calendar className="h-4 w-4" />
+                  Select Survey Date (Version):
+                </Label>
                 <Select value={selectedSurveyDate} onValueChange={setSelectedSurveyDate}>
-                  <SelectTrigger className="w-[280px]">
+                  <SelectTrigger className="w-[320px]">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -302,68 +307,10 @@ export default function AssetRegister() {
           )}
 
           {detailedData && (
-            <div className="overflow-x-auto rounded-xl border">
-              <table className="w-full">
-                <thead className="bg-gradient-to-r from-primary/5 via-accent/5 to-primary/5 border-b-2 border-primary/20">
-                  <tr>
-                    <th className="text-left p-4 font-bold text-sm uppercase tracking-wide">Asset ID</th>
-                    <th className="text-left p-4 font-bold text-sm uppercase tracking-wide">Asset Name</th>
-                    <th className="text-left p-4 font-bold text-sm uppercase tracking-wide">Category</th>
-                    <th className="text-left p-4 font-bold text-sm uppercase tracking-wide">Type</th>
-                    <th className="text-left p-4 font-bold text-sm uppercase tracking-wide">Location</th>
-                    <th className="text-left p-4 font-bold text-sm uppercase tracking-wide">Confidence</th>
-                    <th className="text-left p-4 font-bold text-sm uppercase tracking-wide">Condition</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {detailedData.assets.map((asset, idx) => (
-                    <tr
-                      key={asset.id}
-                      className="border-b hover:bg-primary/5 transition-colors"
-                    >
-                      <td className="p-4">
-                        <Badge variant="outline" className="font-mono font-bold">
-                          {asset.assetCode}
-                        </Badge>
-                      </td>
-                      <td className="p-4 font-semibold">{asset.type}</td>
-                      <td className="p-4">
-                        <Badge variant="secondary" className="text-xs">
-                          {asset.category}
-                        </Badge>
-                      </td>
-                      <td className="p-4 text-sm text-muted-foreground">{asset.type}</td>
-                      <td className="p-4">
-                        <div className="flex items-center gap-2">
-                          <MapPin className="h-3 w-3 text-muted-foreground" />
-                          <span className="text-xs font-mono">
-                            {asset.lat.toFixed(4)}, {asset.lng.toFixed(4)}
-                          </span>
-                        </div>
-                      </td>
-                      <td className="p-4">
-                        <div className="flex items-center gap-2">
-                          <div className="w-16 h-2 bg-muted rounded-full overflow-hidden">
-                            <div 
-                              className="h-full bg-gradient-to-r from-primary to-accent"
-                              style={{ width: `${asset.confidence * 100}%` }}
-                            />
-                          </div>
-                          <span className="text-xs font-bold text-primary">
-                            {(asset.confidence * 100).toFixed(0)}%
-                          </span>
-                        </div>
-                      </td>
-                      <td className="p-4">
-                        <Badge variant="outline" className={cn("font-semibold", getConditionColor(asset.condition))}>
-                          {asset.condition}
-                        </Badge>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <AssetConditionReport 
+              data={detailedData} 
+              roadLength={selectedSummary?.lengthKm || 0}
+            />
           )}
         </DialogContent>
       </Dialog>
@@ -373,8 +320,4 @@ export default function AssetRegister() {
 
 function cn(...classes: (string | boolean | undefined)[]) {
   return classes.filter(Boolean).join(" ");
-}
-
-function Label({ children, className }: { children: React.ReactNode; className?: string }) {
-  return <label className={cn("text-sm font-medium", className)}>{children}</label>;
 }
