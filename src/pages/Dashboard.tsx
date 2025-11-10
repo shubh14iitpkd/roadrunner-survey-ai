@@ -1,9 +1,8 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Card } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { BarChart as BarChartIcon, LineChart as LineChartIcon, PieChart as PieChartIcon, TrendingUp, MapPin, AlertTriangle, CheckCircle, Activity, Package, Calendar, TrendingDown } from "lucide-react";
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from "recharts";
+import { BarChart as BarChartIcon, TrendingUp, MapPin, Package, Calendar, Layers } from "lucide-react";
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import { mockDetectedAssets } from "@/data/mockAssetData";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -13,70 +12,96 @@ export default function Dashboard() {
 
   // Calculate KPIs based on time period
   const totalAssets = mockDetectedAssets.length;
-  const totalAnomalies = mockDetectedAssets.filter(a => a.condition === "Poor").length;
-  const goodAssets = mockDetectedAssets.filter(a => a.condition === "Good").length;
-  const fairAssets = mockDetectedAssets.filter(a => a.condition === "Fair").length;
-  const poorAssets = mockDetectedAssets.filter(a => a.condition === "Poor").length;
   
   const kmSurveyedWeek = 89.5;
   const kmSurveyedMonth = 342.8;
   const kmSurveyed = timePeriod === "week" ? kmSurveyedWeek : kmSurveyedMonth;
 
-  // Asset health percentages
-  const healthData = [
-    { name: "Good", value: goodAssets, percentage: Math.round((goodAssets / totalAssets) * 100), color: "#22c55e" },
-    { name: "Fair", value: fairAssets, percentage: Math.round((fairAssets / totalAssets) * 100), color: "#f59e0b" },
-    { name: "Poor", value: poorAssets, percentage: Math.round((poorAssets / totalAssets) * 100), color: "#ef4444" },
-  ];
-
-  // Roads with most anomalies
-  const roadAnomalies = mockDetectedAssets
-    .filter(a => a.condition === "Poor")
-    .reduce((acc, asset) => {
-      acc[asset.roadName] = (acc[asset.roadName] || 0) + 1;
-      return acc;
-    }, {} as Record<string, number>);
-
-  const topAnomalyRoads = Object.entries(roadAnomalies)
-    .map(([road, count]) => ({ road, count }))
-    .sort((a, b) => b.count - a.count)
-    .slice(0, 5);
-
-  // Categories with most anomalies
-  const categoryAnomalies = mockDetectedAssets
-    .filter(a => a.condition === "Poor")
-    .reduce((acc, asset) => {
-      acc[asset.category] = (acc[asset.category] || 0) + 1;
-      return acc;
-    }, {} as Record<string, number>);
-
-  const topAnomalyCategories = Object.entries(categoryAnomalies)
-    .map(([category, count]) => ({ category, count }))
-    .sort((a, b) => b.count - a.count)
-    .slice(0, 6);
+  // Get unique roads from assets
+  const uniqueRoads = useMemo(() => {
+    const roadMap = new Map<string, { routeId: string; assetCount: number }>();
+    mockDetectedAssets.forEach(asset => {
+      if (!roadMap.has(asset.roadName)) {
+        roadMap.set(asset.roadName, { routeId: asset.routeId, assetCount: 0 });
+      }
+      roadMap.get(asset.roadName)!.assetCount++;
+    });
+    return Array.from(roadMap.entries())
+      .map(([name, data]) => ({ roadName: name, ...data }))
+      .sort((a, b) => b.assetCount - a.assetCount)
+      .slice(0, 5);
+  }, []);
 
   // Asset distribution by category
-  const categoryDistribution = mockDetectedAssets
-    .reduce((acc, asset) => {
-      acc[asset.category] = (acc[asset.category] || 0) + 1;
-      return acc;
-    }, {} as Record<string, number>);
+  const categoryDistribution = useMemo(() => {
+    const distribution = mockDetectedAssets
+      .reduce((acc, asset) => {
+        acc[asset.category] = (acc[asset.category] || 0) + 1;
+        return acc;
+      }, {} as Record<string, number>);
 
-  const categoryChartData = Object.entries(categoryDistribution)
-    .map(([category, count]) => ({ category, count }))
-    .sort((a, b) => b.count - a.count)
-    .slice(0, 6);
+    return Object.entries(distribution)
+      .map(([category, count]) => ({ category, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 6);
+  }, []);
 
   // Recent survey activity
-  const recentSurveys = mockDetectedAssets
-    .sort((a, b) => new Date(b.surveyDate).getTime() - new Date(a.surveyDate).getTime())
-    .slice(0, 5)
-    .map(asset => ({
-      road: asset.roadName,
-      date: asset.surveyDate,
-      assets: Math.floor(Math.random() * 50) + 30,
-      surveyor: asset.surveyorName
-    }));
+  const recentSurveys = useMemo(() => 
+    mockDetectedAssets
+      .sort((a, b) => new Date(b.surveyDate).getTime() - new Date(a.surveyDate).getTime())
+      .slice(0, 5)
+      .map(asset => ({
+        road: asset.roadName,
+        date: asset.surveyDate,
+        assets: Math.floor(Math.random() * 50) + 30,
+        surveyor: asset.surveyorName
+      })), []
+  );
+
+  // Road network paths for map - SVG path definitions
+  const roadPaths = {
+    "Doha Corniche": "M 10,30 Q 30,25 50,30 T 90,35",
+    "Salwa Road": "M 5,50 L 95,55",
+    "Al Shamal Road": "M 30,5 Q 32,30 35,50 T 40,95",
+    "Lusail Expressway": "M 15,15 Q 40,20 60,25 T 90,30",
+    "Dukhan Highway": "M 10,70 Q 50,68 90,70",
+    "Al Khor Coastal Road": "M 60,10 Q 65,30 70,50 T 80,90",
+    "Orbital Highway": "M 20,80 Q 50,75 80,80",
+    "Al Rayyan Road": "M 5,40 L 95,45",
+    "C-Ring Road": "M 50,10 Q 55,50 50,90",
+    "D-Ring Road": "M 65,15 Q 68,50 65,85"
+  };
+
+  // Group assets by road for map positioning
+  const assetsByRoad = useMemo(() => {
+    const grouped: Record<string, typeof mockDetectedAssets> = {};
+    mockDetectedAssets.forEach(asset => {
+      if (!grouped[asset.roadName]) {
+        grouped[asset.roadName] = [];
+      }
+      grouped[asset.roadName].push(asset);
+    });
+    return grouped;
+  }, []);
+
+  // Get position along a road path for an asset marker
+  const getPositionOnRoad = (roadName: string, assetIndex: number, totalAssets: number) => {
+    const path = roadPaths[roadName as keyof typeof roadPaths];
+    if (!path) return { x: 50, y: 50 };
+    
+    const progress = totalAssets > 1 ? assetIndex / (totalAssets - 1) : 0.5;
+    const matches = path.match(/M\s*([\d.]+),([\d.]+).*?([\d.]+),([\d.]+)/);
+    if (matches) {
+      const [, x1, y1, x2, y2] = matches.map(Number);
+      return {
+        x: x1 + (x2 - x1) * progress,
+        y: y1 + (y2 - y1) * progress
+      };
+    }
+    
+    return { x: 50, y: 50 };
+  };
 
   return (
     <div className="space-y-6">
@@ -85,9 +110,9 @@ export default function Dashboard() {
         <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGRlZnM+PHBhdHRlcm4gaWQ9ImdyaWQiIHdpZHRoPSI2MCIgaGVpZ2h0PSI2MCIgcGF0dGVyblVuaXRzPSJ1c2VyU3BhY2VPblVzZSI+PHBhdGggZD0iTSAxMCAwIEwgMCAwIDAgMTAiIGZpbGw9Im5vbmUiIHN0cm9rZT0id2hpdGUiIHN0cm9rZS1vcGFjaXR5PSIwLjEiIHN0cm9rZS13aWR0aD0iMSIvPjwvcGF0dGVybj48L2RlZnM+PHJlY3Qgd2lkdGg9IjEwMCUiIGhlaWdodD0iMTAwJSIgZmlsbD0idXJsKCNncmlkKSIvPjwvc3ZnPg==')] opacity-30"></div>
         <div className="relative flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <div>
-            <h1 className="text-4xl font-bold mb-2 text-white drop-shadow-lg">Dashboard</h1>
+            <h1 className="text-4xl font-bold mb-2 text-white drop-shadow-lg">GIS Dashboard</h1>
             <p className="text-white/90 text-lg">
-              Real-time overview of road asset inventory and condition monitoring
+              Geospatial analysis and road asset inventory monitoring
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -108,7 +133,7 @@ export default function Dashboard() {
       <div className="px-6 space-y-6">
 
         {/* KPI Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
           <Card className="p-6 shadow-elevated border-0 bg-gradient-to-br from-purple-50 to-white dark:from-purple-950/20 dark:to-card animate-fade-in hover:shadow-glow transition-all duration-300">
             <div className="flex items-start justify-between">
               <div className="space-y-2">
@@ -145,109 +170,96 @@ export default function Dashboard() {
             </div>
           </Card>
 
-          <Card className="p-6 shadow-elevated border-0 bg-gradient-to-br from-red-50 to-white dark:from-red-950/20 dark:to-card animate-fade-in hover:shadow-glow transition-all duration-300">
-            <div className="flex items-start justify-between">
-              <div className="space-y-2">
-                <p className="text-sm font-semibold text-red-600 dark:text-red-400 uppercase tracking-wide">Total Anomalies</p>
-                <p className="text-5xl font-bold bg-gradient-to-br from-red-600 to-red-400 bg-clip-text text-transparent">
-                  {totalAnomalies}
-                </p>
-                <p className="text-xs font-medium text-muted-foreground flex items-center gap-1">
-                  <TrendingDown className="h-3 w-3" />
-                  -8 vs last {timePeriod}
-                </p>
-              </div>
-              <div className="p-4 rounded-2xl bg-gradient-to-br from-red-500 to-red-600 shadow-lg">
-                <AlertTriangle className="h-7 w-7 text-white" />
-              </div>
-            </div>
-          </Card>
-
           <Card className="p-6 shadow-elevated border-0 bg-gradient-to-br from-blue-50 to-white dark:from-blue-950/20 dark:to-card animate-fade-in hover:shadow-glow transition-all duration-300">
             <div className="flex items-start justify-between">
               <div className="space-y-2">
-                <p className="text-sm font-semibold text-blue-600 dark:text-blue-400 uppercase tracking-wide">Avg Condition</p>
+                <p className="text-sm font-semibold text-blue-600 dark:text-blue-400 uppercase tracking-wide">Active Roads</p>
                 <p className="text-5xl font-bold bg-gradient-to-br from-blue-600 to-blue-400 bg-clip-text text-transparent">
-                  {healthData[0].percentage}%
+                  {uniqueRoads.length}
                 </p>
-                <p className="text-xs font-medium text-muted-foreground">Assets in good condition</p>
+                <p className="text-xs font-medium text-muted-foreground">Surveyed road networks</p>
               </div>
               <div className="p-4 rounded-2xl bg-gradient-to-br from-blue-500 to-blue-600 shadow-lg">
-                <Activity className="h-7 w-7 text-white" />
+                <Layers className="h-7 w-7 text-white" />
               </div>
             </div>
           </Card>
         </div>
 
-        {/* Asset Health Overview */}
+        {/* GIS Map Overview */}
         <Card className="p-8 shadow-elevated border-0 gradient-card">
           <div className="flex items-center gap-3 mb-6">
             <div className="p-3 rounded-xl bg-gradient-to-br from-primary to-accent">
-              <PieChartIcon className="h-6 w-6 text-white" />
+              <MapPin className="h-6 w-6 text-white" />
             </div>
-            <h3 className="font-bold text-xl">Asset Inventory Health</h3>
+            <h3 className="font-bold text-xl">Road Network & Asset Distribution</h3>
           </div>
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-            <div className="flex items-center justify-center">
-              <ResponsiveContainer width="100%" height={240}>
-                <PieChart>
-                  <Pie
-                    data={healthData}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={60}
-                    outerRadius={100}
-                    paddingAngle={2}
-                    dataKey="value"
-                  >
-                    {healthData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={entry.color} />
-                    ))}
-                  </Pie>
-                  <Tooltip formatter={(value: number) => `${value} assets`} />
-                </PieChart>
-              </ResponsiveContainer>
-            </div>
-            <div className="space-y-4 flex flex-col justify-center">
-              {healthData.map((item) => (
-                <div key={item.name} className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <div className="w-4 h-4 rounded-full" style={{ backgroundColor: item.color }} />
-                      <span className="text-sm font-medium">{item.name}</span>
-                    </div>
-                    <span className="font-semibold">{item.value} ({item.percentage}%)</span>
-                  </div>
-                  <div className="w-full bg-muted rounded-full h-2.5">
-                    <div
-                      className="h-2.5 rounded-full transition-all"
-                      style={{ width: `${item.percentage}%`, backgroundColor: item.color }}
-                    />
-                  </div>
-                </div>
+          <div className="bg-gradient-to-br from-muted/30 to-muted/10 rounded-xl border-2 border-border/50 p-4">
+            <svg viewBox="0 0 100 100" className="w-full h-[400px]">
+              {/* Background grid */}
+              <defs>
+                <pattern id="grid" width="10" height="10" patternUnits="userSpaceOnUse">
+                  <path d="M 10 0 L 0 0 0 10" fill="none" stroke="hsl(var(--border))" strokeWidth="0.5" opacity="0.3"/>
+                </pattern>
+              </defs>
+              <rect width="100" height="100" fill="url(#grid)" />
+              
+              {/* Road paths */}
+              {Object.entries(roadPaths).map(([roadName, path]) => (
+                <g key={roadName}>
+                  <path
+                    d={path}
+                    fill="none"
+                    stroke="hsl(var(--primary))"
+                    strokeWidth="0.3"
+                    opacity="0.6"
+                  />
+                </g>
               ))}
-            </div>
+              
+              {/* Asset markers */}
+              {Object.entries(assetsByRoad).map(([roadName, assets]) =>
+                assets.slice(0, 15).map((asset, idx) => {
+                  const pos = getPositionOnRoad(roadName, idx, Math.min(assets.length, 15));
+                  return (
+                    <g key={`${asset.id}-${idx}`}>
+                      <circle
+                        cx={pos.x}
+                        cy={pos.y}
+                        r="0.8"
+                        fill="hsl(var(--secondary))"
+                        opacity="0.8"
+                        className="transition-all hover:opacity-100"
+                      />
+                    </g>
+                  );
+                })
+              )}
+            </svg>
+          </div>
+          <div className="mt-4 text-sm text-muted-foreground text-center">
+            Showing {mockDetectedAssets.length} detected assets across {Object.keys(assetsByRoad).length} road networks
           </div>
         </Card>
 
-        {/* Charts Section */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Analytics Section */}
+        <div className="grid grid-cols-1 lg:grid-cols-1 gap-6">
           {/* Asset Distribution by Category */}
           <Card className="p-8 shadow-elevated border-0 gradient-card">
             <div className="flex items-center gap-3 mb-6">
               <div className="p-3 rounded-xl bg-gradient-to-br from-blue-500 to-cyan-500">
                 <BarChartIcon className="h-6 w-6 text-white" />
               </div>
-              <h3 className="font-bold text-xl">Assets by Category</h3>
+              <h3 className="font-bold text-xl">Asset Distribution by Category</h3>
             </div>
-            <ResponsiveContainer width="100%" height={280}>
-              <BarChart data={categoryChartData}>
+            <ResponsiveContainer width="100%" height={320}>
+              <BarChart data={categoryDistribution}>
                 <CartesianGrid strokeDasharray="3 3" opacity={0.1} />
                 <XAxis 
                   dataKey="category" 
                   angle={-45}
                   textAnchor="end"
-                  height={80}
+                  height={100}
                   tick={{ fontSize: 11 }}
                 />
                 <YAxis tick={{ fontSize: 12 }} />
@@ -256,42 +268,17 @@ export default function Dashboard() {
               </BarChart>
             </ResponsiveContainer>
           </Card>
-
-          {/* Categories with Most Anomalies */}
-          <Card className="p-8 shadow-elevated border-0 gradient-card">
-            <div className="flex items-center gap-3 mb-6">
-              <div className="p-3 rounded-xl bg-gradient-to-br from-red-500 to-orange-500">
-                <AlertTriangle className="h-6 w-6 text-white" />
-              </div>
-              <h3 className="font-bold text-xl">Anomalies by Category</h3>
-            </div>
-            <ResponsiveContainer width="100%" height={280}>
-              <BarChart data={topAnomalyCategories}>
-                <CartesianGrid strokeDasharray="3 3" opacity={0.1} />
-                <XAxis 
-                  dataKey="category" 
-                  angle={-45}
-                  textAnchor="end"
-                  height={80}
-                  tick={{ fontSize: 11 }}
-                />
-                <YAxis tick={{ fontSize: 12 }} />
-                <Tooltip />
-                <Bar dataKey="count" fill="#ef4444" radius={[8, 8, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </Card>
         </div>
 
         {/* Tables Section */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Roads with Most Anomalies */}
+          {/* Top Roads by Asset Count */}
           <Card className="p-8 shadow-elevated border-0 gradient-card">
             <div className="flex items-center gap-3 mb-6">
               <div className="p-3 rounded-xl bg-gradient-to-br from-orange-500 to-red-500">
                 <MapPin className="h-6 w-6 text-white" />
               </div>
-              <h3 className="font-bold text-xl">Roads with Most Anomalies</h3>
+              <h3 className="font-bold text-xl">Top Roads by Asset Count</h3>
             </div>
             <div className="rounded-lg border border-border overflow-hidden">
               <Table>
@@ -299,17 +286,23 @@ export default function Dashboard() {
                   <TableRow className="bg-muted/50">
                     <TableHead className="font-semibold">#</TableHead>
                     <TableHead className="font-semibold">Road Name</TableHead>
-                    <TableHead className="font-semibold text-right">Anomalies</TableHead>
+                    <TableHead className="font-semibold">Route ID</TableHead>
+                    <TableHead className="font-semibold text-right">Assets</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {topAnomalyRoads.map((item, idx) => (
-                    <TableRow key={item.road} className="hover:bg-muted/30">
+                  {uniqueRoads.map((road, idx) => (
+                    <TableRow key={road.roadName} className="hover:bg-muted/30">
                       <TableCell className="font-medium">{idx + 1}</TableCell>
-                      <TableCell>{item.road}</TableCell>
+                      <TableCell>{road.roadName}</TableCell>
+                      <TableCell>
+                        <Badge variant="outline" className="font-mono text-xs">
+                          {road.routeId}
+                        </Badge>
+                      </TableCell>
                       <TableCell className="text-right">
-                        <Badge variant="destructive" className="font-semibold">
-                          {item.count}
+                        <Badge variant="secondary" className="font-semibold">
+                          {road.assetCount}
                         </Badge>
                       </TableCell>
                     </TableRow>
@@ -323,7 +316,7 @@ export default function Dashboard() {
           <Card className="p-8 shadow-elevated border-0 gradient-card">
             <div className="flex items-center gap-3 mb-6">
               <div className="p-3 rounded-xl bg-gradient-to-br from-purple-500 to-pink-500">
-                <LineChartIcon className="h-6 w-6 text-white" />
+                <Calendar className="h-6 w-6 text-white" />
               </div>
               <h3 className="font-bold text-xl">Recent Survey Activity</h3>
             </div>
@@ -358,6 +351,3 @@ export default function Dashboard() {
   );
 }
 
-function cn(...classes: (string | boolean | undefined)[]) {
-  return classes.filter(Boolean).join(" ");
-}
