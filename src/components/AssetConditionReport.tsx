@@ -44,7 +44,7 @@ export default function AssetConditionReport({ data, roadLength }: AssetConditio
       {/* Overview Card */}
       <Card className="p-6 gradient-card border-0 shadow-elevated">
         <h3 className="text-lg font-bold mb-4">Overview</h3>
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
           <div className="space-y-1">
             <p className="text-sm font-medium text-muted-foreground">Road Name</p>
             <p className="font-semibold">{data.roadName}</p>
@@ -61,6 +61,12 @@ export default function AssetConditionReport({ data, roadLength }: AssetConditio
             <p className="text-sm font-medium text-muted-foreground">Total Assets</p>
             <Badge variant="secondary" className="font-bold text-lg px-3 py-1">
               {data.assets.length}
+            </Badge>
+          </div>
+          <div className="space-y-1">
+            <p className="text-sm font-medium text-muted-foreground">Anomalies Detected</p>
+            <Badge variant="destructive" className="font-bold text-lg px-3 py-1">
+              {data.assets.filter(asset => asset.condition === "Poor" || asset.condition === "Fair").length}
             </Badge>
           </div>
         </div>
@@ -162,8 +168,8 @@ export default function AssetConditionReport({ data, roadLength }: AssetConditio
                 <th className="text-left p-4 font-bold text-sm uppercase tracking-wide">Location (GIS)</th>
                 <th className="text-left p-4 font-bold text-sm uppercase tracking-wide">Asset Name</th>
                 <th className="text-left p-4 font-bold text-sm uppercase tracking-wide">Asset Type</th>
-                <th className="text-left p-4 font-bold text-sm uppercase tracking-wide">Defect Name</th>
-                <th className="text-left p-4 font-bold text-sm uppercase tracking-wide">Defect Description</th>
+                <th className="text-left p-4 font-bold text-sm uppercase tracking-wide">Anomaly Name</th>
+                <th className="text-left p-4 font-bold text-sm uppercase tracking-wide">Anomaly Description</th>
                 <th className="text-left p-4 font-bold text-sm uppercase tracking-wide">View Photo</th>
               </tr>
             </thead>
