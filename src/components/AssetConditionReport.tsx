@@ -66,39 +66,88 @@ export default function AssetConditionReport({ data, roadLength }: AssetConditio
         </div>
       </Card>
 
-      {/* Distribution Chart */}
-      <Card className="p-6 shadow-elevated border-0 gradient-card">
-        <h3 className="text-lg font-bold mb-4">Asset Distribution by Category</h3>
-        <div className="h-64">
-          <div className="flex items-end justify-around h-full gap-4 pb-8">
-            {Object.entries(
-              data.assets.reduce((acc, asset) => {
-                acc[asset.category] = (acc[asset.category] || 0) + 1;
-                return acc;
-              }, {} as Record<string, number>)
-            ).map(([category, count]) => {
-              const maxCount = Math.max(...Object.values(
+      {/* Statistics Row */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <Card className="p-6 gradient-card border-0 shadow-elevated">
+          <h3 className="text-lg font-bold mb-4">Asset Distribution by Category</h3>
+          <div className="h-48">
+            <div className="flex items-end justify-around h-full gap-2 pb-8">
+              {Object.entries(
                 data.assets.reduce((acc, asset) => {
                   acc[asset.category] = (acc[asset.category] || 0) + 1;
                   return acc;
                 }, {} as Record<string, number>)
-              ));
-              const heightPercentage = (count / maxCount) * 100;
-              
-              return (
-                <div key={category} className="flex-1 flex flex-col items-center gap-2">
-                  <div className="text-sm font-bold text-primary">{count}</div>
-                  <div 
-                    className="w-full bg-gradient-to-t from-primary to-primary/60 rounded-t-lg transition-all duration-500 hover:from-primary hover:to-primary/80"
-                    style={{ height: `${heightPercentage}%` }}
-                  />
-                  <div className="text-xs font-medium text-center text-muted-foreground px-2">{category}</div>
-                </div>
-              );
-            })}
+              ).map(([category, count]) => {
+                const maxCount = Math.max(...Object.values(
+                  data.assets.reduce((acc, asset) => {
+                    acc[asset.category] = (acc[asset.category] || 0) + 1;
+                    return acc;
+                  }, {} as Record<string, number>)
+                ));
+                const heightPercentage = (count / maxCount) * 100;
+                
+                return (
+                  <div key={category} className="flex-1 flex flex-col items-center gap-2">
+                    <div className="text-sm font-bold text-primary">{count}</div>
+                    <div 
+                      className="w-full bg-gradient-to-t from-primary to-primary/60 rounded-t-lg transition-all duration-500 hover:from-primary hover:to-primary/80"
+                      style={{ height: `${heightPercentage}%` }}
+                    />
+                    <div className="text-xs font-medium text-center text-muted-foreground px-2">{category}</div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
-        </div>
-      </Card>
+        </Card>
+
+        <Card className="p-6 gradient-card border-0 shadow-elevated md:col-span-2">
+          <h3 className="text-lg font-bold mb-4">Distribution of Defects per Chainage</h3>
+          <div className="h-48">
+            <div className="flex items-end justify-around h-full gap-2 pb-8">
+              {(() => {
+                // Create chainage segments (0-2km, 2-4km, etc.)
+                const chainageSegments = Math.ceil(roadLength / 2);
+                const defectsBySegment = Array(chainageSegments).fill(0);
+                
+                // Count defects (Poor or Fair condition) in each segment
+                data.assets.forEach((asset) => {
+                  if (asset.condition === "Poor" || asset.condition === "Fair") {
+                    // Calculate approximate chainage based on position in array
+                    const assetIndex = data.assets.indexOf(asset);
+                    const chainageKm = (assetIndex / data.assets.length) * roadLength;
+                    const segmentIndex = Math.floor(chainageKm / 2);
+                    if (segmentIndex < chainageSegments) {
+                      defectsBySegment[segmentIndex]++;
+                    }
+                  }
+                });
+
+                const maxDefects = Math.max(...defectsBySegment, 1);
+                
+                return defectsBySegment.map((count, index) => {
+                  const heightPercentage = (count / maxDefects) * 100;
+                  const chainageStart = index * 2;
+                  const chainageEnd = chainageStart + 2;
+                  
+                  return (
+                    <div key={index} className="flex-1 flex flex-col items-center gap-2">
+                      <div className="text-sm font-bold text-destructive">{count}</div>
+                      <div 
+                        className="w-full bg-gradient-to-t from-destructive to-destructive/60 rounded-t-lg transition-all duration-500 hover:from-destructive hover:to-destructive/80"
+                        style={{ height: `${Math.max(heightPercentage, 5)}%` }}
+                      />
+                      <div className="text-xs font-medium text-center text-muted-foreground">
+                        {chainageStart}-{Math.min(chainageEnd, roadLength)}km
+                      </div>
+                    </div>
+                  );
+                });
+              })()}
+            </div>
+          </div>
+        </Card>
+      </div>
 
       {/* Asset Details Table */}
       <Card className="shadow-elevated border-0 gradient-card overflow-hidden">
