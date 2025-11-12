@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { MapPin, Eye, Calendar } from "lucide-react";
+import { MapPin, Eye, Calendar, Download } from "lucide-react";
 import { DetailedRoadAssets } from "@/data/roadSurveyData";
 import {
   Dialog,
@@ -10,6 +10,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import * as XLSX from "xlsx";
 
 interface AssetConditionReportProps {
   data: DetailedRoadAssets;
@@ -25,6 +32,93 @@ export default function AssetConditionReport({ data, roadLength }: AssetConditio
     setIsImageDialogOpen(true);
   };
 
+  const exportToCSV = () => {
+    const csvRows = [];
+    // Headers
+    csvRows.push([
+      "Asset ID",
+      "GPS Start",
+      "GPS End",
+      "Asset Name",
+      "Asset Type",
+      "Anomaly Name",
+      "Anomaly Description"
+    ].join(","));
+
+    // Data rows
+    data.assets.forEach((asset) => {
+      const gpsStart = `${asset.lat.toFixed(6)} ${asset.lng.toFixed(6)}`;
+      const gpsEnd = `${(asset.lat + 0.0001).toFixed(6)} ${(asset.lng + 0.0001).toFixed(6)}`;
+      const anomalyName = asset.condition === "Poor" ? "Deterioration Detected" :
+                          asset.condition === "Fair" ? "Minor Wear" : "No defect";
+      const anomalyDesc = asset.notes || 
+                          (asset.condition === "Poor" ? "Asset shows signs of significant wear and requires maintenance attention" :
+                           asset.condition === "Fair" ? "Asset is functioning but showing minor wear" :
+                           "Asset in good condition");
+      
+      csvRows.push([
+        asset.id,
+        `"${gpsStart}"`,
+        `"${gpsEnd}"`,
+        `"${asset.type}"`,
+        asset.category,
+        anomalyName,
+        `"${anomalyDesc}"`
+      ].join(","));
+    });
+
+    const csvContent = csvRows.join("\n");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const link = document.createElement("a");
+    const url = URL.createObjectURL(blob);
+    link.setAttribute("href", url);
+    link.setAttribute("download", `asset-condition-report-${data.routeId}.csv`);
+    link.style.visibility = "hidden";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const exportToExcel = () => {
+    const worksheetData = [
+      ["Asset Condition Report"],
+      ["Road Name:", data.roadName],
+      ["Route ID:", data.routeId],
+      ["Road Length:", `${roadLength.toFixed(2)} KM`],
+      ["Survey Date:", data.surveyDate],
+      ["Total Assets:", data.assets.length],
+      ["Anomalies Detected:", data.assets.filter(a => a.condition === "Poor" || a.condition === "Fair").length],
+      [],
+      ["Asset ID", "GPS Start", "GPS End", "Asset Name", "Asset Type", "Anomaly Name", "Anomaly Description"],
+    ];
+
+    data.assets.forEach((asset) => {
+      const gpsStart = `${asset.lat.toFixed(6)}, ${asset.lng.toFixed(6)}`;
+      const gpsEnd = `${(asset.lat + 0.0001).toFixed(6)}, ${(asset.lng + 0.0001).toFixed(6)}`;
+      const anomalyName = asset.condition === "Poor" ? "Deterioration Detected" :
+                          asset.condition === "Fair" ? "Minor Wear" : "No defect";
+      const anomalyDesc = asset.notes || 
+                          (asset.condition === "Poor" ? "Asset shows signs of significant wear and requires maintenance attention" :
+                           asset.condition === "Fair" ? "Asset is functioning but showing minor wear" :
+                           "Asset in good condition");
+      
+      worksheetData.push([
+        asset.id,
+        gpsStart,
+        gpsEnd,
+        asset.type,
+        asset.category,
+        anomalyName,
+        anomalyDesc
+      ]);
+    });
+
+    const worksheet = XLSX.utils.aoa_to_sheet(worksheetData);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Asset Report");
+    XLSX.writeFile(workbook, `asset-condition-report-${data.routeId}.xlsx`);
+  };
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -34,9 +128,29 @@ export default function AssetConditionReport({ data, roadLength }: AssetConditio
             <h2 className="text-2xl font-bold text-white mb-1">Asset Condition Report</h2>
             <p className="text-white/90">{data.roadName}</p>
           </div>
-          <div className="flex items-center gap-2 text-sm text-white/90 bg-white/10 px-4 py-2 rounded-lg">
-            <Calendar className="h-4 w-4" />
-            <span>{data.surveyDate}</span>
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 text-sm text-white/90 bg-white/10 px-4 py-2 rounded-lg">
+              <Calendar className="h-4 w-4" />
+              <span>{data.surveyDate}</span>
+            </div>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button className="bg-white/20 hover:bg-white/30 text-white border-white/30">
+                  <Download className="h-4 w-4 mr-2" />
+                  Download Report
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={exportToExcel}>
+                  <Download className="h-4 w-4 mr-2" />
+                  Export as Excel
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={exportToCSV}>
+                  <Download className="h-4 w-4 mr-2" />
+                  Export as CSV
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </div>
       </div>
