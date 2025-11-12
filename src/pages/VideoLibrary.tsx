@@ -3,7 +3,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Play, Download, Search, ArrowLeft, Video as VideoIcon, Columns2, X } from "lucide-react";
+import { Play, Download, Search, ArrowLeft, Video as VideoIcon, Columns2, X, Sparkles } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { roadRegister } from "@/data/roadRegister";
 import { Link } from "react-router-dom";
@@ -20,6 +20,8 @@ interface VideoData {
   size: string;
   status: string;
   thumbnail: string;
+  rawVideoUrl?: string;
+  processedVideoUrl?: string;
 }
 
 const mockVideos: VideoData[] = [
@@ -81,6 +83,11 @@ export default function VideoLibrary() {
   const [compareMode, setCompareMode] = useState(false);
   const [selectedForCompare, setSelectedForCompare] = useState<string[]>([]);
   const [showCompareView, setShowCompareView] = useState(false);
+  const [videoDialog, setVideoDialog] = useState<{ open: boolean; video: VideoData | null; type: 'raw' | 'processed' | null }>({
+    open: false,
+    video: null,
+    type: null
+  });
 
   const filteredVideos = videos.filter((video) => {
     const matchesSearch = video.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -229,17 +236,40 @@ export default function VideoLibrary() {
                 compareMode && selectedForCompare.includes(video.id) && "ring-4 ring-primary shadow-glow"
               )}
             >
-              <div 
-                className="aspect-video bg-gradient-to-br from-muted to-muted/50 flex items-center justify-center relative group cursor-pointer"
-                onClick={() => compareMode && toggleCompareSelection(video.id)}
-              >
-                <VideoIcon className="h-16 w-16 text-muted-foreground/30" />
-                <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                  <Play className="h-12 w-12 text-white" />
+              {/* Dual Video Display */}
+              <div className="grid grid-cols-2 gap-0 border-b">
+                {/* Raw Video */}
+                <div 
+                  className="aspect-video bg-gradient-to-br from-muted to-muted/50 flex flex-col items-center justify-center relative group cursor-pointer border-r"
+                  onClick={() => !compareMode && setVideoDialog({ open: true, video, type: 'raw' })}
+                >
+                  <VideoIcon className="h-10 w-10 text-muted-foreground/30 mb-2" />
+                  <Badge variant="secondary" className="text-xs">RAW</Badge>
+                  <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                    <Play className="h-8 w-8 text-white" />
+                  </div>
                 </div>
-                {compareMode && selectedForCompare.includes(video.id) && (
-                  <Badge className="absolute top-2 right-2">Selected</Badge>
-                )}
+                
+                {/* AI Processed Video */}
+                <div 
+                  className="aspect-video bg-gradient-to-br from-primary/10 to-accent/10 flex flex-col items-center justify-center relative group cursor-pointer"
+                  onClick={() => !compareMode && setVideoDialog({ open: true, video, type: 'processed' })}
+                >
+                  <div className="relative">
+                    <VideoIcon className="h-10 w-10 text-primary/50 mb-2" />
+                    <Sparkles className="h-4 w-4 text-primary absolute -top-1 -right-1" />
+                  </div>
+                  <Badge variant="default" className="text-xs gap-1">
+                    <Sparkles className="h-3 w-3" />
+                    AI PROCESSED
+                  </Badge>
+                  <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                    <Play className="h-8 w-8 text-white" />
+                  </div>
+                  {compareMode && selectedForCompare.includes(video.id) && (
+                    <Badge className="absolute top-2 right-2">Selected</Badge>
+                  )}
+                </div>
               </div>
               
               <div className="p-4 space-y-3">
@@ -268,9 +298,22 @@ export default function VideoLibrary() {
                 <div className="flex gap-2">
                   {!compareMode && (
                     <>
-                      <Button size="sm" className="flex-1">
+                      <Button 
+                        size="sm" 
+                        variant="outline" 
+                        className="flex-1"
+                        onClick={() => setVideoDialog({ open: true, video, type: 'raw' })}
+                      >
                         <Play className="h-3 w-3 mr-1" />
-                        Watch
+                        Raw
+                      </Button>
+                      <Button 
+                        size="sm" 
+                        className="flex-1 gap-1"
+                        onClick={() => setVideoDialog({ open: true, video, type: 'processed' })}
+                      >
+                        <Sparkles className="h-3 w-3" />
+                        AI
                       </Button>
                       <Button size="sm" variant="outline">
                         <Download className="h-3 w-3" />
@@ -306,6 +349,55 @@ export default function VideoLibrary() {
           </Card>
         )}
       </div>
+
+      {/* Video Player Dialog */}
+      <Dialog open={videoDialog.open} onOpenChange={(open) => setVideoDialog({ open, video: null, type: null })}>
+        <DialogContent className="max-w-5xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              {videoDialog.type === 'raw' ? (
+                <>
+                  <VideoIcon className="h-5 w-5" />
+                  Raw Video
+                </>
+              ) : (
+                <>
+                  <Sparkles className="h-5 w-5 text-primary" />
+                  AI Processed Video
+                </>
+              )}
+              {videoDialog.video && ` - ${videoDialog.video.title}`}
+            </DialogTitle>
+          </DialogHeader>
+          {videoDialog.video && (
+            <div className="space-y-4">
+              <Card className="overflow-hidden gradient-card border-0">
+                <div className="aspect-video bg-gradient-to-br from-muted to-muted/50 flex items-center justify-center relative group">
+                  <VideoIcon className="h-24 w-24 text-muted-foreground/30" />
+                  <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-3">
+                    <Play className="h-16 w-16 text-white" />
+                    <p className="text-white text-sm">Click to play video</p>
+                  </div>
+                </div>
+              </Card>
+              <div className="flex items-center justify-between">
+                <div className="space-y-1">
+                  <p className="text-sm text-muted-foreground">{videoDialog.video.roadName}</p>
+                  <div className="flex gap-2">
+                    <Badge variant="outline" className="text-xs">Route #{videoDialog.video.routeId}</Badge>
+                    <Badge variant="secondary" className="text-xs">{videoDialog.video.surveyDate}</Badge>
+                    <Badge variant="outline" className="text-xs">{videoDialog.video.duration}</Badge>
+                  </div>
+                </div>
+                <Button variant="outline" className="gap-2">
+                  <Download className="h-4 w-4" />
+                  Download
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* Side-by-Side Comparison Dialog */}
       <Dialog open={showCompareView} onOpenChange={setShowCompareView}>
