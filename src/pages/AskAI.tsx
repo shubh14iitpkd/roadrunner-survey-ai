@@ -13,7 +13,6 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 
-
 interface Message {
   role: "user" | "assistant";
   content: string;
@@ -45,37 +44,67 @@ interface VideoInfo {
   thumbnail_url?: string;
 }
 
-async function askAIWithContext(
+const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
+const GEMINI_MODEL = "gemini-2.0-flash";
+
+async function askGeminiWithContext(
   prompt: string, 
   videoContext: string,
   framesContext: string,
   conversationHistory: Message[]
 ): Promise<string> {
-  // Avoid importing the auto-generated client directly (can crash if env injection is delayed)
-  const { getSupabaseClient } = await import("@/integrations/supabase/safeClient");
-  const supabase = getSupabaseClient();
+  if (!GEMINI_API_KEY) throw new Error("Missing VITE_GEMINI_API_KEY");
+  
+  const systemPrompt = `You are an AI assistant specialized in road asset analysis for RoadSight AI.
+You have access to video survey data with frames extracted at regular intervals.
+Each frame contains AI-detected road assets like traffic signs, street lights, guardrails, etc.
 
-  const { data, error } = await supabase.functions.invoke('road-ai-chat', {
-    body: { 
-      prompt, 
-      videoContext, 
-      framesContext,
-      conversationHistory: conversationHistory.slice(-6).map(m => ({
-        role: m.role,
-        text: m.content
-      }))
+${videoContext}
+
+${framesContext}
+
+Answer questions about:
+- Assets detected at specific timestamps
+- Asset conditions and types
+- Location-based queries
+- Statistics and summaries
+- Anomalies and issues
+
+Be concise and reference specific timestamps/frame numbers when relevant.
+If asked about a specific time, find the closest frame and describe what was detected.`;
+
+  // Build conversation for context
+  const messages = conversationHistory.slice(-6).map(m => 
+    `${m.role === "user" ? "User" : "Assistant"}: ${m.content}`
+  ).join("\n\n");
+
+  const fullPrompt = messages 
+    ? `${systemPrompt}\n\nConversation history:\n${messages}\n\nUser: ${prompt}`
+    : `${systemPrompt}\n\nUser: ${prompt}`;
+
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ role: "user", parts: [{ text: fullPrompt }] }],
+        generationConfig: {
+          temperature: 0.4,
+          maxOutputTokens: 1024,
+        },
+      }),
     }
-  });
-
-  if (error) {
-    throw new Error(error.message || 'AI service error');
+  );
+  
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || `HTTP ${res.status}`);
   }
-
-  if (data?.error) {
-    throw new Error(data.error);
-  }
-
-  return data?.response || "(No response)";
+  
+  const data = await res.json();
+  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+  return text.trim() || "(No response)";
 }
 
 // Parse timestamp from user query (e.g., "at 2:30", "at 150 seconds", "frame 45")
@@ -309,7 +338,7 @@ ${sampleFrames}`;
         }
       }
 
-      const reply = await askAIWithContext(
+      const reply = await askGeminiWithContext(
         input,
         buildVideoContext(),
         buildFramesContext() + additionalContext,
@@ -495,7 +524,7 @@ ${sampleFrames}`;
             <Button 
               onClick={handleSend} 
               size="icon" 
-              disabled={busy || !selectedVideoId}
+              disabled={busy || !GEMINI_API_KEY || !selectedVideoId}
             >
               {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
             </Button>
