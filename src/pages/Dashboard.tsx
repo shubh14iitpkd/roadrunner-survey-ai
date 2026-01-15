@@ -1,93 +1,157 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { BarChart as BarChartIcon, LineChart as LineChartIcon, PieChart as PieChartIcon, TrendingUp, MapPin, AlertTriangle, CheckCircle, Activity, Package, Calendar, TrendingDown } from "lucide-react";
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from "recharts";
-import { mockDetectedAssets } from "@/data/mockAssetData";
+import { BarChart as BarChartIcon, LineChart as LineChartIcon, MapIcon, TrendingUp, MapPin, AlertTriangle, CheckCircle, Activity, Package, Calendar, TrendingDown, Maximize2 } from "lucide-react";
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { useNavigate } from "react-router-dom";
+import LeafletMapView from "@/components/LeafletMapView";
+import { api } from "@/lib/api";
+
+// Custom tooltip component for charts that adapts to dark mode
+const CustomTooltip = ({ active, payload, label }: any) => {
+  if (active && payload && payload.length) {
+    const data = payload[0];
+    return (
+      <div className="bg-popover border border-border rounded-lg shadow-lg p-3 min-w-32">
+        <div className="flex items-center justify-between pb-2">
+          <span className="text-popover-foreground font-medium text-sm">{label}</span>
+        </div>
+        <div className="flex items-center justify-between">
+          <span className="text-muted-foreground text-xs capitalize mr-2">{data.dataKey}: </span>
+          <span className="text-primary dark:text-foreground font-bold text-sm">{data.value}</span>
+        </div>
+      </div>
+    );
+  }
+  return null;
+};
 
 export default function Dashboard() {
   const [timePeriod, setTimePeriod] = useState<"week" | "month">("week");
+  const [roads, setRoads] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const navigate = useNavigate();
 
-  // Calculate KPIs based on time period
-  const totalAssets = mockDetectedAssets.length;
-  const totalAnomalies = mockDetectedAssets.filter(a => a.condition === "Poor").length;
-  const goodAssets = mockDetectedAssets.filter(a => a.condition === "Good").length;
-  const fairAssets = mockDetectedAssets.filter(a => a.condition === "Fair").length;
-  const poorAssets = mockDetectedAssets.filter(a => a.condition === "Poor").length;
-  
-  const kmSurveyedWeek = 89.5;
-  const kmSurveyedMonth = 342.8;
-  const kmSurveyed = timePeriod === "week" ? kmSurveyedWeek : kmSurveyedMonth;
+  // Dashboard data state
+  const [kpis, setKpis] = useState<any>({
+    totalAssets: 0,
+    totalAnomalies: 0,
+    good: 0,
+    fair: 0,
+    poor: 0,
+    kmSurveyed: 0,
+  });
+  const [categoryChartData, setCategoryChartData] = useState<any[]>([]);
+  const [topAnomalyCategories, setTopAnomalyCategories] = useState<any[]>([]);
+  const [topAnomalyRoads, setTopAnomalyRoads] = useState<any[]>([]);
+  const [recentSurveys, setRecentSurveys] = useState<any[]>([]);
 
-  // Asset health percentages
+  // Load all dashboard data
+  useEffect(() => {
+    (async () => {
+      try {
+        setLoading(true);
+
+        // Load all data in parallel
+        const [roadsResp, kpisResp, assetsByCategoryResp, anomaliesByCategoryResp, topRoadsResp, recentSurveysResp] = await Promise.all([
+          api.roads.list(),
+          api.dashboard.kpis(timePeriod),
+          api.dashboard.assetsByCategory(),
+          api.dashboard.anomaliesByCategory(),
+          api.dashboard.topAnomalyRoads(),
+          api.dashboard.recentSurveys(),
+        ]);
+
+        if (roadsResp?.items) setRoads(roadsResp.items);
+        if (kpisResp) setKpis(kpisResp);
+
+        // Set chart data with demo fallbacks
+        if (assetsByCategoryResp?.items && assetsByCategoryResp.items.length > 0) {
+          setCategoryChartData(assetsByCategoryResp.items);
+        } else {
+          // Demo data for assets by category
+          setCategoryChartData([
+            { category: "Potholes", count: 45 },
+            { category: "Cracks", count: 38 },
+            { category: "Signs", count: 32 },
+            { category: "Manholes", count: 22 },
+            { category: "Markings", count: 13 },
+          ]);
+        }
+
+        if (anomaliesByCategoryResp?.items && anomaliesByCategoryResp.items.length > 0) {
+          setTopAnomalyCategories(anomaliesByCategoryResp.items);
+        } else {
+          // Demo data for anomalies by category
+          setTopAnomalyCategories([
+            { category: "Potholes", count: 12 },
+            { category: "Cracks", count: 8 },
+            { category: "Signs", count: 3 },
+          ]);
+        }
+
+        if (topRoadsResp?.items && topRoadsResp.items.length > 0) {
+          setTopAnomalyRoads(topRoadsResp.items);
+        } else {
+          // Demo data for top anomaly roads
+          setTopAnomalyRoads([
+            { road: "Al Corniche Street", count: 8 },
+            { road: "West Bay Road", count: 6 },
+            { road: "Salwa Road", count: 5 },
+            { road: "C Ring Road", count: 4 },
+          ]);
+        }
+
+        if (recentSurveysResp?.items && recentSurveysResp.items.length > 0) {
+          setRecentSurveys(recentSurveysResp.items);
+        } else {
+          // Demo data for recent surveys
+          setRecentSurveys([
+            { road: "Al Corniche Street", date: "2025-11-10", assets: 42, surveyor: "Ahmed" },
+            { road: "West Bay Road", date: "2025-11-09", assets: 38, surveyor: "Mohammed" },
+            { road: "Salwa Road", date: "2025-11-08", assets: 35, surveyor: "Fatima" },
+            { road: "C Ring Road", date: "2025-11-07", assets: 35, surveyor: "Ahmed" },
+          ]);
+        }
+      } catch (err) {
+        console.error("Failed to load dashboard data:", err);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [timePeriod]);
+
+  // Calculate health data - with demo hardcoded values
+  const totalAssets = kpis.totalAssets || 150; // Demo: default to 150 assets
+  const demoKpis = {
+    totalAssets: loading ? 0 : (kpis.totalAssets || 150),
+    totalAnomalies: loading ? 0 : (kpis.totalAnomalies || 23),
+    good: loading ? 0 : (kpis.good || 98),
+    fair: loading ? 0 : (kpis.fair || 29),
+    poor: loading ? 0 : (kpis.poor || 23),
+    kmSurveyed: loading ? 0 : (kpis.kmSurveyed || 42.8),
+  };
+
   const healthData = [
-    { name: "Good", value: goodAssets, percentage: Math.round((goodAssets / totalAssets) * 100), color: "#22c55e" },
-    { name: "Fair", value: fairAssets, percentage: Math.round((fairAssets / totalAssets) * 100), color: "#f59e0b" },
-    { name: "Poor", value: poorAssets, percentage: Math.round((poorAssets / totalAssets) * 100), color: "#ef4444" },
+    { name: "Good", value: demoKpis.good, percentage: Math.round((demoKpis.good / totalAssets) * 100), color: "#22c55e" },
+    { name: "Fair", value: demoKpis.fair, percentage: Math.round((demoKpis.fair / totalAssets) * 100), color: "#f59e0b" },
+    { name: "Poor", value: demoKpis.poor, percentage: Math.round((demoKpis.poor / totalAssets) * 100), color: "#ef4444" },
   ];
-
-  // Roads with most anomalies
-  const roadAnomalies = mockDetectedAssets
-    .filter(a => a.condition === "Poor")
-    .reduce((acc, asset) => {
-      acc[asset.roadName] = (acc[asset.roadName] || 0) + 1;
-      return acc;
-    }, {} as Record<string, number>);
-
-  const topAnomalyRoads = Object.entries(roadAnomalies)
-    .map(([road, count]) => ({ road, count }))
-    .sort((a, b) => b.count - a.count)
-    .slice(0, 5);
-
-  // Categories with most anomalies
-  const categoryAnomalies = mockDetectedAssets
-    .filter(a => a.condition === "Poor")
-    .reduce((acc, asset) => {
-      acc[asset.category] = (acc[asset.category] || 0) + 1;
-      return acc;
-    }, {} as Record<string, number>);
-
-  const topAnomalyCategories = Object.entries(categoryAnomalies)
-    .map(([category, count]) => ({ category, count }))
-    .sort((a, b) => b.count - a.count)
-    .slice(0, 6);
-
-  // Asset distribution by category
-  const categoryDistribution = mockDetectedAssets
-    .reduce((acc, asset) => {
-      acc[asset.category] = (acc[asset.category] || 0) + 1;
-      return acc;
-    }, {} as Record<string, number>);
-
-  const categoryChartData = Object.entries(categoryDistribution)
-    .map(([category, count]) => ({ category, count }))
-    .sort((a, b) => b.count - a.count)
-    .slice(0, 6);
-
-  // Recent survey activity
-  const recentSurveys = mockDetectedAssets
-    .sort((a, b) => new Date(b.surveyDate).getTime() - new Date(a.surveyDate).getTime())
-    .slice(0, 5)
-    .map(asset => ({
-      road: asset.roadName,
-      date: asset.surveyDate,
-      assets: Math.floor(Math.random() * 50) + 30,
-      surveyor: asset.surveyorName
-    }));
 
   return (
     <div className="space-y-6">
       {/* Hero Header */}
-      <div className="relative overflow-hidden gradient-primary p-8 rounded-2xl shadow-elevated">
-        <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGRlZnM+PHBhdHRlcm4gaWQ9ImdyaWQiIHdpZHRoPSI2MCIgaGVpZ2h0PSI2MCIgcGF0dGVyblVuaXRzPSJ1c2VyU3BhY2VPblVzZSI+PHBhdGggZD0iTSAxMCAwIEwgMCAwIDAgMTAiIGZpbGw9Im5vbmUiIHN0cm9rZT0id2hpdGUiIHN0cm9rZS1vcGFjaXR5PSIwLjEiIHN0cm9rZS13aWR0aD0iMSIvPjwvcGF0dGVybj48L2RlZnM+PHJlY3Qgd2lkdGg9IjEwMCUiIGhlaWdodD0iMTAwJSIgZmlsbD0idXJsKCNncmlkKSIvPjwvc3ZnPg==')] opacity-30"></div>
+      <div className="relative overflow-hidden bg-primary p-8 shadow-elevated">
+        {/* <div className="absolute bg-primary inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGRlZnM+PHBhdHRlcm4gaWQ9ImdyaWQiIHdpZHRoPSI2MCIgaGVpZ2h0PSI2MCIgcGF0dGVyblVuaXRzPSJ1c2VyU3BhY2VPblVzZSI+PHBhdGggZD0iTSAxMCAwIEwgMCAwIDAgMTAiIGZpbGw9Im5vbmUiIHN0cm9rZT0id2hpdGUiIHN0cm9rZS1vcGFjaXR5PSIwLjEiIHN0cm9rZS13aWR0aD0iMSIvPjwvcGF0dGVybj48L2RlZnM+PHJlY3Qgd2lkdGg9IjEwMCUiIGhlaWdodD0iMTAwJSIgZmlsbD0idXJsKCNncmlkKSIvPjwvc3ZnPg==')] opacity-30"></div> */}
+        <div className="absolute bg-primary inset-0 opacity-30"></div>
         <div className="relative flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <div>
             <h1 className="text-4xl font-bold mb-2 text-white drop-shadow-lg">Dashboard</h1>
             <p className="text-white/90 text-lg">
-              Real-time overview of road asset inventory and condition monitoring
+              Overview of road asset inventory and condition monitoring
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -108,18 +172,18 @@ export default function Dashboard() {
       <div className="px-6 space-y-6">
 
         {/* KPI Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
           <Card className="p-6 shadow-elevated border-0 bg-gradient-to-br from-purple-50 to-white dark:from-purple-950/20 dark:to-card animate-fade-in hover:shadow-glow transition-all duration-300">
             <div className="flex items-start justify-between">
               <div className="space-y-2">
                 <p className="text-sm font-semibold text-purple-600 dark:text-purple-400 uppercase tracking-wide">
-                  KM Surveyed {timePeriod === "week" ? "(Week)" : "(Month)"}
+                  Total road network
                 </p>
                 <p className="text-5xl font-bold bg-gradient-to-br from-purple-600 to-purple-400 bg-clip-text text-transparent">
-                  {kmSurveyed}
+                {loading ? "..." : Number(demoKpis.kmSurveyed).toLocaleString("en-US", { maximumFractionDigits: 1 })}
                 </p>
-                <p className="text-xs font-medium text-muted-foreground">
-                  {timePeriod === "week" ? "+15.2 vs last week" : "+45.2 vs last month"}
+                <p className="text-xs font-medium text-foreground">
+                KMs Surveyed
                 </p>
               </div>
               <div className="p-4 rounded-2xl bg-gradient-to-br from-purple-500 to-purple-600 shadow-lg">
@@ -133,10 +197,10 @@ export default function Dashboard() {
               <div className="space-y-2">
                 <p className="text-sm font-semibold text-green-600 dark:text-green-400 uppercase tracking-wide">Total Assets</p>
                 <p className="text-5xl font-bold bg-gradient-to-br from-green-600 to-green-400 bg-clip-text text-transparent">
-                  {totalAssets.toLocaleString()}
+                  {loading ? "..." : demoKpis.totalAssets.toLocaleString()}
                 </p>
-                <p className="text-xs font-medium text-muted-foreground">
-                  {timePeriod === "week" ? "+48 this week" : "+187 this month"}
+                <p className="text-xs font-medium text-foreground">
+                  Detected across network
                 </p>
               </div>
               <div className="p-4 rounded-2xl bg-gradient-to-br from-green-500 to-green-600 shadow-lg">
@@ -150,11 +214,10 @@ export default function Dashboard() {
               <div className="space-y-2">
                 <p className="text-sm font-semibold text-red-600 dark:text-red-400 uppercase tracking-wide">Total Anomalies</p>
                 <p className="text-5xl font-bold bg-gradient-to-br from-red-600 to-red-400 bg-clip-text text-transparent">
-                  {totalAnomalies}
+                  {loading ? "..." : demoKpis.totalAnomalies}
                 </p>
-                <p className="text-xs font-medium text-muted-foreground flex items-center gap-1">
-                  <TrendingDown className="h-3 w-3" />
-                  -8 vs last {timePeriod}
+                <p className="text-xs font-medium text-foreground flex items-center gap-1">
+                  Assets in poor condition
                 </p>
               </div>
               <div className="p-4 rounded-2xl bg-gradient-to-br from-red-500 to-red-600 shadow-lg">
@@ -163,12 +226,12 @@ export default function Dashboard() {
             </div>
           </Card>
 
-          <Card className="p-6 shadow-elevated border-0 bg-gradient-to-br from-blue-50 to-white dark:from-blue-950/20 dark:to-card animate-fade-in hover:shadow-glow transition-all duration-300">
+          {/* <Card className="p-6 shadow-elevated border-0 bg-gradient-to-br from-blue-50 to-white dark:from-blue-950/20 dark:to-card animate-fade-in hover:shadow-glow transition-all duration-300">
             <div className="flex items-start justify-between">
               <div className="space-y-2">
                 <p className="text-sm font-semibold text-blue-600 dark:text-blue-400 uppercase tracking-wide">Avg Condition</p>
                 <p className="text-5xl font-bold bg-gradient-to-br from-blue-600 to-blue-400 bg-clip-text text-transparent">
-                  {healthData[0].percentage}%
+                  {loading ? "..." : `${healthData[0].percentage}%`}
                 </p>
                 <p className="text-xs font-medium text-muted-foreground">Assets in good condition</p>
               </div>
@@ -176,124 +239,116 @@ export default function Dashboard() {
                 <Activity className="h-7 w-7 text-white" />
               </div>
             </div>
-          </Card>
+          </Card> */}
         </div>
 
-        {/* Asset Health Overview */}
-        <Card className="p-8 shadow-elevated border-0 gradient-card">
-          <div className="flex items-center gap-3 mb-6">
-            <div className="p-3 rounded-xl bg-gradient-to-br from-primary to-accent">
-              <PieChartIcon className="h-6 w-6 text-white" />
+        {/* GIS Map Overview */}
+        <Card className="p-6 sm:p-8 shadow-elevated border-0 gradient-card">
+          <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center gap-3">
+              <div className="p-3 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-500">
+                <MapPin className="h-6 w-6 text-white" />
+              </div>
+              <h3 className="font-bold text-lg sm:text-xl">Geographic Overview</h3>
             </div>
-            <h3 className="font-bold text-xl">Asset Inventory Health</h3>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => navigate('/gis')}
+              className="gap-2"
+            >
+              <MapPin className="h-4 w-4" />
+              <span className="hidden sm:inline">View Full Map</span>
+              <span className="sm:hidden">Full View</span>
+            </Button>
           </div>
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-            <div className="flex items-center justify-center">
-              <ResponsiveContainer width="100%" height={240}>
-                <PieChart>
-                  <Pie
-                    data={healthData}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={60}
-                    outerRadius={100}
-                    paddingAngle={2}
-                    dataKey="value"
-                  >
-                    {healthData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={entry.color} />
-                    ))}
-                  </Pie>
-                  <Tooltip formatter={(value: number) => `${value} assets`} />
-                </PieChart>
-              </ResponsiveContainer>
-            </div>
-            <div className="space-y-4 flex flex-col justify-center">
-              {healthData.map((item) => (
-                <div key={item.name} className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <div className="w-4 h-4 rounded-full" style={{ backgroundColor: item.color }} />
-                      <span className="text-sm font-medium">{item.name}</span>
-                    </div>
-                    <span className="font-semibold">{item.value} ({item.percentage}%)</span>
-                  </div>
-                  <div className="w-full bg-muted rounded-full h-2.5">
-                    <div
-                      className="h-2.5 rounded-full transition-all"
-                      style={{ width: `${item.percentage}%`, backgroundColor: item.color }}
-                    />
-                  </div>
-                </div>
-              ))}
-            </div>
+          <div className="relative w-full rounded-xl overflow-hidden border border-border bg-muted/20" style={{ height: '400px' }}>
+            <LeafletMapView selectedRoadNames={[]} roads={roads} />
           </div>
+          {/* <div className="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="p-3 sm:p-4 bg-gradient-to-br from-blue-50 to-cyan-50 dark:from-blue-950/20 dark:to-cyan-950/20 rounded-lg border border-blue-200 dark:border-blue-800">
+              <p className="text-xs sm:text-sm text-blue-600 dark:text-blue-400 font-medium">Total Roads</p>
+              <p className="text-xl sm:text-2xl font-bold text-blue-700 dark:text-blue-300 mt-1">{roads.length}</p>
+            </div>
+            <div className="p-3 sm:p-4 bg-gradient-to-br from-green-50 to-emerald-50 dark:from-green-950/20 dark:to-emerald-950/20 rounded-lg border border-green-200 dark:border-green-800">
+              <p className="text-xs sm:text-sm text-green-600 dark:text-green-400 font-medium">Good</p>
+              <p className="text-xl sm:text-2xl font-bold text-green-700 dark:text-green-300 mt-1">{goodAssets}</p>
+            </div>
+            <div className="p-3 sm:p-4 bg-gradient-to-br from-amber-50 to-yellow-50 dark:from-amber-950/20 dark:to-yellow-950/20 rounded-lg border border-amber-200 dark:border-amber-800">
+              <p className="text-xs sm:text-sm text-amber-600 dark:text-amber-400 font-medium">Fair</p>
+              <p className="text-xl sm:text-2xl font-bold text-amber-700 dark:text-amber-300 mt-1">{fairAssets}</p>
+            </div>
+            <div className="p-3 sm:p-4 bg-gradient-to-br from-red-50 to-rose-50 dark:from-red-950/20 dark:to-rose-950/20 rounded-lg border border-red-200 dark:border-red-800">
+              <p className="text-xs sm:text-sm text-red-600 dark:text-red-400 font-medium">Poor</p>
+              <p className="text-xl sm:text-2xl font-bold text-red-700 dark:text-red-300 mt-1">{poorAssets}</p>
+            </div>
+          </div> */}
         </Card>
 
         {/* Charts Section */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-1 gap-6">
           {/* Asset Distribution by Category */}
-          <Card className="p-8 shadow-elevated border-0 gradient-card">
+          <Card className="p-6 sm:p-8 shadow-elevated border-0 gradient-card">
             <div className="flex items-center gap-3 mb-6">
               <div className="p-3 rounded-xl bg-gradient-to-br from-blue-500 to-cyan-500">
                 <BarChartIcon className="h-6 w-6 text-white" />
               </div>
-              <h3 className="font-bold text-xl">Assets by Category</h3>
+              <h3 className="font-bold text-lg sm:text-xl">Assets by Category</h3>
             </div>
             <ResponsiveContainer width="100%" height={280}>
               <BarChart data={categoryChartData}>
                 <CartesianGrid strokeDasharray="3 3" opacity={0.1} />
-                <XAxis 
-                  dataKey="category" 
+                <XAxis
+                  dataKey="category"
                   angle={-45}
                   textAnchor="end"
                   height={80}
-                  tick={{ fontSize: 11 }}
+                  tick={{ fontSize: 10, fill: "hsl(var(--chart-axis))" }}
                 />
-                <YAxis tick={{ fontSize: 12 }} />
-                <Tooltip />
+                <YAxis tick={{ fontSize: 11, fill: "hsl(var(--chart-axis))" }} />
+                <Tooltip cursor={false} content={<CustomTooltip />} />
                 <Bar dataKey="count" fill="hsl(var(--primary))" radius={[8, 8, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </Card>
 
           {/* Categories with Most Anomalies */}
-          <Card className="p-8 shadow-elevated border-0 gradient-card">
+          {/* <Card className="p-6 sm:p-8 shadow-elevated border-0 gradient-card">
             <div className="flex items-center gap-3 mb-6">
               <div className="p-3 rounded-xl bg-gradient-to-br from-red-500 to-orange-500">
                 <AlertTriangle className="h-6 w-6 text-white" />
               </div>
-              <h3 className="font-bold text-xl">Anomalies by Category</h3>
+              <h3 className="font-bold text-lg sm:text-xl">Anomalies by Category</h3>
             </div>
             <ResponsiveContainer width="100%" height={280}>
               <BarChart data={topAnomalyCategories}>
                 <CartesianGrid strokeDasharray="3 3" opacity={0.1} />
-                <XAxis 
-                  dataKey="category" 
+                <XAxis
+                  dataKey="category"
                   angle={-45}
                   textAnchor="end"
                   height={80}
-                  tick={{ fontSize: 11 }}
+                  tick={{ fontSize: 10 }}
                 />
-                <YAxis tick={{ fontSize: 12 }} />
+                <YAxis tick={{ fontSize: 11 }} />
                 <Tooltip />
                 <Bar dataKey="count" fill="#ef4444" radius={[8, 8, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
-          </Card>
+          </Card> */}
         </div>
 
         {/* Tables Section */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Roads with Most Anomalies */}
-          <Card className="p-8 shadow-elevated border-0 gradient-card">
+          <Card className="p-6 sm:p-8 shadow-elevated border-0 gradient-card">
             <div className="flex items-center gap-3 mb-6">
               <div className="p-3 rounded-xl bg-gradient-to-br from-orange-500 to-red-500">
                 <MapPin className="h-6 w-6 text-white" />
               </div>
-              <h3 className="font-bold text-xl">Roads with Most Anomalies</h3>
+              <h3 className="font-bold text-lg sm:text-xl">Roads with Most Anomalies</h3>
             </div>
-            <div className="rounded-lg border border-border overflow-hidden">
+            <div className="rounded-lg border border-border overflow-hidden overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow className="bg-muted/50">
@@ -306,9 +361,9 @@ export default function Dashboard() {
                   {topAnomalyRoads.map((item, idx) => (
                     <TableRow key={item.road} className="hover:bg-muted/30">
                       <TableCell className="font-medium">{idx + 1}</TableCell>
-                      <TableCell>{item.road}</TableCell>
+                      <TableCell className="text-sm sm:text-base">{item.road}</TableCell>
                       <TableCell className="text-right">
-                        <Badge variant="destructive" className="font-semibold">
+                        <Badge variant="destructive" className="font-semibold text-xs sm:text-sm">
                           {item.count}
                         </Badge>
                       </TableCell>
@@ -320,14 +375,14 @@ export default function Dashboard() {
           </Card>
 
           {/* Recent Survey Activity */}
-          <Card className="p-8 shadow-elevated border-0 gradient-card">
+          <Card className="p-6 sm:p-8 shadow-elevated border-0 gradient-card">
             <div className="flex items-center gap-3 mb-6">
               <div className="p-3 rounded-xl bg-gradient-to-br from-purple-500 to-pink-500">
                 <LineChartIcon className="h-6 w-6 text-white" />
               </div>
-              <h3 className="font-bold text-xl">Recent Survey Activity</h3>
+              <h3 className="font-bold text-lg sm:text-xl">Recent Survey Activity</h3>
             </div>
-            <div className="rounded-lg border border-border overflow-hidden">
+            <div className="rounded-lg border border-border overflow-hidden overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow className="bg-muted/50">
@@ -339,10 +394,10 @@ export default function Dashboard() {
                 <TableBody>
                   {recentSurveys.map((survey, idx) => (
                     <TableRow key={idx} className="hover:bg-muted/30">
-                      <TableCell className="font-medium">{survey.road}</TableCell>
-                      <TableCell className="text-sm text-muted-foreground">{survey.date}</TableCell>
+                      <TableCell className="font-medium text-sm sm:text-base">{survey.road}</TableCell>
+                      <TableCell className="text-xs sm:text-sm text-muted-foreground">{survey.date}</TableCell>
                       <TableCell className="text-right">
-                        <Badge variant="secondary" className="font-semibold">
+                        <Badge variant="secondary" className="font-semibold text-xs sm:text-sm">
                           {survey.assets}
                         </Badge>
                       </TableCell>

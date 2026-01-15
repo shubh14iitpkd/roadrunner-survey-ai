@@ -13,7 +13,7 @@ export default function SignUp() {
   const navigate = useNavigate();
   const { signUp } = useAuth();
   const { toast } = useToast();
-  
+
   const [formData, setFormData] = useState({
     first_name: "",
     last_name: "",
@@ -26,9 +26,9 @@ export default function SignUp() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    if (!formData.first_name || !formData.last_name || !formData.email || 
-        !formData.organisation || !formData.password || !formData.role) {
+
+    if (!formData.first_name || !formData.last_name || !formData.email ||
+      !formData.organisation || !formData.password || !formData.role) {
       toast({
         variant: "destructive",
         title: "Missing fields",
@@ -38,24 +38,29 @@ export default function SignUp() {
     }
 
     setLoading(true);
-    
+
     const result = await signUp({
       first_name: formData.first_name,
       last_name: formData.last_name,
       email: formData.email,
       organisation: formData.organisation,
       role: formData.role,
+      password: formData.password,
     });
 
     setLoading(false);
 
-    if (result.success && result.userId) {
-      navigate(`/verify?userId=${result.userId}`);
+    if (result.success) {
+      toast({
+        title: "Account created successfully!",
+        description: "Welcome to RoadSight AI",
+      });
+      navigate("/");
     } else {
       toast({
         variant: "destructive",
         title: "Sign up failed",
-        description: "This email is already registered",
+        description: result.error || "This email is already registered",
       });
     }
   };
@@ -64,9 +69,9 @@ export default function SignUp() {
     <div className="min-h-screen flex items-center justify-center bg-background p-4">
       <Card className="w-full max-w-md p-8 card-shadow">
         <div className="flex justify-center mb-6">
-          <img src={logo} alt="RoadSight AI" className="h-16 w-auto object-contain" />
+          <img src={logo} alt="RoadSight AI" className="h-16 w-auto object-contain dark:brightness-0 dark:invert" />
         </div>
-        
+
         <h1 className="text-2xl font-bold text-center mb-2">Create Account</h1>
         <p className="text-muted-foreground text-center mb-6">
           Sign up to get started with RoadSight AI
@@ -150,7 +155,7 @@ export default function SignUp() {
 
         <div className="mt-6 text-center text-sm">
           Already have an account?{" "}
-          <Button variant="link" className="p-0 h-auto" onClick={() => navigate("/login")}>
+          <Button variant="link" className="p-0 h-auto dark:text-muted-foreground" onClick={() => navigate("/login")}>
             Login
           </Button>
         </div>

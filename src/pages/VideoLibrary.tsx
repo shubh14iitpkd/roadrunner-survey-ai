@@ -1,13 +1,15 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Play, Download, Search, ArrowLeft, Video as VideoIcon, Columns2, X } from "lucide-react";
+import { Play, Download, Search, ArrowLeft, Video as VideoIcon, Columns2, X, MapPin } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { roadRegister } from "@/data/roadRegister";
 import { Link } from "react-router-dom";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { api, API_BASE } from "@/lib/api";
+import { cn } from "@/lib/utils";
 
 interface VideoData {
   id: string;
@@ -20,61 +22,21 @@ interface VideoData {
   size: string;
   status: string;
   thumbnail: string;
+  thumbnailUrl?: string;
+  storageUrl?: string;
+  annotatedVideoUrl?: string;
+  gpxFileUrl?: string;
+  categoryVideos?: Record<string, string>;
 }
 
-const mockVideos: VideoData[] = [
-  {
-    id: "1",
-    title: "Survey_AlCorniche_2024_01",
-    routeId: 1,
-    roadName: "Al Corniche Street",
-    surveyDate: "2024-03-15",
-    surveyorName: "Ahmed Hassan",
-    duration: "5:30",
-    size: "245 MB",
-    status: "Processed",
-    thumbnail: ""
-  },
-  {
-    id: "2",
-    title: "Survey_AlCorniche_2024_02",
-    routeId: 1,
-    roadName: "Al Corniche Street",
-    surveyDate: "2024-02-10",
-    surveyorName: "Mohammed Ali",
-    duration: "5:25",
-    size: "238 MB",
-    status: "Processed",
-    thumbnail: ""
-  },
-  {
-    id: "3",
-    title: "Survey_AlRayyan_2024_01",
-    routeId: 2,
-    roadName: "Al Rayyan Road",
-    surveyDate: "2024-03-14",
-    surveyorName: "Fatima Ahmed",
-    duration: "8:15",
-    size: "380 MB",
-    status: "Processed",
-    thumbnail: ""
-  },
-  {
-    id: "4",
-    title: "Survey_SalwaRoad_2024_01",
-    routeId: 3,
-    roadName: "Salwa Road",
-    surveyDate: "2024-03-12",
-    surveyorName: "Ahmed Hassan",
-    duration: "12:45",
-    size: "520 MB",
-    status: "Processed",
-    thumbnail: ""
-  },
-];
-
 export default function VideoLibrary() {
-  const [videos] = useState<VideoData[]>(mockVideos);
+  const [videos, setVideos] = useState<VideoData[]>([]);
+  const [showPlayer, setShowPlayer] = useState(false);
+  const [playerSrc, setPlayerSrc] = useState<string>("");
+  const [playerAnnotatedSrc, setPlayerAnnotatedSrc] = useState<string>("");
+  const [playerCategoryVideos, setPlayerCategoryVideos] = useState<Record<string, string>>({});
+  const [activeCategory, setActiveCategory] = useState<string>("");
+
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedRoute, setSelectedRoute] = useState<string>("all");
   const [selectedSurveyor, setSelectedSurveyor] = useState<string>("all");
@@ -82,16 +44,104 @@ export default function VideoLibrary() {
   const [selectedForCompare, setSelectedForCompare] = useState<string[]>([]);
   const [showCompareView, setShowCompareView] = useState(false);
 
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        // Helper to extract string from MongoDB ObjectId
+        const getIdString = (id: any): string => {
+          if (!id) return '';
+          if (typeof id === 'string') return id;
+          if (id.$oid) return id.$oid;
+          return String(id);
+        };
+
+        const resp = await api.videos.list();
+        const items = resp.items as any[];
+        const baseMapped: VideoData[] = items.map(v => {
+          const videoIdStr = getIdString(v._id);
+          const durationSeconds = v.duration_seconds || 0;
+          const durMin = Math.floor(durationSeconds / 60);
+          const durSec = String(durationSeconds % 60).padStart(2, "0");
+          const sizeBytes = v.size_bytes || 0;
+          const sizeMb = `${(sizeBytes / 1024 / 1024).toFixed(0)} MB`;
+          const road = roadRegister.find(r => r.route_id === v.route_id);
+
+          // Helper function to build full URL
+          const buildUrl = (path: string | undefined) => {
+            if (!path) return undefined;
+            // If path already starts with http:// or https://, return as-is
+            if (path.startsWith('http://') || path.startsWith('https://')) return path;
+            // Otherwise prepend API_BASE
+            return `${API_BASE}${path}`;
+          };
+
+          // Build category videos map
+          const catVideos: Record<string, string> = {};
+          if (v.category_videos) {
+            Object.entries(v.category_videos).forEach(([k, val]) => {
+              catVideos[k] = buildUrl(val as string)!;
+            });
+          }
+
+          return {
+            id: videoIdStr,
+            title: v.title || `Video ${videoIdStr}`,
+            routeId: v.route_id,
+            roadName: road?.road_name || `Route #${v.route_id}`,
+            surveyDate: "",
+            surveyorName: "",
+            duration: `${durMin}:${durSec}`,
+            size: sizeMb,
+            status: (v.status || "").toString(),
+            thumbnail: "",
+            thumbnailUrl: buildUrl(v.thumbnail_url),
+            storageUrl: buildUrl(v.storage_url),
+            annotatedVideoUrl: buildUrl(v.annotated_video_url),
+            gpxFileUrl: buildUrl(v.gpx_file_url),
+            categoryVideos: catVideos,
+          } as VideoData;
+        });
+        if (!cancelled) setVideos(baseMapped);
+
+        // Best-effort enrichment with surveys
+        try {
+          const surveysResp = await api.Surveys.list();
+          const surveyMap = new Map<string, any>();
+          (surveysResp.items as any[]).forEach(s => {
+            const surveyIdStr = getIdString(s._id);
+            surveyMap.set(surveyIdStr, s);
+          });
+          if (!cancelled) {
+            setVideos(prev => prev.map(v => {
+              const raw = items.find(it => getIdString(it._id) === v.id);
+              const surveyIdStr = raw ? getIdString(raw.survey_id) : undefined;
+              const s = surveyIdStr ? surveyMap.get(surveyIdStr) : undefined;
+              return {
+                ...v,
+                surveyDate: s?.survey_date || v.surveyDate,
+                surveyorName: s?.surveyor_name || v.surveyorName,
+              };
+            }));
+          }
+        } catch { }
+      } catch (e) {
+        // silently ignore for now
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
   const filteredVideos = videos.filter((video) => {
     const matchesSearch = video.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                         video.roadName.toLowerCase().includes(searchQuery.toLowerCase());
+      video.roadName.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesRoute = selectedRoute === "all" || video.routeId.toString() === selectedRoute;
     const matchesSurveyor = selectedSurveyor === "all" || video.surveyorName === selectedSurveyor;
-    
+
     return matchesSearch && matchesRoute && matchesSurveyor;
   });
 
-  const surveyors = Array.from(new Set(videos.map(v => v.surveyorName)));
+  const surveyors = useMemo(() => Array.from(new Set(videos.map(v => v.surveyorName).filter(Boolean))), [videos]);
 
   const toggleCompareSelection = (videoId: string) => {
     if (selectedForCompare.includes(videoId)) {
@@ -115,11 +165,22 @@ export default function VideoLibrary() {
     setSelectedForCompare([]);
   };
 
+  const CATEGORY_LABELS: Record<string, string> = {
+    "corridor_fence": "Corridor Fence",
+    "corridor_pavement": "Pavement",
+    "corridor_structure": "Structures",
+    "directional_signage": "Signage",
+    "its": "ITS",
+    "roadway_lighting": "Lighting",
+    "oia": "OIA",
+    "default": "Default"
+  };
+
   return (
     <div className="space-y-6">
       {/* Hero Header */}
-      <div className="relative overflow-hidden gradient-primary p-8 rounded-2xl shadow-elevated">
-        <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGRlZnM+PHBhdHRlcm4gaWQ9ImdyaWQiIHdpZHRoPSI2MCIgaGVpZ2h0PSI2MCIgcGF0dGVyblVuaXRzPSJ1c2VyU3BhY2VPblVzZSI+PHBhdGggZD0iTSAxMCAwIEwgMCAwIDAgMTAiIGZpbGw9Im5vbmUiIHN0cm9rZT0id2hpdGUiIHN0cm9rZS1vcGFjaXR5PSIwLjEiIHN0cm9rZS13aWR0aD0iMSIvPjwvcGF0dGVybj48L2RlZnM+PHJlY3Qgd2lkdGg9IjEwMCUiIGhlaWdodD0iMTAwJSIgZmlsbD0idXJsKCNncmlkKSIvPjwvc3ZnPg==')] opacity-30"></div>
+      <div className="relative overflow-hidden gradient-primary p-8 shadow-elevated">
+        <div className="absolute inset-0 bg-primary"></div>
         <div className="relative flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <div>
             <div className="flex items-center gap-3 mb-2">
@@ -222,18 +283,35 @@ export default function VideoLibrary() {
         {/* Video Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {filteredVideos.map((video) => (
-            <Card 
-              key={video.id} 
+            <Card
+              key={video.id}
               className={cn(
                 "overflow-hidden shadow-elevated border-0 gradient-card hover:shadow-glow transition-all duration-300 animate-fade-in",
                 compareMode && selectedForCompare.includes(video.id) && "ring-4 ring-primary shadow-glow"
               )}
             >
-              <div 
-                className="aspect-video bg-gradient-to-br from-muted to-muted/50 flex items-center justify-center relative group cursor-pointer"
+              <div
+                className="aspect-video bg-gradient-to-br from-muted to-muted/50 flex items-center justify-center relative group cursor-pointer overflow-hidden"
                 onClick={() => compareMode && toggleCompareSelection(video.id)}
               >
-                <VideoIcon className="h-16 w-16 text-muted-foreground/30" />
+                {video.thumbnailUrl ? (
+                  <>
+                    <img
+                      src={video.thumbnailUrl}
+                      alt={`Thumbnail for ${video.title}`}
+                      className="w-full h-full object-cover"
+                      onError={(e) => {
+                        e.currentTarget.style.display = 'none';
+                        e.currentTarget.nextElementSibling?.classList.remove('hidden');
+                      }}
+                    />
+                    <div className="hidden">
+                      <VideoIcon className="h-16 w-16 text-muted-foreground/30" />
+                    </div>
+                  </>
+                ) : (
+                  <VideoIcon className="h-16 w-16 text-muted-foreground/30" />
+                )}
                 <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                   <Play className="h-12 w-12 text-white" />
                 </div>
@@ -241,7 +319,7 @@ export default function VideoLibrary() {
                   <Badge className="absolute top-2 right-2">Selected</Badge>
                 )}
               </div>
-              
+
               <div className="p-4 space-y-3">
                 <div>
                   <h3 className="font-semibold mb-1">{video.title}</h3>
@@ -264,22 +342,44 @@ export default function VideoLibrary() {
                     <span>{video.size}</span>
                   </div>
                 </div>
-                
+
                 <div className="flex gap-2">
                   {!compareMode && (
                     <>
-                      <Button size="sm" className="flex-1">
+                      <Button
+                        size="sm"
+                        className="flex-1"
+                        onClick={() => {
+                          if (video.storageUrl) {
+                            setPlayerSrc(video.storageUrl);
+                            setPlayerAnnotatedSrc(video.annotatedVideoUrl || "");
+                            setPlayerCategoryVideos(video.categoryVideos || {});
+                            setActiveCategory(""); // reset default
+                            setShowPlayer(true);
+                          }
+                        }}
+                        disabled={!video.storageUrl}
+                      >
                         <Play className="h-3 w-3 mr-1" />
-                        Watch
+                        {video.storageUrl ? "Watch" : "No Video"}
                       </Button>
-                      <Button size="sm" variant="outline">
-                        <Download className="h-3 w-3" />
+                      <Button size="sm" variant="outline" asChild disabled={!video.storageUrl}>
+                        <a href={video.storageUrl} download>
+                          <Download className="h-3 w-3" />
+                        </a>
                       </Button>
+                      {video.gpxFileUrl && (
+                        <Button size="sm" variant="outline" asChild>
+                          <a href={`/gis?id=${video.routeId}`} title="View on GIS">
+                            <MapPin className="h-3 w-3" />
+                          </a>
+                        </Button>
+                      )}
                     </>
                   )}
                   {compareMode && (
-                    <Button 
-                      size="sm" 
+                    <Button
+                      size="sm"
                       className="flex-1"
                       variant={selectedForCompare.includes(video.id) ? "default" : "outline"}
                       onClick={() => toggleCompareSelection(video.id)}
@@ -318,7 +418,7 @@ export default function VideoLibrary() {
               </Button>
             </div>
           </DialogHeader>
-          
+
           <div className="grid grid-cols-2 gap-4 p-6 pt-0 h-[calc(90vh-100px)]">
             {selectedVideos.map((video, index) => (
               <div key={video.id} className="space-y-3 flex flex-col">
@@ -337,10 +437,27 @@ export default function VideoLibrary() {
                     <p className="text-xs text-muted-foreground">Surveyor: {video.surveyorName}</p>
                   </div>
                 </Card>
-                
+
                 <Card className="flex-1 overflow-hidden gradient-card border-0">
                   <div className="relative w-full h-full bg-gradient-to-br from-muted to-muted/50 flex items-center justify-center group">
-                    <VideoIcon className="h-24 w-24 text-muted-foreground/30" />
+                    {video.thumbnailUrl ? (
+                      <>
+                        <img
+                          src={video.thumbnailUrl}
+                          alt={`Thumbnail for ${video.title}`}
+                          className="w-full h-full object-cover"
+                          onError={(e) => {
+                            e.currentTarget.style.display = 'none';
+                            e.currentTarget.nextElementSibling?.classList.remove('hidden');
+                          }}
+                        />
+                        <div className="hidden">
+                          <VideoIcon className="h-24 w-24 text-muted-foreground/30" />
+                        </div>
+                      </>
+                    ) : (
+                      <VideoIcon className="h-24 w-24 text-muted-foreground/30" />
+                    )}
                     <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-3">
                       <Play className="h-16 w-16 text-white" />
                       <p className="text-white text-sm">Click to play video</p>
@@ -358,7 +475,7 @@ export default function VideoLibrary() {
                     </div>
                   </div>
                 </Card>
-                
+
                 <div className="flex gap-2">
                   <Button size="sm" className="flex-1 gap-2">
                     <Play className="h-4 w-4" />
@@ -374,10 +491,132 @@ export default function VideoLibrary() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Enhanced Video Player Dialog - Side by Side View */}
+      <Dialog open={showPlayer} onOpenChange={setShowPlayer}>
+        <DialogContent className="max-w-[95vw] h-[90vh] p-0">
+          <DialogHeader className="p-6 pb-4">
+            <DialogTitle className="text-2xl font-bold">Video Viewer</DialogTitle>
+          </DialogHeader>
+
+          {/* Side-by-side Video Display */}
+          <div className={playerAnnotatedSrc ? "grid grid-cols-2 gap-4 p-6 pt-0 h-[calc(90vh-100px)]" : "p-6 pt-0 h-[calc(90vh-100px)]"}>
+            {/* Left: Original Video */}
+            {playerSrc && (
+              <div className="space-y-3 flex flex-col h-full">
+                <Card className="p-4 gradient-card border-0">
+                  <div className="flex items-center justify-between">
+                    <h3 className="font-semibold text-lg">Original Survey Video</h3>
+                    <Badge variant="outline">Raw Footage</Badge>
+                  </div>
+                  <p className="text-sm text-muted-foreground mt-1">Unprocessed video from survey</p>
+                  {/* Spacer to match height if categories exist on right */}
+                  {Object.keys(playerCategoryVideos).length > 0 && <div className="mt-3 min-h-[32px]"></div>}
+                </Card>
+
+                <Card className="flex-1 overflow-hidden gradient-card border-0 flex items-center justify-center min-h-0">
+                  <div className="relative w-full h-full">
+                    <video
+                      key={playerSrc}
+                      src={playerSrc}
+                      controls
+                      className="absolute inset-0 w-full h-full object-contain rounded-lg"
+                    />
+                  </div>
+                </Card>
+
+                <div className="flex gap-2">
+                  <Button size="sm" variant="outline" className="flex-1 gap-2" asChild>
+                    <a href={playerSrc} download>
+                      <Download className="h-4 w-4" />
+                      Download Original
+                    </a>
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {/* Right: AI Annotated Video */}
+            {(playerAnnotatedSrc || Object.keys(playerCategoryVideos).length > 0) && (
+              <div className="space-y-3 flex flex-col h-full">
+                <Card className="p-4 gradient-card border-0">
+                  <div className="flex items-center justify-between">
+                    <h3 className="font-semibold text-lg">AI Annotated Video</h3>
+                    <Badge className="bg-gradient-to-r from-blue-500 to-purple-500">AI Processed</Badge>
+                  </div>
+                  <p className="text-sm text-muted-foreground mt-1">Object detection with bounding boxes</p>
+
+                  {/* Category Buttons */}
+                  {Object.keys(playerCategoryVideos).length > 0 && (
+                    <div className="flex flex-wrap gap-2 mt-3 min-h-[32px]">
+                      {Object.keys(playerCategoryVideos).sort().map(cat => (
+                        <Button
+                          key={cat}
+                          size="sm"
+                          variant={activeCategory === cat ? "default" : "outline"}
+                          className={`text-xs h-7 ${activeCategory === cat ? "bg-blue-600 text-white" : ""}`}
+                          onClick={() => {
+                            const videoEl = document.getElementById('annotated-video-player') as HTMLVideoElement;
+                            const currentTime = videoEl ? videoEl.currentTime : 0;
+                            const isPlaying = videoEl ? !videoEl.paused : false;
+
+                            setActiveCategory(cat);
+                            setPlayerAnnotatedSrc(playerCategoryVideos[cat]);
+
+                            // Restore state after render
+                            requestAnimationFrame(() => {
+                              const newVideoEl = document.getElementById('annotated-video-player') as HTMLVideoElement;
+                              if (newVideoEl) {
+                                newVideoEl.onloadedmetadata = () => {
+                                  newVideoEl.currentTime = currentTime;
+                                  if (isPlaying) newVideoEl.play().catch(() => { });
+                                };
+                              }
+                            });
+                          }}
+                        >
+                          {CATEGORY_LABELS[cat] || cat}
+                        </Button>
+                      ))}
+                    </div>
+                  )}
+                </Card>
+
+                <Card className="flex-1 overflow-hidden gradient-card border-0 flex items-center justify-center min-h-0">
+                  <div className="relative w-full h-full">
+                    <video
+                      id="annotated-video-player"
+                      key={playerAnnotatedSrc}
+                      src={playerAnnotatedSrc}
+                      controls
+                      className="absolute inset-0 w-full h-full object-contain rounded-lg"
+                      onError={(e) => {
+                        console.error('[VideoLibrary] Error loading annotated video:', playerAnnotatedSrc);
+                      }}
+                    />
+                  </div>
+                </Card>
+
+                <div className="flex gap-2">
+                  <Button size="sm" variant="outline" className="flex-1 gap-2" asChild>
+                    <a href={playerAnnotatedSrc} download>
+                      <Download className="h-4 w-4" />
+                      Download Annotated
+                    </a>
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {/* Fallback if no videos available */}
+            {!playerAnnotatedSrc && !playerSrc && (
+              <div className="text-center p-8 col-span-2">
+                <p className="text-muted-foreground">No video available</p>
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
-}
-
-function cn(...classes: (string | boolean | undefined)[]) {
-  return classes.filter(Boolean).join(" ");
 }

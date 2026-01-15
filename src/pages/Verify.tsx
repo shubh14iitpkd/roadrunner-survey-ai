@@ -14,13 +14,13 @@ export default function Verify() {
   const userId = searchParams.get("userId");
   const { verifyCode } = useAuth();
   const { toast } = useToast();
-  
+
   const [code, setCode] = useState("");
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (!userId) {
       toast({
         variant: "destructive",
@@ -63,9 +63,9 @@ export default function Verify() {
     <div className="min-h-screen flex items-center justify-center bg-background p-4">
       <Card className="w-full max-w-md p-8 card-shadow">
         <div className="flex justify-center mb-6">
-          <img src={logo} alt="RoadSight AI" className="h-16 w-auto object-contain" />
+          <img src={logo} alt="RoadSight AI" className="h-16 w-auto object-contain dark:brightness-0 dark:invert" />
         </div>
-        
+
         <h1 className="text-2xl font-bold text-center mb-2">Verify Your Email</h1>
         <p className="text-muted-foreground text-center mb-6">
           A verification code has been sent to your email. Enter the code to verify.

@@ -1,14 +1,14 @@
 import { useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { 
-  LayoutDashboard, 
-  Map, 
-  Upload, 
-  FileVideo, 
-  Database, 
-  MapPin, 
-  MessageSquare, 
-  Settings, 
+import {
+  LayoutDashboard,
+  Map,
+  Upload,
+  FileVideo,
+  Database,
+  MapPin,
+  MessageSquare,
+  Settings,
   Menu,
   X,
   LogOut
@@ -20,12 +20,13 @@ import logo from "@/assets/roadsight-logo.jpg";
 
 const navigation = [
   { name: "Dashboard", href: "/", icon: LayoutDashboard },
+  { name: "Map View", href: "/gis", icon: MapPin },
+  { name: "Asset Register", href: "/assets", icon: Database },
+  { name: "Ask AI", href: "/ask-ai", icon: MessageSquare },
+  { name: "Project Management", href: null, icon: null, isHeading: true },
   { name: "Road Register", href: "/roads", icon: Map },
   { name: "Survey Upload", href: "/upload", icon: Upload },
   { name: "Video Library", href: "/videos", icon: FileVideo },
-  { name: "Asset Register", href: "/assets", icon: Database },
-  { name: "GIS View", href: "/gis", icon: MapPin },
-  { name: "Ask AI", href: "/ask-ai", icon: MessageSquare },
   { name: "Settings", href: "/settings", icon: Settings },
 ];
 
@@ -48,18 +49,19 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       {/* Sidebar - Always visible on desktop, toggle on mobile */}
       <aside
         className={cn(
-          "h-screen bg-background border-r border-border flex flex-col w-64",
-          "fixed lg:static top-0 left-0 z-50 lg:z-auto transition-transform duration-300 lg:transition-none",
+          "h-screen bg-primary flex flex-col w-64",
+          "fixed lg:static top-0 left-0 z-[9999] lg:z-auto transition-transform duration-300 lg:transition-none",
           sidebarOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
         )}
       >
+        {/*  */}
         {/* Logo */}
-        <div className="h-16 flex items-center justify-between px-6 border-b border-border bg-background">
+        <div className="h-16 flex items-center justify-between px-6">
           <div className="flex items-center gap-3">
-            <img 
-              src={logo} 
-              alt="RoadSight AI" 
-              className="h-8 w-auto object-contain"
+            <img
+              src={logo}
+              alt="RoadSight AI"
+              className="h-8 w-auto object-contain brightness-0 invert"
             />
           </div>
           <Button
@@ -73,13 +75,26 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto bg-primary">
+        <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
           {navigation.map((item) => {
+            // Render heading
+            if (item.isHeading) {
+              return (
+                <div
+                  key={item.name}
+                  className="px-3 py-2 mt-4 mb-1 text-xs font-semibold text-primary-foreground/60 uppercase tracking-wider"
+                >
+                  {item.name}
+                </div>
+              );
+            }
+
+            // Render link
             const isActive = location.pathname === item.href;
             return (
               <Link
                 key={item.name}
-                to={item.href}
+                to={item.href!}
                 onClick={() => setSidebarOpen(false)}
                 className={cn(
                   "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all animate-smooth",
@@ -96,18 +111,18 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         </nav>
 
         {/* User section */}
-        <div className="p-4 border-t border-border bg-background">
+        <div className="p-4">
           <div className="flex items-center gap-3 px-2">
-            <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
-              <span className="text-primary font-semibold text-sm">
+            <div className="w-8 h-8 rounded-full bg-primary-foreground/10 flex items-center justify-center">
+              <span className="text-primary-foreground font-semibold text-sm">
                 {user?.first_name?.[0]}{user?.last_name?.[0]}
               </span>
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-foreground truncate">
+              <p className="text-sm font-medium text-primary-foreground truncate">
                 {user?.first_name} {user?.last_name}
               </p>
-              <p className="text-xs text-muted-foreground truncate">{user?.role}</p>
+              <p className="text-xs text-primary-foreground/70 truncate">{user?.role}</p>
             </div>
             <Button
               variant="ghost"
@@ -116,7 +131,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                 logout();
                 navigate("/login");
               }}
-              className="h-8 w-8"
+              className="h-8 w-8 text-primary-foreground hover:bg-primary-foreground/10 hover:text-primary-foreground"
               title="Logout"
             >
               <LogOut className="h-4 w-4" />
@@ -136,10 +151,10 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           >
             <Menu className="h-5 w-5" />
           </Button>
-          <img 
-            src={logo} 
-            alt="RoadSight AI" 
-            className="h-7 w-auto object-contain"
+          <img
+            src={logo}
+            alt="RoadSight AI"
+            className="h-7 w-auto object-contain dark:brightness-0 dark:invert"
           />
         </header>
 

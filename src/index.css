@@ -2,29 +2,83 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Definition of the design system. All colors, gradients, fonts, etc should be defined here. 
+/* Definition of the design system. All colors, gradients, fonts, etc should be defined here.
 All colors MUST be HSL.
 */
 
+/* Google Places Autocomplete Styles */
+.pac-container {
+  z-index: 99999 !important;
+  background-color: white !important;
+  border-radius: 0.5rem !important;
+  box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1) !important;
+  border: 1px solid hsl(var(--border)) !important;
+  margin-top: 4px !important;
+  font-family: inherit !important;
+  pointer-events: auto !important;
+}
+
+.pac-item {
+  padding: 0.75rem 1rem !important;
+  cursor: pointer !important;
+  border-top: 1px solid hsl(var(--border)) !important;
+  font-size: 0.875rem !important;
+  line-height: 1.25rem !important;
+  pointer-events: auto !important;
+  user-select: none !important;
+}
+
+.pac-item:first-child {
+  border-top: none !important;
+}
+
+.pac-item:hover {
+  background-color: hsl(var(--muted)) !important;
+  cursor: pointer !important;
+}
+
+.pac-item-selected,
+.pac-item-selected:hover {
+  background-color: hsl(var(--primary) / 0.1) !important;
+  cursor: pointer !important;
+}
+
+.pac-matched {
+  font-weight: 600 !important;
+  color: hsl(var(--primary)) !important;
+  pointer-events: none !important;
+}
+
+.pac-icon {
+  display: none !important;
+}
+
+.pac-item-query {
+  font-size: 0.875rem !important;
+  color: hsl(var(--foreground)) !important;
+  pointer-events: none !important;
+}
+
 @layer base {
   :root {
-    --background: 220 25% 98%;
-    --foreground: 220 20% 15%;
+    /* Light Mode */
+    --background: 210 17% 98%; /* #f8f9fa */
+    --foreground: 220 6% 13%; /* #202124 */
 
-    --card: 0 0% 100%;
-    --card-foreground: 220 20% 15%;
+    --card: 0 0% 100%; /* #ffffff */
+    --card-foreground: 220 6% 13%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 220 20% 15%;
+    --popover-foreground: 220 6% 13%;
 
-    --primary: 217 64% 31%;
+    --primary: 217 64% 31%; /* #1c4280 */
     --primary-foreground: 0 0% 100%;
     --primary-glow: 217 64% 50%;
 
-    --secondary: 198 99% 41%;
+    --secondary: 198 99% 41%; /* #0190cf */
     --secondary-foreground: 0 0% 100%;
 
-    --muted: 220 15% 95%;
+    --muted: 210 14% 95%;
     --muted-foreground: 220 10% 50%;
 
     --accent: 215 69% 87%;
@@ -43,13 +97,13 @@ All colors MUST be HSL.
 
     --radius: 0.75rem;
 
-    --sidebar-background: 217 64% 31%;
-    --sidebar-foreground: 0 0% 100%;
+    --sidebar-background: 210 14% 95%; /* #f1f3f4 */
+    --sidebar-foreground: 220 6% 13%;
     --sidebar-primary: 198 99% 41%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 217 64% 40%;
-    --sidebar-accent-foreground: 0 0% 100%;
-    --sidebar-border: 217 64% 25%;
+    --sidebar-accent: 217 64% 90%;
+    --sidebar-accent-foreground: 217 64% 31%;
+    --sidebar-border: 220 15% 88%;
     --sidebar-ring: 198 99% 41%;
 
     --chart-1: 217 91% 60%;
@@ -60,32 +114,35 @@ All colors MUST be HSL.
 
     --gradient-primary: linear-gradient(135deg, hsl(217, 64%, 31%) 0%, hsl(198, 99%, 41%) 100%);
     --gradient-success: linear-gradient(135deg, hsl(142, 76%, 36%) 0%, hsl(187, 85%, 43%) 100%);
-    --gradient-card: linear-gradient(145deg, hsl(0, 0%, 100%) 0%, hsl(215, 69%, 98%) 100%);
+    --gradient-card: linear-gradient(145deg, hsl(0, 0% 100%) 0%, hsl(215, 69%, 98%) 100%);
     
     --shadow-card: 0 4px 20px rgba(28, 66, 128, 0.08);
     --shadow-elevated: 0 10px 40px rgba(28, 66, 128, 0.12);
     --shadow-glow: 0 0 30px rgba(1, 144, 207, 0.15);
+
+    --chart-axis: 217 19% 27%; /* gray-700 */
   }
 
   .dark {
-    --background: 222 47% 11%;
-    --foreground: 210 20% 98%;
+    /* Dark Mode */
+    --background: 0 0% 13.3%; /* #222 */
+    --foreground: 214 59% 85%; /* #c0d4ef */
 
-    --card: 222 47% 14%;
-    --card-foreground: 210 20% 98%;
+    --card: 207 7% 24%; /* #393e42 */
+    --card-foreground: 214 59% 85%;
 
-    --popover: 222 47% 14%;
-    --popover-foreground: 210 20% 98%;
+    --popover: 207 7% 24%;
+    --popover-foreground: 214 58% 85%;
 
-    --primary: 217 64% 45%;
+    --primary: 217 64% 31%; /* #1c4280 */
     --primary-foreground: 0 0% 100%;
     --primary-glow: 217 64% 60%;
 
-    --secondary: 198 99% 50%;
+    --secondary: 198 99% 41%; /* #0190cf */
     --secondary-foreground: 0 0% 100%;
 
-    --muted: 222 47% 20%;
-    --muted-foreground: 210 15% 70%;
+    --muted: 220 9% 19%;
+    --muted-foreground: 214 58% 60%;
 
     --accent: 215 69% 75%;
     --accent-foreground: 217 64% 20%;
@@ -97,18 +154,18 @@ All colors MUST be HSL.
     --warning: 38 92% 50%;
     --danger: 0 84% 60%;
 
-    --border: 222 47% 22%;
-    --input: 222 47% 22%;
+    --border: 0 0% 0%; /* Black */
+    --input: 207 7% 30%;
     --ring: 217 91% 60%;
 
-    --sidebar-background: 217 64% 25%;
-    --sidebar-foreground: 0 0% 100%;
-    --sidebar-primary: 198 99% 50%;
+    --sidebar-background: 220 9% 19%; /* #2d3036 */
+    --sidebar-foreground: 214 58% 85%;
+    --sidebar-primary: 198 99% 41%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 217 64% 35%;
-    --sidebar-accent-foreground: 0 0% 100%;
-    --sidebar-border: 217 64% 20%;
-    --sidebar-ring: 198 99% 50%;
+    --sidebar-accent: 207 7% 30%;
+    --sidebar-accent-foreground: 214 58% 85%;
+    --sidebar-border: 0 0% 0%;
+    --sidebar-ring: 198 99% 41%;
 
     --chart-1: 217 91% 60%;
     --chart-2: 142 76% 36%;
@@ -116,13 +173,15 @@ All colors MUST be HSL.
     --chart-4: 271 81% 56%;
     --chart-5: 187 85% 43%;
 
-    --gradient-primary: linear-gradient(135deg, hsl(217, 64%, 45%) 0%, hsl(198, 99%, 50%) 100%);
+    --gradient-primary: linear-gradient(135deg, hsl(217, 64%, 31%) 0%, hsl(198, 99%, 41%) 100%);
     --gradient-success: linear-gradient(135deg, hsl(142, 76%, 36%) 0%, hsl(187, 85%, 43%) 100%);
-    --gradient-card: linear-gradient(145deg, hsl(222, 47%, 14%) 0%, hsl(217, 40%, 18%) 100%);
+    --gradient-card: linear-gradient(145deg, hsl(207, 7% 24%) 0%, hsl(220, 9% 19%) 100%);
     
-    --shadow-card: 0 4px 20px rgba(0, 0, 0, 0.3);
-    --shadow-elevated: 0 10px 40px rgba(0, 0, 0, 0.4);
-    --shadow-glow: 0 0 30px rgba(1, 144, 207, 0.3);
+    --shadow-card: 0 4px 20px rgba(0, 0, 0, 0.5);
+    --shadow-elevated: 0 10px 40px rgba(0, 0, 0, 0.6);
+    --shadow-glow: 0 0 30px rgba(1, 144, 207, 0.2);
+
+    --chart-axis: 214 59% 85%;
   }
 }
 
