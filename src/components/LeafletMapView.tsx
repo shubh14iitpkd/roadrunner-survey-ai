@@ -379,11 +379,43 @@ export default function LeafletMapView({ selectedRoadNames = [], roads = [], sel
               const timestamp = progress * videoDuration;
               const video_id_real = video._id.$oid || video._id;
 
-              // Fetch frame data
-              const frameData = await api.videos.getFrameWithDetections(
-                video_id_real,
-                timestamp.toFixed(1)
-              );
+              let frameData: any;
+
+              // Check if this track has demo data
+              if (t.demoData) {
+                // Use demo data - find detections closest to this timestamp
+                const nearbyDetections = t.demoData.detections.filter(
+                  d => Math.abs(d.timestamp - timestamp) < 2 // within 2 seconds
+                );
+                
+                // Create mock frame data for demo
+                frameData = {
+                  image_data: '', // No image for demo - will show placeholder
+                  detections: nearbyDetections.map(d => ({
+                    class_name: d.className,
+                    confidence: d.confidence,
+                    bbox: {
+                      x1: d.bbox.x * 10, // Scale percent to approximate pixels
+                      y1: d.bbox.y * 10,
+                      x2: (d.bbox.x + d.bbox.width) * 10,
+                      y2: (d.bbox.y + d.bbox.height) * 10,
+                    },
+                    condition: d.condition,
+                    category: d.category,
+                  })),
+                  width: 1920,
+                  height: 1080,
+                  frame_number: Math.round(timestamp * 30),
+                  is_demo: true,
+                };
+                console.log(`Demo popup at ${timestamp.toFixed(1)}s: ${nearbyDetections.length} detections`);
+              } else {
+                // Fetch frame data from API
+                frameData = await api.videos.getFrameWithDetections(
+                  video_id_real,
+                  timestamp.toFixed(1)
+                );
+              }
 
               // Open custom React popup instead of HTML string
               setPopupState({
@@ -438,11 +470,6 @@ export default function LeafletMapView({ selectedRoadNames = [], roads = [], sel
             }
           } catch (err) {
             console.error('Error loading video frame:', err);
-            // circleMarker.bindPopup(`
-            //   <div style="font-weight:600">${t.title}</div>
-            //   <div style="font-size:11px;color:#666;">Point ${index + 1} of ${t.path.length}</div>
-            //   <div style="font-size:11px;color:#ff6b6b;margin-top:4px;">Failed to load frame</div>
-            // `).openPopup();
           }
         });
 
