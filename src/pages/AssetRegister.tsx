@@ -152,15 +152,36 @@ export default function AssetRegister() {
         videosBySurveyMap[survey._id]?.length > 0
       );
 
-      // Pre-load demo data for all demo videos to calculate KPIs
+      // Get the latest survey per route (for KPI counting)
+      const latestSurveyByRoute: Record<number, any> = {};
+      surveysWithVideos.forEach((survey: any) => {
+        const routeId = survey.route_id;
+        if (!latestSurveyByRoute[routeId] ||
+          new Date(survey.survey_date) > new Date(latestSurveyByRoute[routeId].survey_date)) {
+          latestSurveyByRoute[routeId] = survey;
+        }
+      });
+
+      // Create a set of latest survey IDs for quick lookup
+      const latestSurveyIds = new Set(Object.values(latestSurveyByRoute).map(s => s._id));
+
+      // Pre-load demo data ONLY for videos belonging to the latest survey per route
       const allAssets: Asset[] = [];
+      const processedDemoKeys = new Set<string>(); // Avoid duplicate demo data loading
 
       for (const video of videos) {
+        const surveyId = typeof video.survey_id === 'object' && video.survey_id.$oid
+          ? video.survey_id.$oid
+          : String(video.survey_id || '');
+
+        // Only process videos from the latest survey for each route
+        if (!latestSurveyIds.has(surveyId)) {
+          continue;
+        }
+
         const demoKey = isDemoVideo(video.title || '');
-        if (demoKey) {
-          const surveyId = typeof video.survey_id === 'object' && video.survey_id.$oid
-            ? video.survey_id.$oid
-            : String(video.survey_id || '');
+        if (demoKey && !processedDemoKeys.has(demoKey)) {
+          processedDemoKeys.add(demoKey); // Mark as processed to avoid duplicates
 
           try {
             const demoData = await loadDemoData(demoKey);
@@ -173,7 +194,6 @@ export default function AssetRegister() {
           }
         }
         // For non-demo videos, we could try to load metadata here too if needed
-        // But for now, demo videos are the main use case
       }
 
       setAssets(allAssets);
