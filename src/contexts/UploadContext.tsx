@@ -609,39 +609,48 @@ export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         }
         
         // Regular video processing via backend
-        // console.log("Starting AI processing for video:", videoId, video);
         try {
-            setVideos((prev) =>
-                prev.map((v) =>
-                    v.id === videoId ? { ...v, status: "queue" as VideoStatus, progress: 0 } : v
-                )
-            );
-
-            // Call backend to start processing
-            const response = await api.videos.processWithAI(video.backendId);
-
-            if (response.ok) {
-                toast.success(`AI processing started for ${video.name} with SageMaker`);
-            } else {
-                throw new Error(response.message || "Failed to start processing");
+            // Prevent spamming when a request is already in-flight
+            if (video.status === "processing" || video.status === "uploading" || video.status === "queue") {
+                toast.info("Processing is already in progress for this video");
+                return;
             }
 
-            // Update local state to processing
+            // Immediately set to processing locally so the UI is stable
             setVideos((prev) =>
                 prev.map((v) =>
                     v.id === videoId ? { ...v, status: "processing" as VideoStatus, progress: 0 } : v
                 )
             );
+
+            // Persist state server-side first (prevents polling from reverting to 'uploaded')
+            await api.videos.updateStatus(video.backendId, { status: "processing", progress: 0 });
+
+            // Trigger backend processing (non-blocking)
+            const response = await api.videos.processWithAI(video.backendId);
+
+            if (!response?.ok) {
+                throw new Error(response?.message || "Failed to start processing");
+            }
+
+            toast.success(`AI processing started for ${video.name}`);
         } catch (error: any) {
             console.error("Error starting AI processing:", error);
-            toast.error(`Failed to start processing: ${error.message}`);
+            toast.error(`Failed to start processing: ${error?.message || "Unknown error"}`);
 
-            // Revert to uploaded status on error
+            // Revert locally
             setVideos((prev) =>
                 prev.map((v) =>
                     v.id === videoId ? { ...v, status: "uploaded" as VideoStatus, progress: 0 } : v
                 )
             );
+
+            // Best-effort revert server-side
+            try {
+                await api.videos.updateStatus(video.backendId, { status: "uploaded", progress: 100 });
+            } catch {
+                // ignore
+            }
         }
     };
 
