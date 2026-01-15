@@ -635,13 +635,16 @@ export default function SurveyUpload() {
                             </div>
                           </td>
 
-                          {/* Route (combined ID + Name) */}
+                          {/* Route (stacked layout) */}
                           <td className="p-3">
-                            <div className="flex items-center gap-2">
-                              <Badge variant="outline" className="font-mono text-xs border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-400 bg-blue-50/50 dark:bg-blue-950/30 flex-shrink-0">
-                                #{video.routeId}
-                              </Badge>
-                              <span className="text-sm font-medium truncate max-w-[120px]" title={road?.road_name || `Road ${video.routeId}`}>
+                            <div className="flex flex-col gap-0.5">
+                              <div className="flex items-center gap-1.5">
+                                <div className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+                                <span className="text-xs font-mono text-blue-600 dark:text-blue-400">
+                                  Route {video.routeId}
+                                </span>
+                              </div>
+                              <span className="text-sm font-medium text-foreground leading-tight" title={road?.road_name || `Road ${video.routeId}`}>
                                 {road?.road_name || `Road ${video.routeId}`}
                               </span>
                             </div>
