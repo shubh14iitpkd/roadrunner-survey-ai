@@ -1,6 +1,4 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
 import { ANNOTATION_CATEGORIES } from '@/services/demoDataService';
 import { ChevronLeft, ChevronRight, Layers, Play, Pause, MapPin } from 'lucide-react';
 
@@ -197,53 +195,80 @@ export default function VideoMarkerPopup({
   ).length || 0;
 
   return (
-    <div style={{ width: '100%', maxWidth: '700px', fontSize: '13px' }}>
+    <div className="video-marker-popup" style={{ width: '100%', maxWidth: '700px', fontSize: '13px', color: '#1e293b' }}>
       {/* Header with Navigation */}
       <div style={{ 
         display: 'flex', 
         justifyContent: 'space-between', 
         alignItems: 'center',
-        marginBottom: '10px',
-        paddingBottom: '8px',
-        borderBottom: '1px solid rgba(255,255,255,0.1)',
+        marginBottom: '12px',
+        paddingBottom: '10px',
+        borderBottom: '1px solid #e2e8f0',
       }}>
         <div>
-          <div style={{ fontWeight: 600, fontSize: '14px' }}>{trackTitle}</div>
-          <div style={{ fontSize: '11px', color: '#94a3b8', display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span>Point {pointIndex + 1} / {totalPoints}</span>
+          <div style={{ fontWeight: 600, fontSize: '15px', color: '#0f172a' }}>{trackTitle}</div>
+          <div style={{ fontSize: '12px', color: '#64748b', display: 'flex', alignItems: 'center', gap: '8px', marginTop: '4px' }}>
+            <span>📍 Point {pointIndex + 1} / {totalPoints}</span>
             <span>•</span>
-            <span>{timestamp.toFixed(1)}s</span>
+            <span>⏱ {timestamp.toFixed(1)}s</span>
           </div>
         </div>
 
         {/* Navigation Controls */}
-        <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
-          <Button
-            size="sm"
-            variant="outline"
+        <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+          <button
             onClick={() => handleNavigate('prev')}
             disabled={pointIndex === 0}
-            className="h-8 w-8 p-0"
+            style={{
+              width: '36px',
+              height: '36px',
+              borderRadius: '8px',
+              border: '1px solid #cbd5e1',
+              background: pointIndex === 0 ? '#f1f5f9' : '#ffffff',
+              cursor: pointIndex === 0 ? 'not-allowed' : 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: pointIndex === 0 ? '#94a3b8' : '#334155',
+            }}
           >
-            <ChevronLeft className="h-4 w-4" />
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
+            <ChevronLeft style={{ width: '20px', height: '20px' }} />
+          </button>
+          <button
             onClick={togglePlay}
-            className="h-8 w-8 p-0"
+            style={{
+              width: '36px',
+              height: '36px',
+              borderRadius: '8px',
+              border: '1px solid #3b82f6',
+              background: '#3b82f6',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: '#ffffff',
+            }}
           >
-            {isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
+            {isPlaying ? <Pause style={{ width: '18px', height: '18px' }} /> : <Play style={{ width: '18px', height: '18px' }} />}
+          </button>
+          <button
             onClick={() => handleNavigate('next')}
             disabled={pointIndex >= totalPoints - 1}
-            className="h-8 w-8 p-0"
+            style={{
+              width: '36px',
+              height: '36px',
+              borderRadius: '8px',
+              border: '1px solid #cbd5e1',
+              background: pointIndex >= totalPoints - 1 ? '#f1f5f9' : '#ffffff',
+              cursor: pointIndex >= totalPoints - 1 ? 'not-allowed' : 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: pointIndex >= totalPoints - 1 ? '#94a3b8' : '#334155',
+            }}
           >
-            <ChevronRight className="h-4 w-4" />
-          </Button>
+            <ChevronRight style={{ width: '20px', height: '20px' }} />
+          </button>
         </div>
       </div>
 
@@ -251,13 +276,16 @@ export default function VideoMarkerPopup({
       <div style={{ 
         display: 'flex', 
         alignItems: 'center', 
-        gap: '6px',
-        marginBottom: '10px',
-        fontSize: '11px',
-        color: '#64748b',
+        gap: '8px',
+        marginBottom: '12px',
+        padding: '8px 12px',
+        background: '#f1f5f9',
+        borderRadius: '6px',
+        fontSize: '12px',
+        color: '#475569',
       }}>
-        <MapPin className="h-3 w-3" />
-        <span>{gpxPoint.lat.toFixed(6)}, {gpxPoint.lon.toFixed(6)}</span>
+        <MapPin style={{ width: '14px', height: '14px', color: '#3b82f6' }} />
+        <span style={{ fontFamily: 'monospace' }}>{gpxPoint.lat.toFixed(6)}, {gpxPoint.lon.toFixed(6)}</span>
       </div>
 
       {/* Video Container */}
@@ -298,54 +326,88 @@ export default function VideoMarkerPopup({
           />
         )}
 
-        {/* Detection count badge */}
+        {/* Video Controls Overlay */}
         <div style={{
           position: 'absolute',
-          top: '8px',
-          right: '8px',
+          top: '10px',
+          left: '10px',
+          right: '10px',
           display: 'flex',
-          gap: '6px',
+          justifyContent: 'space-between',
+          alignItems: 'flex-start',
         }}>
-          <Badge 
-            variant="secondary" 
-            className="bg-black/70 text-white text-xs cursor-pointer"
+          {/* Left: Bounding box toggle */}
+          <button
             onClick={() => setShowBboxes(!showBboxes)}
+            style={{
+              padding: '6px 12px',
+              borderRadius: '6px',
+              background: 'rgba(0,0,0,0.75)',
+              border: 'none',
+              color: '#ffffff',
+              fontSize: '12px',
+              fontWeight: 600,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+            }}
           >
-            {showBboxes ? 'Hide' : 'Show'} Boxes
-          </Badge>
-          <Badge variant="secondary" className="bg-primary/90 text-white text-xs">
+            <Layers style={{ width: '14px', height: '14px' }} />
+            {showBboxes ? 'Hide Boxes' : 'Show Boxes'}
+          </button>
+          
+          {/* Right: Detection count */}
+          <div style={{
+            padding: '6px 12px',
+            borderRadius: '6px',
+            background: '#3b82f6',
+            color: '#ffffff',
+            fontSize: '12px',
+            fontWeight: 600,
+          }}>
             {visibleDetections} detections
-          </Badge>
+          </div>
         </div>
       </div>
 
       {/* Category Filters */}
       <div style={{ 
         display: 'flex', 
-        gap: '4px', 
+        gap: '6px', 
         flexWrap: 'wrap',
-        marginBottom: '8px',
+        marginBottom: '10px',
+        padding: '10px',
+        background: '#f8fafc',
+        borderRadius: '8px',
+        border: '1px solid #e2e8f0',
       }}>
+        <div style={{ width: '100%', marginBottom: '6px', fontSize: '11px', color: '#64748b', fontWeight: 600, textTransform: 'uppercase' }}>
+          <Layers style={{ width: '12px', height: '12px', display: 'inline', marginRight: '4px' }} />
+          Category Filters
+        </div>
         {Object.entries(CATEGORY_COLORS).map(([category, color]) => {
           const count = detectionsByCategory[category]?.length || 0;
           const isActive = selectedCategories.has(category);
-          if (count === 0) return null;
           return (
-            <Button
+            <button
               key={category}
-              size="sm"
-              variant={isActive ? 'default' : 'ghost'}
               onClick={() => toggleCategory(category)}
-              className="h-6 px-2 text-[10px] rounded-full"
               style={{
-                borderColor: color,
-                backgroundColor: isActive ? color : 'transparent',
+                padding: '4px 10px',
+                borderRadius: '16px',
+                border: `2px solid ${color}`,
+                background: isActive ? color : 'transparent',
                 color: isActive ? '#ffffff' : color,
-                border: `1px solid ${color}`,
+                fontSize: '11px',
+                fontWeight: 600,
+                cursor: 'pointer',
+                opacity: count === 0 ? 0.5 : 1,
+                transition: 'all 0.2s ease',
               }}
             >
               {category} ({count})
-            </Button>
+            </button>
           );
         })}
       </div>
@@ -353,28 +415,35 @@ export default function VideoMarkerPopup({
       {/* Detection List */}
       {detections?.length > 0 && (
         <div style={{ 
-          maxHeight: '100px',
+          maxHeight: '120px',
           overflowY: 'auto',
-          background: 'rgba(0,0,0,0.3)',
-          borderRadius: '6px',
-          padding: '8px',
+          background: '#f8fafc',
+          borderRadius: '8px',
+          padding: '10px',
+          border: '1px solid #e2e8f0',
         }}>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+          <div style={{ marginBottom: '6px', fontSize: '11px', color: '#64748b', fontWeight: 600, textTransform: 'uppercase' }}>
+            Detected Assets
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
             {detections
               .filter(d => selectedCategories.has(d.category || 'Other'))
               .map((d, i) => (
-              <Badge 
+              <span
                 key={i}
-                variant="outline"
-                className="text-[10px]"
                 style={{ 
-                  borderColor: CATEGORY_COLORS[d.category || 'Other'],
+                  padding: '4px 8px',
+                  borderRadius: '4px',
+                  border: `1px solid ${CATEGORY_COLORS[d.category || 'Other']}`,
+                  background: 'white',
                   color: CATEGORY_COLORS[d.category || 'Other'],
+                  fontSize: '11px',
+                  fontWeight: 500,
                 }}
               >
                 {d.class_name} • {(d.confidence * 100).toFixed(0)}%
                 {d.condition && ` • ${d.condition}`}
-              </Badge>
+              </span>
             ))}
           </div>
         </div>
