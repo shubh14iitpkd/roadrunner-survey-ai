@@ -27,8 +27,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { demoDataCache } from "@/contexts/UploadContext";
-import { isDemoVideo, convertToAssets, ANNOTATION_CATEGORIES } from "@/services/demoDataService";
+import { isDemoVideo, loadDemoData, convertToAssets, ANNOTATION_CATEGORIES } from "@/services/demoDataService";
 
 interface Asset {
   _id: string;
@@ -114,8 +113,8 @@ export default function AssetRegister() {
   const loadData = async () => {
     try {
       setLoading(true);
-      const [framesResp, surveysResp, roadsResp] = await Promise.all([
-        api.frames.list({ has_detections: true, limit: 20000 }),
+      const [videosResp, surveysResp, roadsResp] = await Promise.all([
+        api.videos.list(),
         api.Surveys.list({ latest_only: true }),
         api.roads.list(),
       ]);
@@ -128,31 +127,57 @@ export default function AssetRegister() {
           : String(survey._id)
       }));
 
-      // Convert frames with detections to assets
-      const assetsFromFrames: Asset[] = [];
-      (framesResp?.items || []).forEach((frame: any) => {
-        if (frame.detections && Array.isArray(frame.detections)) {
-          frame.detections.forEach((detection: any, index: number) => {
-            assetsFromFrames.push({
-              _id: `${frame._id}_${index}`,
-              route_id: frame.route_id,
-              survey_id: frame.survey_id || '',
-              category: detection.class_name || 'Unknown',
-              type: detection.class_name || 'Unknown',
-              condition: detection.confidence > 0.8 ? 'good' : detection.confidence > 0.5 ? 'fair' : 'poor',
-              confidence: detection.confidence,
-              lat: frame.latitude,
-              lng: frame.longitude,
-              detected_at: frame.created_at || new Date().toISOString(),
-              image_url: frame.frame_path,
-              description: `${detection.class_name} detected with ${(detection.confidence * 100).toFixed(0)}% confidence`
-            });
-          });
+      // Get videos and group by survey_id
+      const videos = (videosResp?.items || []) as any[];
+      const videosBySurveyMap: Record<string, any[]> = {};
+      const videosByRouteMap: Record<number, any[]> = {};
+
+      videos.forEach((video: any) => {
+        const surveyId = typeof video.survey_id === 'object' && video.survey_id.$oid
+          ? video.survey_id.$oid
+          : String(video.survey_id || '');
+
+        if (!videosBySurveyMap[surveyId]) videosBySurveyMap[surveyId] = [];
+        videosBySurveyMap[surveyId].push(video);
+
+        const routeId = video.route_id;
+        if (routeId) {
+          if (!videosByRouteMap[routeId]) videosByRouteMap[routeId] = [];
+          videosByRouteMap[routeId].push(video);
         }
       });
 
-      setAssets(assetsFromFrames);
-      setSurveys(normalizedSurveys);
+      // Filter surveys to only those that have videos
+      const surveysWithVideos = normalizedSurveys.filter((survey: any) =>
+        videosBySurveyMap[survey._id]?.length > 0
+      );
+
+      // Pre-load demo data for all demo videos to calculate KPIs
+      const allAssets: Asset[] = [];
+
+      for (const video of videos) {
+        const demoKey = isDemoVideo(video.title || '');
+        if (demoKey) {
+          const surveyId = typeof video.survey_id === 'object' && video.survey_id.$oid
+            ? video.survey_id.$oid
+            : String(video.survey_id || '');
+
+          try {
+            const demoData = await loadDemoData(demoKey);
+            if (demoData) {
+              const demoAssets = convertToAssets(demoData, video.route_id || 0, surveyId);
+              allAssets.push(...demoAssets as Asset[]);
+            }
+          } catch (err) {
+            console.warn(`Failed to load demo data for ${demoKey}:`, err);
+          }
+        }
+        // For non-demo videos, we could try to load metadata here too if needed
+        // But for now, demo videos are the main use case
+      }
+
+      setAssets(allAssets);
+      setSurveys(surveysWithVideos);
       setRoads(roadsResp?.items || []);
     } catch (err: any) {
       toast.error("Failed to load data: " + (err?.message || "Unknown error"));
@@ -163,7 +188,7 @@ export default function AssetRegister() {
 
   const loadSurveyAssets = async (surveyId: string) => {
     try {
-      // First, get videos for this survey
+      // Get videos for this survey
       const videosResp = await api.videos.list({ survey_id: surveyId });
       const videos = videosResp?.items || [];
 
@@ -172,26 +197,31 @@ export default function AssetRegister() {
         return;
       }
 
-      // Fetch metadata for all videos and combine detections
-      const assetsFromMetadata: Asset[] = [];
+      // Fetch assets for all videos
+      const allAssets: Asset[] = [];
 
       for (const video of videos) {
         const videoId = typeof video._id === 'object' && video._id.$oid
           ? video._id.$oid
           : String(video._id);
 
-        // Check if this is a demo video with cached data
+        // Check if this is a demo video
         const demoKey = isDemoVideo(video.title || '');
-        const cachedDemoData = demoDataCache.get(videoId);
 
-        if (cachedDemoData) {
-          // Use demo data from cache
-          console.log(`Using cached demo data for video ${videoId}: ${cachedDemoData.totalDetections} detections`);
-          const demoAssets = convertToAssets(cachedDemoData, video.route_id || 0, surveyId);
-          assetsFromMetadata.push(...demoAssets as Asset[]);
+        if (demoKey) {
+          // For demo videos, load data directly from JSON files
+          console.log(`Loading demo data for video ${videoId} (key: ${demoKey})`);
+          const demoData = await loadDemoData(demoKey);
+
+          if (demoData) {
+            const demoAssets = convertToAssets(demoData, video.route_id || 0, surveyId);
+            allAssets.push(...demoAssets as Asset[]);
+            console.log(`Loaded ${demoAssets.length} demo assets for ${demoKey}`);
+          }
           continue;
         }
 
+        // For non-demo videos, try to load from metadata
         try {
           const metadataResp = await api.videos.getMetadata(videoId);
           const metadata = metadataResp?.metadata || [];
@@ -200,7 +230,7 @@ export default function AssetRegister() {
           metadata.forEach((frame: any) => {
             if (frame.detections && Array.isArray(frame.detections)) {
               frame.detections.forEach((detection: any, index: number) => {
-                assetsFromMetadata.push({
+                allAssets.push({
                   _id: `${videoId}_frame${frame.frame_number}_det${index}`,
                   route_id: video.route_id || 0,
                   survey_id: surveyId,
@@ -219,29 +249,20 @@ export default function AssetRegister() {
           });
         } catch (metaErr: any) {
           console.warn(`No metadata for video ${videoId}:`, metaErr.message);
-          // Continue with other videos even if one fails
         }
       }
 
-      if (assetsFromMetadata.length === 0) {
-        toast.info("No AI detections found in metadata for this survey");
+      if (allAssets.length === 0) {
+        toast.info("No AI detections found for this survey. Process the video with AI first.");
       }
 
-      setDetailAssets(assetsFromMetadata);
+      setDetailAssets(allAssets);
       setSelectedSurveyId(surveyId);
       setIsDetailDialogOpen(true);
     } catch (err: any) {
       toast.error("Failed to load assets: " + (err?.message || "Unknown error"));
     }
   };
-
-  // Group assets by route_id for reliable matching
-  const assetsByRouteMap = assets.reduce((acc, asset) => {
-    const routeId = asset.route_id;
-    if (!acc[routeId]) acc[routeId] = [];
-    acc[routeId].push(asset);
-    return acc;
-  }, {} as Record<number, Asset[]>);
 
   // Group surveys by route_id (get latest survey for each road)
   const surveyByRouteMap = surveys.reduce((acc, survey) => {
@@ -251,31 +272,24 @@ export default function AssetRegister() {
     return acc;
   }, {} as Record<number, Survey>);
 
-  // Create enriched road data with survey/asset information
-  const enrichedRoads = roads.map((road) => {
-    const latestSurvey = surveyByRouteMap[road.route_id];
-    const routeAssets = assetsByRouteMap[road.route_id] || [];
+  // Create enriched road data - only for roads that have surveys
+  const enrichedRoads = roads
+    .filter((road) => surveyByRouteMap[road.route_id]) // Only roads with surveys
+    .map((road) => {
+      const latestSurvey = surveyByRouteMap[road.route_id];
 
-    const goodCount = routeAssets.filter(a => a.condition?.toLowerCase() === 'good').length;
-    const fairCount = routeAssets.filter(a => a.condition?.toLowerCase() === 'fair').length;
-    const poorCount = routeAssets.filter(a => a.condition?.toLowerCase() === 'poor').length;
+      return {
+        route_id: road.route_id,
+        roadName: road.road_name,
+        lengthKm: road.estimated_distance_km || 0,
+        surveyId: latestSurvey?._id || null,
+        surveyDate: latestSurvey?.survey_date || null,
+        surveyorName: latestSurvey?.surveyor_name || null,
+        hasSurvey: !!latestSurvey,
+      };
+    });
 
-    return {
-      route_id: road.route_id,
-      roadName: road.road_name,
-      lengthKm: road.estimated_distance_km || 0,
-      surveyId: latestSurvey?._id || null,
-      surveyDate: latestSurvey?.survey_date || null,
-      surveyorName: latestSurvey?.surveyor_name || null,
-      totalAssets: routeAssets.length,
-      goodCondition: goodCount,
-      fairCondition: fairCount,
-      poorCondition: poorCount,
-      hasSurvey: !!latestSurvey,
-    };
-  });
-
-  // Filter enriched roads
+  // Filter enriched roads based on search
   const filteredRoads = enrichedRoads.filter((road) => {
     // If route_id is specified in URL, only show that road
     if (selectedRouteId && road.route_id.toString() !== selectedRouteId) {
@@ -289,13 +303,14 @@ export default function AssetRegister() {
     return matchesSearch;
   });
 
-  // Calculate KPIs from enrichedRoads to match table values
+  // Calculate KPIs - based on pre-loaded assets
   const totalRoads = roads.length;
-  const surveyedRoads = enrichedRoads.filter(r => r.hasSurvey).length;
-  const totalAssets = enrichedRoads.reduce((sum, r) => sum + r.totalAssets, 0);
-  const totalGood = enrichedRoads.reduce((sum, r) => sum + r.goodCondition, 0);
-  const totalFair = enrichedRoads.reduce((sum, r) => sum + r.fairCondition, 0);
-  const totalPoor = enrichedRoads.reduce((sum, r) => sum + r.poorCondition, 0);
+  const surveyedRoads = enrichedRoads.length; // Only roads with surveys/videos
+  // Asset counts from pre-loaded demo data
+  const totalAssets = assets.length;
+  const totalGood = assets.filter(a => a.condition?.toLowerCase() === 'good').length;
+  const totalFair = assets.filter(a => a.condition?.toLowerCase() === 'fair').length;
+  const totalPoor = assets.filter(a => a.condition?.toLowerCase() === 'poor').length;
 
   const selectedSurvey = surveys.find(s => s._id === selectedSurveyId);
   const selectedRoad = roads.find(r => r.route_id === selectedSurvey?.route_id);
@@ -447,7 +462,6 @@ export default function AssetRegister() {
                     <th className="text-left p-5 font-bold text-sm uppercase tracking-wide">Surveyor</th>
                     <th className="text-left p-5 font-bold text-sm uppercase tracking-wide">Survey Date</th>
                     {/* <th className="text-left p-5 font-bold text-sm uppercase tracking-wide">Asset Condition</th> */}
-                    <th className="text-left p-5 font-bold text-sm uppercase tracking-wide">Total Assets</th>
                     <th className="text-left p-5 font-bold text-sm uppercase tracking-wide">Actions</th>
                   </tr>
                 </thead>
@@ -516,11 +530,6 @@ export default function AssetRegister() {
                           </Badge>
                         )}
                       </td> */}
-                      <td className="p-5">
-                        <Badge variant="secondary" className="font-bold text-lg px-3 py-1">
-                          {road.totalAssets}
-                        </Badge>
-                      </td>
                       <td className="p-5">
                         <div className="flex gap-2">
                           {road.surveyId ? (
