@@ -48,13 +48,13 @@ const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY || "AIzaSyAkJBDspyPQc
 const GEMINI_MODEL = "gemini-2.0-flash";
 
 async function askGeminiWithContext(
-  prompt: string, 
+  prompt: string,
   videoContext: string,
   framesContext: string,
   conversationHistory: Message[]
 ): Promise<string> {
   if (!GEMINI_API_KEY) throw new Error("Missing VITE_GEMINI_API_KEY");
-  
+
   const systemPrompt = `You are an AI assistant specialized in road asset analysis for RoadSight AI.
 You have access to video survey data with frames extracted at regular intervals.
 Each frame contains AI-detected road assets like traffic signs, street lights, guardrails, etc.
@@ -74,11 +74,11 @@ Be concise and reference specific timestamps/frame numbers when relevant.
 If asked about a specific time, find the closest frame and describe what was detected.`;
 
   // Build conversation for context
-  const messages = conversationHistory.slice(-6).map(m => 
+  const messages = conversationHistory.slice(-6).map(m =>
     `${m.role === "user" ? "User" : "Assistant"}: ${m.content}`
   ).join("\n\n");
 
-  const fullPrompt = messages 
+  const fullPrompt = messages
     ? `${systemPrompt}\n\nConversation history:\n${messages}\n\nUser: ${prompt}`
     : `${systemPrompt}\n\nUser: ${prompt}`;
 
@@ -96,12 +96,12 @@ If asked about a specific time, find the closest frame and describe what was det
       }),
     }
   );
-  
+
   if (!res.ok) {
     const text = await res.text();
     throw new Error(text || `HTTP ${res.status}`);
   }
-  
+
   const data = await res.json();
   const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
   return text.trim() || "(No response)";
@@ -116,19 +116,19 @@ function parseTimestampFromQuery(query: string): { timestamp?: number; frameNumb
     const seconds = parseInt(timeMatch[2]);
     return { timestamp: minutes * 60 + seconds };
   }
-  
+
   // Match "at X seconds" or "X seconds"
   const secondsMatch = query.match(/(?:at\s+)?(\d+)\s*(?:seconds?|sec|s)\b/i);
   if (secondsMatch) {
     return { timestamp: parseInt(secondsMatch[1]) };
   }
-  
+
   // Match "frame X" or "frame number X"
   const frameMatch = query.match(/frame\s*(?:number\s*)?(\d+)/i);
   if (frameMatch) {
     return { frameNumber: parseInt(frameMatch[1]) };
   }
-  
+
   return {};
 }
 
@@ -142,15 +142,20 @@ export default function AskAI() {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [chatId, setChatId] = useState<string | null>(null);
-  
   // Video selection
   const [videos, setVideos] = useState<VideoInfo[]>([]);
   const [selectedVideoId, setSelectedVideoId] = useState<string>("");
   const [selectedVideo, setSelectedVideo] = useState<VideoInfo | null>(null);
   const [videoFrames, setVideoFrames] = useState<FrameData[]>([]);
   const [loadingFrames, setLoadingFrames] = useState(false);
-  
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Debug: wrapper for setSelectedVideoId
+  const handleVideoSelect = (value: string) => {
+    console.log("Video selected:", value);
+    setSelectedVideoId(value);
+  };
 
   // Load completed videos
   useEffect(() => {
@@ -168,6 +173,7 @@ export default function AskAI() {
             thumbnail_url: v.thumbnail_url,
           }));
           setVideos(videoList);
+          console.log("Loaded videos:", videoList);
         }
       } catch (err) {
         console.error("Failed to load videos:", err);
@@ -177,6 +183,7 @@ export default function AskAI() {
 
   // Load frames when video is selected
   useEffect(() => {
+    console.log("Selected video ID:", selectedVideoId);
     if (!selectedVideoId) {
       setVideoFrames([]);
       setSelectedVideo(null);
@@ -185,22 +192,51 @@ export default function AskAI() {
 
     const video = videos.find(v => v._id === selectedVideoId);
     setSelectedVideo(video || null);
-
+    console.log(selectedVideoId);
     (async () => {
       setLoadingFrames(true);
       try {
-        const resp = await api.frames.withDetections({ video_id: selectedVideoId, limit: 200 });
+        // Use the getAllFrames endpoint with has_detections filter
+        const resp = await api.videos.getAllFrames(selectedVideoId, true);
+        console.log(resp);
         if (resp?.items) {
-          const frames: FrameData[] = resp.items.map((f: any) => ({
-            frame_id: typeof f._id === 'object' ? f._id.$oid : f._id,
-            frame_number: f.frame_number,
-            timestamp: f.timestamp || f.frame_number, // seconds
-            image_url: f.image_url,
-            detections: f.detections || [],
-            location: f.location,
-          }));
+          const frames: FrameData[] = resp.items.map((f: any) => {
+            // Flatten detections from all endpoints (detections is an object with endpoint names as keys)
+            const allDetections: Detection[] = [];
+            if (f.detections && typeof f.detections === 'object') {
+              Object.values(f.detections).forEach((endpointDets: any) => {
+                if (Array.isArray(endpointDets)) {
+                  endpointDets.forEach((d: any) => {
+                    allDetections.push({
+                      class_name: d.class_name,
+                      confidence: d.confidence,
+                      bbox: d.box || d.bbox,
+                    });
+                  });
+                }
+              });
+            }
+
+            // Extract location from GeoJSON Point format or direct lat/lon
+            let location: { lat: number; lon: number } | undefined;
+            if (f.location?.coordinates) {
+              // GeoJSON format: [lon, lat]
+              location = { lat: f.location.coordinates[1], lon: f.location.coordinates[0] };
+            } else if (f.lat && f.lon) {
+              location = { lat: f.lat, lon: f.lon };
+            }
+
+            return {
+              frame_id: typeof f._id === 'object' ? f._id.$oid : String(f._id),
+              frame_number: f.frame_number,
+              timestamp: f.timestamp || f.frame_number,
+              image_url: f.frame_path,
+              detections: allDetections,
+              location,
+            };
+          });
           setVideoFrames(frames);
-          
+
           // Add a system message about the loaded video
           if (video) {
             setMessages(prev => [...prev, {
@@ -245,12 +281,12 @@ export default function AskAI() {
   // Find frames near a timestamp
   const findFramesNearTimestamp = (targetTimestamp: number, count: number = 3): FrameData[] => {
     if (videoFrames.length === 0) return [];
-    
+
     // Sort by distance to target timestamp
-    const sorted = [...videoFrames].sort((a, b) => 
+    const sorted = [...videoFrames].sort((a, b) =>
       Math.abs(a.timestamp - targetTimestamp) - Math.abs(b.timestamp - targetTimestamp)
     );
-    
+
     return sorted.slice(0, count);
   };
 
@@ -270,7 +306,7 @@ Total frames with detections: ${videoFrames.length}`;
 
   const buildFramesContext = (): string => {
     if (videoFrames.length === 0) return "No frames loaded.";
-    
+
     // Summarize detections
     const detectionCounts: Record<string, number> = {};
     videoFrames.forEach(frame => {
@@ -345,13 +381,13 @@ ${sampleFrames}`;
         messages
       );
 
-      const aiMessage: Message = { 
-        role: "assistant", 
+      const aiMessage: Message = {
+        role: "assistant",
         content: reply,
         frames: relevantFrames.length > 0 ? relevantFrames : undefined,
         timestamp: timestamp !== undefined ? formatTimestamp(timestamp) : undefined,
       };
-      
+
       setMessages(prev => [...prev, aiMessage]);
       if (cid) persistMessage(cid, aiMessage);
     } catch (e: any) {
@@ -372,7 +408,7 @@ ${sampleFrames}`;
     "How many traffic signs are there?",
     "Are there any damaged or poor condition assets?",
     "Summarize the road infrastructure",
-    "What's at frame 50?",
+    "What's at frame 60?",
   ] : [];
 
   return (
@@ -389,11 +425,11 @@ ${sampleFrames}`;
               <p className="text-sm text-muted-foreground">Query video data with natural language</p>
             </div>
           </div>
-          
+
           {/* Video Selector */}
           <div className="flex items-center gap-3">
             <Video className="h-5 w-5 text-muted-foreground" />
-            <Select value={selectedVideoId} onValueChange={setSelectedVideoId}>
+            <Select value={selectedVideoId} onValueChange={handleVideoSelect}>
               <SelectTrigger className="flex-1">
                 <SelectValue placeholder="Select a processed video to analyze..." />
               </SelectTrigger>
@@ -445,10 +481,10 @@ ${sampleFrames}`;
                   </div>
                 )}
                 <div className="max-w-[80%] space-y-2">
-                  <Card className={cn("p-4", message.role === "user" ? "bg-primary text-primary-foreground" : "bg-card")}> 
+                  <Card className={cn("p-4", message.role === "user" ? "bg-primary text-primary-foreground" : "bg-card")}>
                     <p className="text-sm whitespace-pre-wrap">{message.content}</p>
                   </Card>
-                  
+
                   {/* Show relevant frames if available */}
                   {message.frames && message.frames.length > 0 && (
                     <Collapsible>
@@ -467,7 +503,7 @@ ${sampleFrames}`;
                                 Frame {frame.frame_number} • {formatTimestamp(frame.timestamp)}
                               </div>
                               <div className="text-muted-foreground">
-                                {frame.detections.length > 0 
+                                {frame.detections.length > 0
                                   ? frame.detections.slice(0, 3).map(d => d.class_name).join(", ")
                                   : "No detections"}
                                 {frame.detections.length > 3 && ` +${frame.detections.length - 3} more`}
@@ -496,10 +532,10 @@ ${sampleFrames}`;
             <p className="text-sm font-medium mb-2 text-muted-foreground">Try these:</p>
             <div className="flex flex-wrap gap-2">
               {samplePrompts.map((prompt, idx) => (
-                <Button 
-                  key={idx} 
-                  variant="outline" 
-                  size="sm" 
+                <Button
+                  key={idx}
+                  variant="outline"
+                  size="sm"
                   className="text-xs h-7"
                   onClick={() => setInput(prompt)}
                 >
@@ -521,9 +557,9 @@ ${sampleFrames}`;
               className="flex-1"
               disabled={!selectedVideoId || busy}
             />
-            <Button 
-              onClick={handleSend} 
-              size="icon" 
+            <Button
+              onClick={handleSend}
+              size="icon"
               disabled={busy || !GEMINI_API_KEY || !selectedVideoId}
             >
               {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
