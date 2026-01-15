@@ -636,7 +636,6 @@ export default function AssetRegister() {
                       <SelectItem value="all">All Conditions</SelectItem>
                       <SelectItem value="good">Good</SelectItem>
                       <SelectItem value="fair">Fair</SelectItem>
-                      <SelectItem value="poor">Poor</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -670,12 +669,11 @@ export default function AssetRegister() {
 
                   const totalGood = filteredAssets.filter(a => a.condition?.toLowerCase() === 'good').length;
                   const totalFair = filteredAssets.filter(a => a.condition?.toLowerCase() === 'fair').length;
-                  const totalPoor = filteredAssets.filter(a => a.condition?.toLowerCase() === 'poor').length;
 
                   return (
                     <div className="space-y-6">
                       {/* Category Overview KPIs */}
-                      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                         <Card className="p-4 bg-gradient-to-br from-purple-50 to-white dark:from-purple-950/20 dark:to-card border-purple-200">
                           <p className="text-xs font-semibold text-purple-600 dark:text-purple-400 uppercase tracking-wide">Total Assets</p>
                           <p className="text-3xl font-bold bg-gradient-to-br from-purple-600 to-purple-400 bg-clip-text text-transparent">
@@ -702,14 +700,6 @@ export default function AssetRegister() {
                           <p className="text-xs text-muted-foreground">
                             {filteredAssets.length > 0 ? ((totalFair / filteredAssets.length) * 100).toFixed(0) : 0}%
                           </p>
-                        </Card>
-
-                        <Card className="p-4 bg-gradient-to-br from-red-50 to-white dark:from-red-950/20 dark:to-card border-red-200">
-                          <p className="text-xs font-semibold text-red-600 dark:text-red-400 uppercase tracking-wide">Poor</p>
-                          <p className="text-3xl font-bold bg-gradient-to-br from-red-600 to-red-400 bg-clip-text text-transparent">
-                            {totalPoor}
-                          </p>
-                          <p className="text-xs text-muted-foreground">Needs attention</p>
                         </Card>
 
                         <Card className="p-4 bg-gradient-to-br from-blue-50 to-white dark:from-blue-950/20 dark:to-card border-blue-200">
@@ -753,13 +743,6 @@ export default function AssetRegister() {
                                       title={`Fair: ${stat.fair}`}
                                     />
                                   )}
-                                  {stat.poor > 0 && (
-                                    <div 
-                                      className="bg-red-500 transition-all" 
-                                      style={{ width: `${(stat.poor / stat.total) * 100}%` }}
-                                      title={`Poor: ${stat.poor}`}
-                                    />
-                                  )}
                                 </div>
                                 
                                 {/* Condition labels */}
@@ -771,10 +754,6 @@ export default function AssetRegister() {
                                   <span className="flex items-center gap-1">
                                     <span className="w-2 h-2 rounded-full bg-amber-500"></span>
                                     {stat.fair}
-                                  </span>
-                                  <span className="flex items-center gap-1">
-                                    <span className="w-2 h-2 rounded-full bg-red-500"></span>
-                                    {stat.poor}
                                   </span>
                                   <span className="text-primary dark:text-foreground font-medium">
                                     {(stat.avgConfidence * 100).toFixed(0)}% conf
