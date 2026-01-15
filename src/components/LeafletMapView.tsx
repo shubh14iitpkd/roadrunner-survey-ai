@@ -9,7 +9,7 @@ import { isDemoVideo, type ProcessedVideoData, type Detection, ANNOTATION_CATEGO
 import markerIcon2x from 'leaflet/dist/images/marker-icon-2x.png';
 import markerIcon from 'leaflet/dist/images/marker-icon.png';
 import markerShadow from 'leaflet/dist/images/marker-shadow.png';
-import VideoMarkerPopup from "@/components/VideoMarkerPopup";
+import FrameComparisonPopup from "@/components/FrameComparisonPopup";
 import { createRoot } from "react-dom/client";
 delete (L.Icon.Default.prototype as any)._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -100,6 +100,13 @@ export default function LeafletMapView({ selectedRoadNames = [], roads = [], sel
   const markersRef = useRef<L.Marker[]>([]);
   const [tracks, setTracks] = useState<GpxTrack[]>([]);
   const [framesWithDetections, setFramesWithDetections] = useState<Map<number, FrameWithDetection[]>>(new Map());
+  const [popupState, setPopupState] = useState<{
+    isOpen: boolean;
+    frameData: any;
+    trackTitle: string;
+    pointIndex: number;
+    totalPoints: number;
+  } | null>(null);
 
   // Initialize map
   useEffect(() => {
@@ -397,113 +404,109 @@ export default function LeafletMapView({ selectedRoadNames = [], roads = [], sel
           fillOpacity: 0.9,
         }).addTo(mapRef.current!);
 
-        // Add popup on click with video at timestamp
+        // Add popup on click with frame image
         circleMarker.on('click', async () => {
+          const baseUrl = API_BASE;
+
           try {
             if (video && video._id) {
               const progress = t.path.length > 1 ? index / (t.path.length - 1) : 0;
-              const videoDuration = video.duration_seconds || 300;
+              const videoDuration = video.duration_seconds || 60;
               const timestamp = progress * videoDuration;
               const video_id_real = video._id.$oid || video._id;
 
-              // Get video URL
-              const videoUrl = video.storage_url?.startsWith('http') 
-                ? video.storage_url 
-                : `${API_BASE}${video.storage_url}`;
+              let frameData: any;
 
-              // Get detections for this timestamp
-              let detections: any[] = [];
+              // Check if this track has demo data
               if (t.demoData) {
-                detections = t.demoData.detections
-                  .filter(d => Math.abs(d.timestamp - timestamp) < 2)
-                  .map(d => ({
+                // Use demo data - find detections closest to this timestamp
+                const nearbyDetections = t.demoData.detections.filter(
+                  d => Math.abs(d.timestamp - timestamp) < 2 // within 2 seconds
+                );
+                
+                // Create frame data for demo with proper bbox format
+                frameData = {
+                  image_data: '', // No image for demo - will show detection summary
+                  detections: nearbyDetections.map(d => ({
                     class_name: d.className,
                     confidence: d.confidence,
-                    bbox: { x: d.bbox.x, y: d.bbox.y, width: d.bbox.width, height: d.bbox.height },
+                    bbox: {
+                      x: d.bbox.x,      // Keep as percentage (0-100)
+                      y: d.bbox.y,
+                      width: d.bbox.width,
+                      height: d.bbox.height,
+                    },
                     condition: d.condition,
                     category: d.category,
-                  }));
+                  })),
+                  width: 1920,
+                  height: 1080,
+                  frame_number: Math.round(timestamp * 30),
+                  is_demo: true,
+                };
+                console.log(`Demo popup at ${timestamp.toFixed(1)}s: ${nearbyDetections.length} detections from ${Object.keys(CATEGORY_COLORS).length} categories`);
+              } else {
+                // Fetch frame data from API
+                frameData = await api.videos.getFrameWithDetections(
+                  video_id_real,
+                  timestamp.toFixed(1)
+                );
               }
 
-              console.log(`Opening video popup at ${timestamp.toFixed(1)}s with ${detections.length} detections`);
+              // Open custom React popup instead of HTML string
+              setPopupState({
+                isOpen: true,
+                frameData: {
+                  ...frameData,
+                  videoId: video_id_real,
+                  timestamp: timestamp.toFixed(1),
+                  baseUrl,
+                },
+                trackTitle: t.title,
+                pointIndex: index,
+                totalPoints: t.path.length,
+              });
 
-              // Function to open popup at a specific point
-              const openPopupAtPoint = (pointIdx: number) => {
-                const pointProgress = t.path.length > 1 ? pointIdx / (t.path.length - 1) : 0;
-                const pointTimestamp = pointProgress * videoDuration;
-                const pointLatLng = t.path[pointIdx] as L.LatLngTuple;
+              // Create a custom Leaflet popup with a container
+              const popupContainer = L.popup({
+                maxWidth: 850,
+                minWidth: 800,
+                className: 'custom-popup',
+              })
+                .setLatLng(latLng)
+                .setContent('<div id="popup-root"></div>')
+                .openOn(mapRef.current!);
 
-                // Get detections for this point
-                let pointDetections: any[] = [];
-                if (t.demoData) {
-                  pointDetections = t.demoData.detections
-                    .filter(d => Math.abs(d.timestamp - pointTimestamp) < 2)
-                    .map(d => ({
-                      class_name: d.className,
-                      confidence: d.confidence,
-                      bbox: { x: d.bbox.x, y: d.bbox.y, width: d.bbox.width, height: d.bbox.height },
-                      condition: d.condition,
-                      category: d.category,
-                    }));
+              // Render React component into popup
+              setTimeout(() => {
+                const popupElement = document.getElementById('popup-root');
+                if (popupElement) {
+                  const root = createRoot(popupElement);
+                  root.render(
+                    <FrameComparisonPopup
+                      frameData={{
+                        ...frameData,
+                        videoId: video_id_real,
+                        timestamp: timestamp.toFixed(1),
+                        baseUrl,
+                        gpx_point: { lat: latLng[0], lon: latLng[1] },
+                      }}
+                      trackTitle={t.title}
+                      pointIndex={index}
+                      totalPoints={t.path.length}
+                      onClose={() => {
+                        if (mapRef.current) {
+                          mapRef.current.closePopup();
+                        }
+                        root.unmount();
+                      }}
+                    />
+                  );
                 }
-
-                // Close existing popup
-                if (mapRef.current) {
-                  mapRef.current.closePopup();
-                }
-
-                // Pan map to new point
-                mapRef.current?.panTo(pointLatLng, { animate: true, duration: 0.3 });
-
-                // Create popup at new location
-                const popup = L.popup({
-                  maxWidth: 750,
-                  minWidth: 700,
-                  className: 'custom-popup video-popup',
-                  closeButton: true,
-                })
-                  .setLatLng(pointLatLng)
-                  .setContent('<div id="video-popup-root"></div>')
-                  .openOn(mapRef.current!);
-
-                // Render React component
-                setTimeout(() => {
-                  const popupElement = document.getElementById('video-popup-root');
-                  if (popupElement) {
-                    const root = createRoot(popupElement);
-                    root.render(
-                      <VideoMarkerPopup
-                        videoUrl={videoUrl}
-                        timestamp={pointTimestamp}
-                        detections={pointDetections}
-                        trackTitle={t.title}
-                        pointIndex={pointIdx}
-                        totalPoints={t.path.length}
-                        gpxPoint={{ lat: pointLatLng[0], lon: pointLatLng[1] }}
-                        onNavigate={(direction) => {
-                          root.unmount();
-                          const newIdx = direction === 'next' 
-                            ? Math.min(pointIdx + 1, t.path.length - 1)
-                            : Math.max(pointIdx - 1, 0);
-                          openPopupAtPoint(newIdx);
-                        }}
-                        onClose={() => {
-                          if (mapRef.current) {
-                            mapRef.current.closePopup();
-                          }
-                          root.unmount();
-                        }}
-                      />
-                    );
-                  }
-                }, 50);
-              };
-
-              // Open popup at clicked point
-              openPopupAtPoint(index);
+              }, 50);
             }
           } catch (err) {
-            console.error('Error opening video popup:', err);
+            console.error('Error loading video frame:', err);
           }
         });
 
