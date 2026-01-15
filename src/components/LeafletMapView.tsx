@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import L, { canvas } from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { api, API_BASE } from "@/lib/api";
+import { demoDataCache } from "@/contexts/UploadContext";
+import { isDemoVideo, type ProcessedVideoData, type Detection } from "@/services/demoDataService";
 
 // Fix for default marker icons in Leaflet with Vite
 import markerIcon2x from 'leaflet/dist/images/marker-icon-2x.png';
@@ -22,6 +24,9 @@ type GpxTrack = {
   color: string;
   routeId: number;
   roadName: string;
+  videoId?: string;
+  isDemo?: boolean;
+  demoData?: ProcessedVideoData;
 };
 
 // Frame with detection data
@@ -29,7 +34,7 @@ interface FrameWithDetection {
   timestamp: number;
   latitude?: number;
   longitude?: number;
-  detections: Array<{ class_name: string; confidence: number }>;
+  detections: Array<{ class_name: string; confidence: number; condition?: string; category?: string }>;
 }
 
 interface LeafletMapViewProps {
@@ -175,6 +180,11 @@ export default function LeafletMapView({ selectedRoadNames = [], roads = [], sel
             // Find the matching road for this video (for road name and filtering)
             const road = roads.find(r => r.route_id === video.route_id);
             const roadName = road?.road_name || video.title || `Video ${video._id?.$oid || video._id}`;
+            const videoId = video._id?.$oid || video._id;
+
+            // Check if this is a demo video with cached data
+            const demoKey = isDemoVideo(video.title || '');
+            const cachedDemoData = demoDataCache.get(videoId);
 
             const url = `${baseUrl}${video.gpx_file_url}`;
             const path = await fetchAndParseGpx(url);
@@ -183,13 +193,16 @@ export default function LeafletMapView({ selectedRoadNames = [], roads = [], sel
               continue;
             }
 
-            console.log(`Successfully loaded ${path.length} points from video GPX: ${roadName}`);
+            console.log(`Successfully loaded ${path.length} points from video GPX: ${roadName}${demoKey ? ' (DEMO)' : ''}`);
             loadedTracks.push({
               path,
               title: roadName,
               color: colors[i % colors.length],
               routeId: video.route_id,
               roadName: roadName,
+              videoId,
+              isDemo: !!demoKey || !!cachedDemoData,
+              demoData: cachedDemoData,
             });
           }
         } catch (err) {
@@ -204,7 +217,7 @@ export default function LeafletMapView({ selectedRoadNames = [], roads = [], sel
     })();
   }, [roads]);
 
-  // Fetch frames with detections for each track's route
+  // Fetch frames with detections for each track's route (or use demo data)
   useEffect(() => {
     if (tracks.length === 0) return;
 
@@ -213,9 +226,45 @@ export default function LeafletMapView({ selectedRoadNames = [], roads = [], sel
 
       for (const track of tracks) {
         try {
-          const framesResp = await api.frames.withDetections({ route_id: track.routeId, limit: 10000 });
-          if (framesResp?.items) {
-            framesMap.set(track.routeId, framesResp.items);
+          // Check if we have demo data for this track
+          if (track.demoData) {
+            // Convert demo detections to frame format
+            const demoFrames: FrameWithDetection[] = [];
+            const detectionsByTimestamp = new Map<number, Detection[]>();
+            
+            // Group detections by timestamp (rounded to nearest second)
+            for (const detection of track.demoData.detections) {
+              const ts = Math.round(detection.timestamp);
+              if (!detectionsByTimestamp.has(ts)) {
+                detectionsByTimestamp.set(ts, []);
+              }
+              detectionsByTimestamp.get(ts)!.push(detection);
+            }
+            
+            // Convert to frame format
+            for (const [timestamp, detections] of detectionsByTimestamp) {
+              const firstDetection = detections[0];
+              demoFrames.push({
+                timestamp,
+                latitude: firstDetection.lat,
+                longitude: firstDetection.lon,
+                detections: detections.map(d => ({
+                  class_name: d.className,
+                  confidence: d.confidence,
+                  condition: d.condition,
+                  category: d.category,
+                })),
+              });
+            }
+            
+            framesMap.set(track.routeId, demoFrames);
+            console.log(`Using ${demoFrames.length} demo frames for route ${track.routeId}`);
+          } else {
+            // Fetch from API
+            const framesResp = await api.frames.withDetections({ route_id: track.routeId, limit: 10000 });
+            if (framesResp?.items) {
+              framesMap.set(track.routeId, framesResp.items);
+            }
           }
         } catch (err) {
           console.error(`Failed to fetch frames for route ${track.routeId}:`, err);
