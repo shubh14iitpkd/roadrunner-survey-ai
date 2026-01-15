@@ -577,12 +577,13 @@ export default function SurveyUpload() {
                 <table className="w-full">
                   <thead>
                     <tr className="bg-gradient-to-r from-blue-50 via-indigo-50 to-purple-50 dark:from-blue-950/30 dark:via-indigo-950/30 dark:to-purple-950/30 border-b border-border">
-                      <th className="text-left p-3 font-semibold text-sm w-28">Preview</th>
-                      <th className="text-left p-3 font-semibold text-sm">Route</th>
+                      <th className="text-left p-3 font-semibold text-sm w-24">Preview</th>
+                      <th className="text-left p-3 font-semibold text-sm min-w-[140px] max-w-[200px]">Route</th>
                       <th className="text-left p-3 font-semibold text-sm w-24">Date</th>
-                      <th className="text-left p-3 font-semibold text-sm w-24">Surveyor</th>
-                      <th className="text-left p-3 font-semibold text-sm w-24">GPS</th>
-                      <th className="text-left p-3 font-semibold text-sm">Status & Actions</th>
+                      <th className="text-left p-3 font-semibold text-sm w-20">Surveyor</th>
+                      <th className="text-left p-3 font-semibold text-sm w-20">GPS</th>
+                      <th className="text-left p-3 font-semibold text-sm w-32">Status</th>
+                      <th className="text-left p-3 font-semibold text-sm">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -635,16 +636,16 @@ export default function SurveyUpload() {
                             </div>
                           </td>
 
-                          {/* Route (stacked layout) */}
-                          <td className="p-3">
+                          {/* Route (stacked layout with truncation) */}
+                          <td className="p-3 max-w-[200px]">
                             <div className="flex flex-col gap-0.5">
-                              <div className="flex items-center gap-1.5">
-                                <div className="w-1.5 h-1.5 rounded-full bg-blue-500" />
-                                <span className="text-xs font-mono text-blue-600 dark:text-blue-400">
-                                  Route {video.routeId}
-                                </span>
-                              </div>
-                              <span className="text-sm font-medium text-foreground leading-tight" title={road?.road_name || `Road ${video.routeId}`}>
+                              <span className="text-[10px] font-mono text-blue-600 dark:text-blue-400 uppercase tracking-wide">
+                                Route #{video.routeId}
+                              </span>
+                              <span 
+                                className="text-sm font-medium text-foreground leading-snug line-clamp-2" 
+                                title={road?.road_name || `Road ${video.routeId}`}
+                              >
                                 {road?.road_name || `Road ${video.routeId}`}
                               </span>
                             </div>
@@ -677,10 +678,9 @@ export default function SurveyUpload() {
                             )}
                           </td>
 
-                          {/* Status & Actions (combined) */}
+                          {/* Status column */}
                           <td className="p-3">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              {/* Status badge */}
+                            <div className="flex flex-col gap-1">
                               <div className="flex items-center gap-1.5">
                                 {getStatusIcon(video.status)}
                                 <Badge
@@ -698,16 +698,19 @@ export default function SurveyUpload() {
                                   {getStatusLabel(video.status)}
                                 </Badge>
                               </div>
-
                               {/* Progress bar for uploading/processing */}
                               {(video.status === "uploading" || video.status === "processing") && (
-                                <div className="flex items-center gap-2 min-w-[100px]">
-                                  <Progress value={video.progress} className="h-1.5 flex-1" />
+                                <div className="flex items-center gap-2">
+                                  <Progress value={video.progress} className="h-1.5 flex-1 max-w-[80px]" />
                                   <span className="text-[10px] font-medium text-primary">{video.progress}%</span>
                                 </div>
                               )}
+                            </div>
+                          </td>
 
-                              {/* Action buttons */}
+                          {/* Actions column */}
+                          <td className="p-3">
+                            <div className="flex items-center gap-1.5 flex-wrap">
                               {video.status === "uploaded" && (
                                 <Button
                                   size="sm"
@@ -775,14 +778,18 @@ export default function SurveyUpload() {
                                       setSelectedVideo(video);
                                       setShowVideoPlayer(true);
                                     }}
-                                    className="h-7 text-xs text-purple-600 hover:bg-purple-50"
+                                    className="h-7 w-7 p-0 text-purple-600 hover:bg-purple-50"
                                   >
                                     <Video className="h-3 w-3" />
                                   </Button>
                                 </>
                               )}
 
-                              {/* Delete button (always visible, end of row) */}
+                              {video.status === "queue" && (
+                                <span className="text-xs text-muted-foreground">Waiting...</span>
+                              )}
+
+                              {/* Delete button */}
                               <Button
                                 size="sm"
                                 variant="ghost"
@@ -797,7 +804,7 @@ export default function SurveyUpload() {
                                   });
                                   setDeleteDialogOpen(true);
                                 }}
-                                className="h-7 w-7 p-0 text-red-400 hover:text-red-600 hover:bg-red-50 ml-auto"
+                                className="h-7 w-7 p-0 text-red-400 hover:text-red-600 hover:bg-red-50"
                                 disabled={video.status === "uploading" || video.status === "processing" || isDeleting || !video.surveyId}
                               >
                                 <Trash2 className="h-3.5 w-3.5" />
