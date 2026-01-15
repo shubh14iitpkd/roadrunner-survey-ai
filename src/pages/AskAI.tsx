@@ -12,7 +12,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import { supabase } from "@/integrations/supabase/client";
+
 
 interface Message {
   role: "user" | "assistant";
@@ -51,6 +51,9 @@ async function askAIWithContext(
   framesContext: string,
   conversationHistory: Message[]
 ): Promise<string> {
+  // Dynamically import supabase to avoid crash when env vars not ready
+  const { supabase } = await import("@/integrations/supabase/client");
+  
   const { data, error } = await supabase.functions.invoke('road-ai-chat', {
     body: { 
       prompt, 
