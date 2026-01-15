@@ -228,3 +228,35 @@ All colors MUST be HSL.
     background: var(--gradient-card);
   }
 }
+
+/* Leaflet Video Popup Styles */
+.leaflet-popup.video-popup .leaflet-popup-content-wrapper {
+  background: hsl(var(--card));
+  color: hsl(var(--card-foreground));
+  border-radius: 12px;
+  box-shadow: 0 20px 40px -10px rgba(0, 0, 0, 0.5);
+  border: 1px solid hsl(var(--border));
+}
+
+.leaflet-popup.video-popup .leaflet-popup-content {
+  margin: 12px;
+  min-width: 680px;
+}
+
+.leaflet-popup.video-popup .leaflet-popup-close-button {
+  color: hsl(var(--muted-foreground));
+  font-size: 20px;
+  width: 28px;
+  height: 28px;
+  right: 8px;
+  top: 8px;
+}
+
+.leaflet-popup.video-popup .leaflet-popup-close-button:hover {
+  color: hsl(var(--foreground));
+}
+
+.leaflet-popup.video-popup .leaflet-popup-tip {
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
+}
