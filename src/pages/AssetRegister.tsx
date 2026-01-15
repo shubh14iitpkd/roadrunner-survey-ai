@@ -28,7 +28,7 @@ import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { demoDataCache } from "@/contexts/UploadContext";
-import { isDemoVideo, convertToAssets, ANNOTATION_CATEGORIES } from "@/services/demoDataService";
+import { isDemoVideo, loadDemoData, convertToAssets, ANNOTATION_CATEGORIES } from "@/services/demoDataService";
 
 interface Asset {
   _id: string;
@@ -184,16 +184,27 @@ export default function AssetRegister() {
           ? video._id.$oid
           : String(video._id);
 
-        // Check if this is a demo video with cached data
-        const demoKey = isDemoVideo(video.title || '');
+        // Demo video handling (must work even after page reload)
+        const demoKey = isDemoVideo(video.title || "");
         const cachedDemoData = demoDataCache.get(videoId);
 
-        if (cachedDemoData) {
-          // Use demo data from cache
-          console.log(`Using cached demo data for video ${videoId}: ${cachedDemoData.totalDetections} detections`);
-          const demoAssets = convertToAssets(cachedDemoData, video.route_id || 0, surveyId);
-          assetsFromMetadata.push(...demoAssets as Asset[]);
-          continue;
+        if (demoKey) {
+          let demoData = cachedDemoData;
+
+          // Cache is in-memory and gets cleared on refresh, so reload demo data from public files.
+          if (!demoData) {
+            demoData = await loadDemoData(demoKey);
+            if (demoData) demoDataCache.set(videoId, demoData);
+          }
+
+          if (demoData) {
+            console.log(
+              `Using demo data for video ${videoId} (${demoKey}): ${demoData.totalDetections} detections`
+            );
+            const demoAssets = convertToAssets(demoData, video.route_id || 0, surveyId);
+            assetsFromMetadata.push(...(demoAssets as Asset[]));
+            continue;
+          }
         }
 
         try {
