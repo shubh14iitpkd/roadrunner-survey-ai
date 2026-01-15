@@ -44,7 +44,7 @@ interface VideoInfo {
   thumbnail_url?: string;
 }
 
-const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY || "AIzaSyAkJBDspyPQcVWTjc-zgsk4UhnRd-6OZ7k";
+const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
 const GEMINI_MODEL = "gemini-2.0-flash";
 
 async function askGeminiWithContext(
