@@ -82,12 +82,15 @@ export default function SurveyUpload() {
   const inQueue = videos.filter(v => v.status === "queue").length;
   const processing = videos.filter(v => v.status === "uploading" || v.status === "processing").length;
 
+  // Track uploads in progress for showing status
+  const [uploadingItems, setUploadingItems] = useState<string[]>([]);
+
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!selectedRoute) {
       toast.error("Please select a route first");
       return;
     }
-    if (!surveyorName) {
+    if (!surveyorName?.trim()) {
       toast.error("Please enter surveyor name");
       return;
     }
@@ -95,9 +98,25 @@ export default function SurveyUpload() {
     const files = Array.from(e.target.files || []);
     if (files.length === 0) return;
 
-    await uploadFiles(files, selectedRoute, surveyDate, surveyorName, selectedGpxFile);
-
-    setIsUploadDialogOpen(false);
+    // Add file names to uploading list
+    const fileNames = files.map(f => f.name);
+    setUploadingItems(prev => [...prev, ...fileNames]);
+    
+    toast.success(`Started uploading ${files.length} video(s) in background`);
+    
+    // Don't close dialog - let user add more if needed
+    // Upload runs in background
+    uploadFiles(files, selectedRoute, surveyDate, surveyorName, selectedGpxFile)
+      .then(() => {
+        setUploadingItems(prev => prev.filter(name => !fileNames.includes(name)));
+        toast.success(`Completed uploading ${files.length} video(s)`);
+      })
+      .catch(() => {
+        setUploadingItems(prev => prev.filter(name => !fileNames.includes(name)));
+      });
+    
+    // Reset file input
+    e.target.value = '';
     setSelectedGpxFile(null);
   };
 
@@ -116,19 +135,24 @@ export default function SurveyUpload() {
       return;
     }
 
-    const func = async () => {
-      const id = await uploadFromLibrary(
-        item.video_path,
-        item.size_bytes,
-        selectedRoute,
-        surveyDate,
-        surveyorName,
-        item.thumb_url
-      );
-    }
-    func();
-    setIsUploadDialogOpen(false);
-    setSelectedGpxFile(null);
+    // Add to uploading list
+    setUploadingItems(prev => [...prev, item.name]);
+    toast.success(`Started processing "${item.name}" in background`);
+
+    // Upload runs in background - don't close dialog
+    uploadFromLibrary(
+      item.video_path,
+      item.size_bytes || 0,
+      selectedRoute,
+      surveyDate,
+      surveyorName,
+      item.thumb_url
+    ).then(() => {
+      setUploadingItems(prev => prev.filter(name => name !== item.name));
+      toast.success(`Added "${item.name}" to processing queue`);
+    }).catch(() => {
+      setUploadingItems(prev => prev.filter(name => name !== item.name));
+    });
   }
 
   const handleGpxFileSelect = async (e: React.ChangeEvent<HTMLInputElement>, videoId: string) => {
@@ -223,20 +247,51 @@ export default function SurveyUpload() {
                 Video Library
               </Button>
             </Link>
-            <Dialog open={isUploadDialogOpen} onOpenChange={(open) => !isUploading && setIsUploadDialogOpen(open)}>
+            <Dialog open={isUploadDialogOpen} onOpenChange={setIsUploadDialogOpen}>
               <DialogTrigger asChild>
                 <Button className="gap-2 bg-white text-primary hover:bg-white/90 shadow-lg">
                   <Upload className="h-4 w-4" />
                   Upload Survey Data
+                  {uploadingItems.length > 0 && (
+                    <Badge variant="secondary" className="ml-1 bg-primary/20">
+                      {uploadingItems.length}
+                    </Badge>
+                  )}
                 </Button>
               </DialogTrigger>
               <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
                 <DialogHeader>
-                  <DialogTitle>Upload Survey Data</DialogTitle>
+                  <DialogTitle className="flex items-center gap-2">
+                    Upload Survey Data
+                    {uploadingItems.length > 0 && (
+                      <Badge variant="outline" className="text-xs font-normal">
+                        <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                        {uploadingItems.length} uploading
+                      </Badge>
+                    )}
+                  </DialogTitle>
                   <DialogDescription>
-                    Upload video and GPX files for road survey processing
+                    Upload video and GPX files for road survey processing. You can add multiple videos - they will upload in parallel.
                   </DialogDescription>
                 </DialogHeader>
+                
+                {/* Upload Queue Status */}
+                {uploadingItems.length > 0 && (
+                  <div className="p-3 rounded-lg bg-primary/5 border border-primary/20">
+                    <div className="flex items-center gap-2 text-sm font-medium text-primary mb-2">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Uploading in progress...
+                    </div>
+                    <div className="space-y-1">
+                      {uploadingItems.map((name, i) => (
+                        <div key={i} className="text-xs text-muted-foreground flex items-center gap-2">
+                          <div className="w-2 h-2 rounded-full bg-primary animate-pulse" />
+                          {name}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
                 <Tabs defaultValue="cloud" className="w-full">
                   <TabsList className="grid w-full grid-cols-2">
@@ -411,11 +466,19 @@ export default function SurveyUpload() {
                         selectedRoute={selectedRoute} 
                         surveyorName={surveyorName}
                         surveyDate={surveyDate}
-                        handleFileSelect={handleLibraryFileSelect} 
+                        handleFileSelect={handleLibraryFileSelect}
+                        uploadingItems={uploadingItems}
                       />
                     </div>
                   </TabsContent>
                 </Tabs>
+                
+                {/* Footer with close button */}
+                <div className="flex justify-end pt-4 border-t">
+                  <Button variant="outline" onClick={() => setIsUploadDialogOpen(false)}>
+                    {uploadingItems.length > 0 ? "Close (uploads continue in background)" : "Close"}
+                  </Button>
+                </div>
               </DialogContent>
             </Dialog>
           </div>

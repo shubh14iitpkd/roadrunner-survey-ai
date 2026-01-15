@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { api, API_BASE } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Loader2, Video, FileVideo } from "lucide-react";
+import { Loader2, Video, FileVideo, CheckCircle } from "lucide-react";
 import { toast } from "sonner";
 import { LibraryVideoItem } from "@/contexts/UploadContext";
 interface LibraryItem {
@@ -21,13 +21,15 @@ interface VideoLibraryUploadProps {
   surveyorName?: string;
   surveyDate?: string;
   handleFileSelect: (item: LibraryVideoItem) => void;
+  uploadingItems?: string[];
 }
 
 export const VideoLibraryUpload: React.FC<VideoLibraryUploadProps> = ({ 
   selectedRoute, 
   surveyorName,
   surveyDate,
-  handleFileSelect 
+  handleFileSelect,
+  uploadingItems = []
 }) => {
   const [items, setItems] = useState<LibraryVideoItem[]>([]);
   const [folders, setFolders] = useState<string[]>([]);
@@ -143,46 +145,76 @@ export const VideoLibraryUpload: React.FC<VideoLibraryUploadProps> = ({
           
           <div className="rounded-lg bg-background border border-border">
             <ul className="divide-y">
-              {items.map((video, i) => (
-                <li 
-                  key={video.name} 
-                  className={`flex items-center justify-between p-3 transition-all ${
-                    isFormComplete 
-                      ? "cursor-pointer hover:bg-primary/5" 
-                      : "cursor-not-allowed opacity-60"
-                  }`} 
-                  onClick={() => handleVideoClick(video)}
-                >
-                  <div className="flex items-center gap-3 min-w-0">
-                    {video.thumb_url ? (
-                      <div className="w-24 h-16 rounded-lg overflow-hidden shadow-md border border-border bg-muted">
-                        <img
-                          src={`${API_BASE}${video.thumb_url}`}
-                          alt={`Thumbnail for ${video.name}`}
-                          className="w-full h-full object-cover"
-                          onError={(e) => {
-                            e.currentTarget.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="100" height="60" viewBox="0 0 100 60"%3E%3Crect fill="%23ddd" width="100" height="60"/%3E%3Ctext x="50%25" y="50%25" fill="%23999" font-family="Arial" font-size="12" text-anchor="middle" dominant-baseline="middle"%3ENo Image%3C/text%3E%3C/svg%3E';
-                          }}
-                        />
+              {items.map((video, i) => {
+                const isCurrentlyUploading = uploadingItems.includes(video.name);
+                const isClickable = isFormComplete && !isCurrentlyUploading;
+                
+                return (
+                  <li 
+                    key={video.name} 
+                    className={`flex items-center justify-between p-3 transition-all ${
+                      isCurrentlyUploading 
+                        ? "bg-primary/5 cursor-default"
+                        : isClickable
+                          ? "cursor-pointer hover:bg-primary/5" 
+                          : "cursor-not-allowed opacity-60"
+                    }`} 
+                    onClick={() => isClickable && handleVideoClick(video)}
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      {video.thumb_url ? (
+                        <div className={`w-24 h-16 rounded-lg overflow-hidden shadow-md border bg-muted relative ${
+                          isCurrentlyUploading ? "border-primary" : "border-border"
+                        }`}>
+                          <img
+                            src={`${API_BASE}${video.thumb_url}`}
+                            alt={`Thumbnail for ${video.name}`}
+                            className={`w-full h-full object-cover ${isCurrentlyUploading ? "opacity-50" : ""}`}
+                            onError={(e) => {
+                              e.currentTarget.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="100" height="60" viewBox="0 0 100 60"%3E%3Crect fill="%23ddd" width="100" height="60"/%3E%3Ctext x="50%25" y="50%25" fill="%23999" font-family="Arial" font-size="12" text-anchor="middle" dominant-baseline="middle"%3ENo Image%3C/text%3E%3C/svg%3E';
+                            }}
+                          />
+                          {isCurrentlyUploading && (
+                            <div className="absolute inset-0 flex items-center justify-center">
+                              <Loader2 className="h-6 w-6 text-primary animate-spin" />
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <div className={`w-24 h-16 rounded-lg flex items-center justify-center bg-muted border ${
+                          isCurrentlyUploading ? "border-primary" : "border-border"
+                        }`}>
+                          {isCurrentlyUploading ? (
+                            <Loader2 className="w-6 h-6 text-primary animate-spin" />
+                          ) : (
+                            <Video className="w-8 h-8 text-muted-foreground" />
+                          )}
+                        </div>
+                      )}
+                      <div className="min-w-0">
+                        <div className="font-medium truncate flex items-center gap-2">
+                          {video.name}
+                          {isCurrentlyUploading && (
+                            <span className="text-xs text-primary font-normal">Uploading...</span>
+                          )}
+                        </div>
+                        <div className="text-xs text-muted-foreground truncate">{video.video_path}</div>
                       </div>
-                    ) : (
-                      <div className="w-24 h-16 rounded-lg flex items-center justify-center bg-muted border border-border">
-                        <Video className="w-8 h-8 text-muted-foreground" />
-                      </div>
-                    )}
-                    <div className="min-w-0">
-                      <div className="font-medium truncate">{video.name}</div>
-                      <div className="text-xs text-muted-foreground truncate">{video.video_path}</div>
                     </div>
-                  </div>
-                  
-                  {isFormComplete && (
-                    <Button size="sm" variant="outline" className="ml-2 flex-shrink-0">
-                      Select
-                    </Button>
-                  )}
-                </li>
-              ))}
+                    
+                    {isCurrentlyUploading ? (
+                      <div className="ml-2 flex-shrink-0 px-3 py-1.5 text-xs font-medium text-primary bg-primary/10 rounded-md flex items-center gap-1">
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                        Processing
+                      </div>
+                    ) : isFormComplete ? (
+                      <Button size="sm" variant="outline" className="ml-2 flex-shrink-0">
+                        Select
+                      </Button>
+                    ) : null}
+                  </li>
+                );
+              })}
           </ul>
           </div>
         </>
