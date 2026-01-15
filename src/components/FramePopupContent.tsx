@@ -15,7 +15,7 @@ interface Detection {
 
 interface FramePopupContentProps {
   frameData: {
-    image_data: string;
+    image_data?: string;
     detections: Detection[];
     width: number;
     height: number;
@@ -23,6 +23,7 @@ interface FramePopupContentProps {
     videoId: string;
     timestamp: string;
     baseUrl: string;
+    is_demo?: boolean;
   };
   trackTitle: string;
   pointIndex: number;
@@ -172,53 +173,122 @@ export default function FramePopupContent({
         </div>
       )}
 
-      {/* Image Container */}
-      <div style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
-        <div>
-          <img
-            //   ref={imgRef}
-            src={frameData.image_data}
-            alt="Road frame"
-            className='w-[380px] h-auto block rounded-sm'
-          />
-        </div>
-        <div style={{ position: 'relative', width: '380px', marginBottom: '10px' }}>
-          <img
-            ref={imgRef}
-            src={frameData.image_data}
-            alt="Road frame"
-            className='w-[380px] h-auto block rounded-sm'
-          />
-          <canvas
-            ref={canvasRef}
-            style={{
-              position: 'absolute',
-              top: 0,
-              left: 0,
-              width: '100%',
-              height: '100%',
-              borderRadius: '4px',
-              cursor: 'pointer',
-            }}
-          />
-          <div
-            style={{
-              position: 'absolute',
-              top: '4px',
-              zIndex: 999,
-              right: '4px',
-              background: 'rgba(59, 130, 246, 0.9)',
-              color: 'white',
-              padding: '4px 8px',
-              borderRadius: '3px',
-              fontSize: '10px',
-              fontWeight: 600,
-            }}
-          >
-            AI Detected
+      {/* Image Container or Demo Summary */}
+      {frameData.is_demo ? (
+        // Demo mode - show detection summary without images
+        <div style={{ 
+          background: 'linear-gradient(135deg, #1e3a5f 0%, #0d1b2a 100%)',
+          padding: '20px',
+          borderRadius: '8px',
+          marginBottom: '10px',
+        }}>
+          <div style={{ 
+            display: 'flex', 
+            alignItems: 'center', 
+            gap: '8px', 
+            marginBottom: '16px',
+            color: '#60a5fa',
+          }}>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+              <path d="M2 17l10 5 10-5"/>
+              <path d="M2 12l10 5 10-5"/>
+            </svg>
+            <span style={{ fontWeight: 600 }}>Demo Detection Data</span>
+          </div>
+          
+          {frameData.detections?.length > 0 ? (
+            <div style={{ display: 'grid', gap: '8px' }}>
+              {Object.entries(classCount || {}).map(([className, count]) => (
+                <div key={className} style={{ 
+                  display: 'flex', 
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  background: 'rgba(255,255,255,0.1)',
+                  padding: '10px 14px',
+                  borderRadius: '6px',
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <div style={{
+                      width: '10px',
+                      height: '10px',
+                      borderRadius: '50%',
+                      backgroundColor: colorMap[className],
+                    }}/>
+                    <span style={{ color: '#e2e8f0' }}>{className}</span>
+                  </div>
+                  <Badge 
+                    variant="secondary" 
+                    className="bg-primary/20 text-primary-foreground"
+                  >
+                    {count}
+                  </Badge>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div style={{ textAlign: 'center', color: '#94a3b8', padding: '16px' }}>
+              No detections at this location
+            </div>
+          )}
+          
+          <div style={{ 
+            marginTop: '12px', 
+            fontSize: '11px', 
+            color: '#64748b',
+            textAlign: 'center',
+          }}>
+            Frame #{frameData.frame_number} • {frameData.timestamp}s
           </div>
         </div>
-      </div>
+      ) : (
+        // Regular mode - show images with detections
+        <div style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
+          <div>
+            <img
+              src={frameData.image_data}
+              alt="Road frame"
+              className='w-[380px] h-auto block rounded-sm'
+            />
+          </div>
+          <div style={{ position: 'relative', width: '380px', marginBottom: '10px' }}>
+            <img
+              ref={imgRef}
+              src={frameData.image_data}
+              alt="Road frame"
+              className='w-[380px] h-auto block rounded-sm'
+            />
+            <canvas
+              ref={canvasRef}
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                width: '100%',
+                height: '100%',
+                borderRadius: '4px',
+                cursor: 'pointer',
+              }}
+            />
+            <div
+              style={{
+                position: 'absolute',
+                top: '4px',
+                zIndex: 999,
+                right: '4px',
+                background: 'rgba(59, 130, 246, 0.9)',
+                color: 'white',
+                padding: '4px 8px',
+                borderRadius: '3px',
+                fontSize: '10px',
+                fontWeight: 600,
+              }}
+            >
+              AI Detected
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Detection Summary */}
       {/* {frameData.detections && frameData.detections.length > 0 && (
