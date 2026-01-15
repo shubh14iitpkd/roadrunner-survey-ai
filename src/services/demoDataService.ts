@@ -125,11 +125,31 @@ function extractCondition(result: any[]): string {
   return 'good'; // default
 }
 
-// Parse Label Studio annotation format
-function parseAnnotations(data: any[], category: string): Detection[] {
+// Extract video key from S3 path like "s3://sauditech/Sabah Al HAmad Corridor/2025_0817_115147_F.MP4"
+function extractVideoKeyFromPath(path: string): string | null {
+  if (!path) return null;
+  // Get filename without extension
+  const match = path.match(/\/([^\/]+)\.(mp4|MP4)$/i);
+  if (match) {
+    return match[1];
+  }
+  return null;
+}
+
+// Parse Label Studio annotation format, filtering by video key
+function parseAnnotations(data: any[], category: string, videoKey: string): Detection[] {
   const detections: Detection[] = [];
   
   for (const task of data) {
+    // Check if this task belongs to the specified video
+    const taskVideoPath = task.data?.video || '';
+    const taskVideoKey = extractVideoKeyFromPath(taskVideoPath);
+    
+    // Skip if this annotation doesn't belong to the requested video
+    if (taskVideoKey !== videoKey) {
+      continue;
+    }
+    
     for (const annotation of task.annotations || []) {
       const results = annotation.result || [];
       
@@ -266,8 +286,9 @@ export async function loadDemoData(videoKey: string): Promise<ProcessedVideoData
       }
       
       const data = await response.json();
-      const detections = parseAnnotations(data, annotationFile.category);
-      console.log(`Parsed ${detections.length} detections from ${annotationFile.category}`);
+      // Pass videoKey to filter annotations for this specific video
+      const detections = parseAnnotations(data, annotationFile.category, videoKey);
+      console.log(`Parsed ${detections.length} detections from ${annotationFile.category} for video ${videoKey}`);
       allDetections.push(...detections);
     } catch (err) {
       console.error(`Error loading ${annotationFile.file}:`, err);
