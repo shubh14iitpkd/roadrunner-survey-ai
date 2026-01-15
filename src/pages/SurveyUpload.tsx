@@ -35,7 +35,7 @@ import { useUpload, VideoStatus, VideoFile, demoDataCache } from "@/contexts/Upl
 import VideoLibraryUpload from "@/components/VideoLibraryUpload";
 import { set } from "date-fns";
 import { LibraryVideoItem } from "@/contexts/UploadContext";
-import { isDemoVideo } from "@/services/demoDataService";
+
 
 export default function SurveyUpload() {
   const navigate = useNavigate();
@@ -644,11 +644,6 @@ export default function SurveyUpload() {
                                 <span className="text-[10px] font-mono text-blue-600 dark:text-blue-400 uppercase tracking-wide">
                                   Route #{video.routeId}
                                 </span>
-                                {isDemoVideo(video.name) && (
-                                  <Badge variant="secondary" className="text-[9px] px-1 py-0 h-4 bg-gradient-to-r from-amber-100 to-orange-100 text-amber-700 dark:from-amber-900/30 dark:to-orange-900/30 dark:text-amber-400 border-amber-200">
-                                    DEMO
-                                  </Badge>
-                                )}
                               </div>
                               <span 
                                 className="text-sm font-medium text-foreground leading-snug line-clamp-2" 
