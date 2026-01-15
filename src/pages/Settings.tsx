@@ -12,11 +12,37 @@ import {
   AccordionTrigger,
 } from "@/components/ui/accordion";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/contexts/AuthContext";
+import { useTheme } from "next-themes";
+import { useEffect, useState } from "react";
 
 export default function Settings() {
   const { toast } = useToast();
+  const { user } = useAuth();
+  const { theme, setTheme } = useTheme();
+
+  const [fullName, setFullName] = useState("");
+  const [email, setEmail] = useState("");
+  const [organization, setOrganization] = useState("");
+  const [darkMode, setDarkMode] = useState(false);
+
+  useEffect(() => {
+    if (user) {
+      const name = `${user.first_name || ""} ${user.last_name || ""}`.trim();
+      setFullName(name);
+      setEmail(user.email || "");
+      setOrganization(user.organisation || "");
+    }
+  }, [user]);
+
+  useEffect(() => {
+    setDarkMode(theme === "dark");
+  }, [theme]);
 
   const handleSave = () => {
+    // Apply dark mode setting
+    setTheme(darkMode ? "dark" : "light");
+
     toast({
       title: "Settings saved",
       description: "Your settings have been updated successfully.",
@@ -37,7 +63,7 @@ export default function Settings() {
           <Card className="card-shadow">
             <AccordionTrigger className="px-6 py-4 hover:no-underline">
               <div className="flex items-center gap-3">
-                <User className="h-5 w-5 text-primary" />
+                <User className="h-5 w-5 dark:text-foreground text-primary" />
                 <div className="text-left">
                   <h2 className="font-semibold text-lg">Profile Settings</h2>
                   <p className="text-sm text-muted-foreground font-normal">
@@ -51,17 +77,17 @@ export default function Settings() {
               <div className="space-y-4">
                 <div className="space-y-2">
                   <Label htmlFor="name">Full Name</Label>
-                  <Input id="name" defaultValue="Admin User" />
+                  <Input id="name" value={fullName} onChange={(e) => setFullName(e.target.value)} />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="email">Email</Label>
-                  <Input id="email" type="email" defaultValue="admin@gbdg.qa" />
+                  <Input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="organization">Organization</Label>
-                  <Input id="organization" defaultValue="GBDG Qatar" />
+                  <Input id="organization" value={organization} onChange={(e) => setOrganization(e.target.value)} />
                 </div>
-                <Button onClick={handleSave} className="mt-4">Save Changes</Button>
+                {/* <Button onClick={handleSave} className="mt-4">Save Changes</Button> */}
               </div>
             </AccordionContent>
           </Card>
@@ -71,7 +97,7 @@ export default function Settings() {
           <Card className="card-shadow">
             <AccordionTrigger className="px-6 py-4 hover:no-underline">
               <div className="flex items-center gap-3">
-                <Bell className="h-5 w-5 text-primary" />
+                <Bell className="h-5 w-5 dark:text-foreground text-primary" />
                 <div className="text-left">
                   <h2 className="font-semibold text-lg">Notifications</h2>
                   <p className="text-sm text-muted-foreground font-normal">
@@ -120,7 +146,7 @@ export default function Settings() {
           <Card className="card-shadow">
             <AccordionTrigger className="px-6 py-4 hover:no-underline">
               <div className="flex items-center gap-3">
-                <Lock className="h-5 w-5 text-primary" />
+                <Lock className="h-5 w-5 dark:text-foreground text-primary" />
                 <div className="text-left">
                   <h2 className="font-semibold text-lg">Security</h2>
                   <p className="text-sm text-muted-foreground font-normal">
@@ -163,7 +189,7 @@ export default function Settings() {
           <Card className="card-shadow">
             <AccordionTrigger className="px-6 py-4 hover:no-underline">
               <div className="flex items-center gap-3">
-                <SettingsIcon className="h-5 w-5 text-primary" />
+                <SettingsIcon className="h-5 w-5 dark:text-foreground text-primary" />
                 <div className="text-left">
                   <h2 className="font-semibold text-lg">Application Settings</h2>
                   <p className="text-sm text-muted-foreground font-normal">
@@ -199,7 +225,7 @@ export default function Settings() {
                       Enable dark theme for the interface
                     </p>
                   </div>
-                  <Switch />
+                  <Switch checked={darkMode} onCheckedChange={setDarkMode} />
                 </div>
                 <Button onClick={handleSave} className="mt-4">Save Changes</Button>
               </div>

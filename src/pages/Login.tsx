@@ -12,14 +12,14 @@ export default function Login() {
   const navigate = useNavigate();
   const { login } = useAuth();
   const { toast } = useToast();
-  
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     setLoading(true);
     const result = await login(email, password);
     setLoading(false);
@@ -43,9 +43,9 @@ export default function Login() {
     <div className="min-h-screen flex items-center justify-center bg-background p-4">
       <Card className="w-full max-w-md p-8 card-shadow">
         <div className="flex justify-center mb-6">
-          <img src={logo} alt="RoadSight AI" className="h-16 w-auto object-contain" />
+          <img src={logo} alt="RoadSight AI" className="h-16 w-auto object-contain dark:brightness-0 dark:invert" />
         </div>
-        
+
         <h1 className="text-2xl font-bold text-center mb-2">Welcome Back</h1>
         <p className="text-muted-foreground text-center mb-6">
           Login to access your RoadSight AI dashboard
@@ -75,9 +75,9 @@ export default function Login() {
           </div>
 
           <div className="flex justify-end">
-            <Button 
-              variant="link" 
-              className="p-0 h-auto text-sm"
+            <Button
+              variant="link"
+              className="p-0 h-auto text-sm dark:text-foreground"
               type="button"
               onClick={() => {
                 toast({
@@ -97,13 +97,9 @@ export default function Login() {
 
         <div className="mt-6 text-center text-sm">
           Don't have an account?{" "}
-          <Button variant="link" className="p-0 h-auto" onClick={() => navigate("/signup")}>
+          <Button variant="link" className="p-0 h-auto dark:text-muted-foreground" onClick={() => navigate("/signup")}>
             Sign up
           </Button>
-        </div>
-
-        <div className="mt-4 p-3 bg-muted rounded-lg text-xs text-center text-muted-foreground">
-          Demo: Use password "demo123" for any registered account
         </div>
       </Card>
     </div>
