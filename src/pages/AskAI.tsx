@@ -51,9 +51,10 @@ async function askAIWithContext(
   framesContext: string,
   conversationHistory: Message[]
 ): Promise<string> {
-  // Dynamically import supabase to avoid crash when env vars not ready
-  const { supabase } = await import("@/integrations/supabase/client");
-  
+  // Avoid importing the auto-generated client directly (can crash if env injection is delayed)
+  const { getSupabaseClient } = await import("@/integrations/supabase/safeClient");
+  const supabase = getSupabaseClient();
+
   const { data, error } = await supabase.functions.invoke('road-ai-chat', {
     body: { 
       prompt, 
