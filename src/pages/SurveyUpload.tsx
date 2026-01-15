@@ -31,10 +31,11 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api, API_BASE } from "@/lib/api";
-import { useUpload, VideoStatus, VideoFile } from "@/contexts/UploadContext";
+import { useUpload, VideoStatus, VideoFile, demoDataCache } from "@/contexts/UploadContext";
 import VideoLibraryUpload from "@/components/VideoLibraryUpload";
 import { set } from "date-fns";
 import { LibraryVideoItem } from "@/contexts/UploadContext";
+import { isDemoVideo } from "@/services/demoDataService";
 
 export default function SurveyUpload() {
   const navigate = useNavigate();
@@ -639,9 +640,16 @@ export default function SurveyUpload() {
                           {/* Route (stacked layout with truncation) */}
                           <td className="p-3 max-w-[200px]">
                             <div className="flex flex-col gap-0.5">
-                              <span className="text-[10px] font-mono text-blue-600 dark:text-blue-400 uppercase tracking-wide">
-                                Route #{video.routeId}
-                              </span>
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-[10px] font-mono text-blue-600 dark:text-blue-400 uppercase tracking-wide">
+                                  Route #{video.routeId}
+                                </span>
+                                {isDemoVideo(video.name) && (
+                                  <Badge variant="secondary" className="text-[9px] px-1 py-0 h-4 bg-gradient-to-r from-amber-100 to-orange-100 text-amber-700 dark:from-amber-900/30 dark:to-orange-900/30 dark:text-amber-400 border-amber-200">
+                                    DEMO
+                                  </Badge>
+                                )}
+                              </div>
                               <span 
                                 className="text-sm font-medium text-foreground leading-snug line-clamp-2" 
                                 title={road?.road_name || `Road ${video.routeId}`}
@@ -704,6 +712,12 @@ export default function SurveyUpload() {
                                   <Progress value={video.progress} className="h-1.5 flex-1 max-w-[80px]" />
                                   <span className="text-[10px] font-medium text-primary">{video.progress}%</span>
                                 </div>
+                              )}
+                              {/* Show detection count for completed demo videos */}
+                              {video.status === "completed" && video.backendId && demoDataCache.has(video.backendId) && (
+                                <span className="text-[10px] text-green-600 dark:text-green-400">
+                                  {demoDataCache.get(video.backendId)?.totalDetections.toLocaleString()} detections
+                                </span>
                               )}
                             </div>
                           </td>
