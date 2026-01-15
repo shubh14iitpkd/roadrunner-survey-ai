@@ -26,13 +26,23 @@ export const DEMO_VIDEOS = {
   },
 };
 
-// Annotation file categories
+// Annotation file categories - each file maps to a specific asset category
+export const ANNOTATION_CATEGORIES = {
+  OIA: 'OIA',
+  ITS: 'ITS',
+  ROADWAY_LIGHTING: 'Roadway Lighting',
+  STRUCTURES: 'Structures',
+  DIRECTIONAL_SIGNAGE: 'Directional Signage',
+  CORRIDOR_PAVEMENT: 'Corridor & Pavement',
+};
+
 const ANNOTATION_FILES = [
-  { file: '/demo-data/annotations/corridor-pavement.json', category: 'Corridor & Pavement' },
-  { file: '/demo-data/annotations/its.json', category: 'ITS (Intelligent Transport Systems)' },
-  { file: '/demo-data/annotations/oia.json', category: 'OIA (Outdoor Infrastructure Assets)' },
-  { file: '/demo-data/annotations/roadway-lighting.json', category: 'Roadway Lighting' },
-  { file: '/demo-data/annotations/corridor-structures.json', category: 'Corridor Structures' },
+  { file: '/demo-data/annotations/oia.json', category: ANNOTATION_CATEGORIES.OIA },
+  { file: '/demo-data/annotations/its.json', category: ANNOTATION_CATEGORIES.ITS },
+  { file: '/demo-data/annotations/roadway-lighting.json', category: ANNOTATION_CATEGORIES.ROADWAY_LIGHTING },
+  { file: '/demo-data/annotations/corridor-structures.json', category: ANNOTATION_CATEGORIES.STRUCTURES },
+  { file: '/demo-data/annotations/directional-signage.json', category: ANNOTATION_CATEGORIES.DIRECTIONAL_SIGNAGE },
+  { file: '/demo-data/annotations/corridor-pavement.json', category: ANNOTATION_CATEGORIES.CORRIDOR_PAVEMENT },
 ];
 
 // Asset condition mapping from annotation choices
@@ -352,7 +362,8 @@ export function convertToAssets(data: ProcessedVideoData, routeId: number, surve
     _id: `demo_asset_${routeId}_${index}`,
     route_id: routeId,
     survey_id: surveyId,
-    category: d.className,
+    asset_type: d.className,    // The specific asset label (e.g., "Guardrail", "Light Pole")
+    category: d.category,       // The annotation category (e.g., "OIA", "ITS", "Roadway Lighting")
     type: d.className,
     condition: d.condition,
     confidence: d.confidence,
@@ -360,6 +371,6 @@ export function convertToAssets(data: ProcessedVideoData, routeId: number, surve
     lng: d.lon,
     detected_at: new Date().toISOString(),
     image_url: undefined,
-    description: `${d.className} detected with ${(d.confidence * 100).toFixed(0)}% confidence (${d.category})`,
+    description: `${d.className} - ${d.condition} condition`,
   }));
 }
