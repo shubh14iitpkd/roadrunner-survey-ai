@@ -28,13 +28,14 @@ import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { demoDataCache } from "@/contexts/UploadContext";
-import { isDemoVideo, convertToAssets } from "@/services/demoDataService";
+import { isDemoVideo, convertToAssets, ANNOTATION_CATEGORIES } from "@/services/demoDataService";
 
 interface Asset {
   _id: string;
   route_id: number;
   survey_id: string;
-  category: string;
+  category: string;          // Annotation category: OIA, ITS, Roadway Lighting, etc.
+  asset_type?: string;       // The specific asset label (e.g., "Guardrail")
   type?: string;
   condition: string;
   confidence?: number;
@@ -613,10 +614,10 @@ export default function AssetRegister() {
                       All Categories
                       <Badge variant="secondary" className="ml-2 text-xs">{detailAssets.length}</Badge>
                     </TabsTrigger>
-                    {Array.from(new Set(detailAssets.map(a => a.description?.match(/\(([^)]+)\)$/)?.[1] || 'Other').filter(Boolean)))
-                      .sort()
+                    {Object.values(ANNOTATION_CATEGORIES)
+                      .filter(category => detailAssets.some(a => a.category === category))
                       .map(category => {
-                        const count = detailAssets.filter(a => (a.description?.match(/\(([^)]+)\)$/)?.[1] || 'Other') === category).length;
+                        const count = detailAssets.filter(a => a.category === category).length;
                         return (
                           <TabsTrigger key={category} value={category} className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
                             {category}
@@ -645,18 +646,18 @@ export default function AssetRegister() {
                   const selectedCategory = filterCategory;
                   const categoryAssets = selectedCategory === 'all' 
                     ? detailAssets 
-                    : detailAssets.filter(a => (a.description?.match(/\(([^)]+)\)$/)?.[1] || 'Other') === selectedCategory);
+                    : detailAssets.filter(a => a.category === selectedCategory);
                   
                   const filteredAssets = categoryAssets.filter(
                     asset => filterCondition === 'all' || asset.condition?.toLowerCase() === filterCondition
                   );
 
-                  // Get unique asset types (labels) for this category
-                  const assetTypes = Array.from(new Set(filteredAssets.map(a => a.category).filter(Boolean)));
+                  // Get unique asset types (labels) for this category - use asset_type or type
+                  const assetTypes = Array.from(new Set(filteredAssets.map(a => a.asset_type || a.type || a.category).filter(Boolean)));
                   
                   // Calculate stats by type
                   const typeStats = assetTypes.map(type => {
-                    const typeAssets = filteredAssets.filter(a => a.category === type);
+                    const typeAssets = filteredAssets.filter(a => (a.asset_type || a.type || a.category) === type);
                     return {
                       type,
                       total: typeAssets.length,
@@ -815,17 +816,17 @@ export default function AssetRegister() {
                                 const paginatedAssets = filteredAssets.slice(startIndex, startIndex + itemsPerPage);
 
                                 return paginatedAssets.map((asset) => {
-                                  const assetCategory = asset.description?.match(/\(([^)]+)\)$/)?.[1] || 'Other';
+                                  const assetType = asset.asset_type || asset.type || 'Unknown';
                                   return (
                                     <tr key={asset._id} className="border-b hover:bg-primary/5 transition-colors">
                                       <td className="p-3">
                                         <div className="flex items-center gap-2">
-                                          <span className="font-semibold text-sm">{asset.category}</span>
+                                          <span className="font-semibold text-sm">{assetType}</span>
                                         </div>
                                       </td>
                                       <td className="p-3">
                                         <Badge variant="outline" className="text-xs bg-primary/5">
-                                          {assetCategory}
+                                          {asset.category}
                                         </Badge>
                                       </td>
                                       <td className="p-3">
