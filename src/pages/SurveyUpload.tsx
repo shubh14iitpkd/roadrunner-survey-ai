@@ -102,6 +102,20 @@ export default function SurveyUpload() {
   };
 
   const handleLibraryFileSelect = async (item: LibraryVideoItem) => {
+    // Validate required fields
+    if (!selectedRoute) {
+      toast.error("Please select a Route ID before selecting a video");
+      return;
+    }
+    if (!surveyorName?.trim()) {
+      toast.error("Please enter Surveyor Name before selecting a video");
+      return;
+    }
+    if (!surveyDate) {
+      toast.error("Please enter Survey Date before selecting a video");
+      return;
+    }
+
     const func = async () => {
       const id = await uploadFromLibrary(
         item.video_path,
@@ -111,8 +125,6 @@ export default function SurveyUpload() {
         surveyorName,
         item.thumb_url
       );
-
-      // processWithAI(id);
     }
     func();
     setIsUploadDialogOpen(false);
@@ -395,7 +407,12 @@ export default function SurveyUpload() {
                       </div>
                     </div>
                     <div>
-                      <VideoLibraryUpload selectedRoute={selectedRoute} handleFileSelect={handleLibraryFileSelect} />
+                      <VideoLibraryUpload 
+                        selectedRoute={selectedRoute} 
+                        surveyorName={surveyorName}
+                        surveyDate={surveyDate}
+                        handleFileSelect={handleLibraryFileSelect} 
+                      />
                     </div>
                   </TabsContent>
                 </Tabs>
