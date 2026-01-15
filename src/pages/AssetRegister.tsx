@@ -26,6 +26,8 @@ import {
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { demoDataCache } from "@/contexts/UploadContext";
+import { isDemoVideo, convertToAssets } from "@/services/demoDataService";
 
 interface Asset {
   _id: string;
@@ -175,6 +177,18 @@ export default function AssetRegister() {
         const videoId = typeof video._id === 'object' && video._id.$oid
           ? video._id.$oid
           : String(video._id);
+
+        // Check if this is a demo video with cached data
+        const demoKey = isDemoVideo(video.title || '');
+        const cachedDemoData = demoDataCache.get(videoId);
+
+        if (cachedDemoData) {
+          // Use demo data from cache
+          console.log(`Using cached demo data for video ${videoId}: ${cachedDemoData.totalDetections} detections`);
+          const demoAssets = convertToAssets(cachedDemoData, video.route_id || 0, surveyId);
+          assetsFromMetadata.push(...demoAssets as Asset[]);
+          continue;
+        }
 
         try {
           const metadataResp = await api.videos.getMetadata(videoId);
