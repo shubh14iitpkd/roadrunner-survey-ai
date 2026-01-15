@@ -2,12 +2,13 @@ import { useState, useEffect } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Upload, Play, CheckCircle, Clock, AlertCircle, Video, Cloud, FileVideo, Database, TrendingUp, Calendar, MapPin, Loader2, Trash2, X } from "lucide-react";
+import { Upload, Play, CheckCircle, Clock, AlertCircle, Video, Cloud, FileVideo, Database, TrendingUp, Calendar, MapPin, Loader2, Trash2, X, Map } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
+import GpxMiniMap from "@/components/GpxMiniMap";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -36,6 +37,7 @@ import { set } from "date-fns";
 import { LibraryVideoItem } from "@/contexts/UploadContext";
 
 export default function SurveyUpload() {
+  const navigate = useNavigate();
   const { videos, isUploading, uploadFiles, uploadFromLibrary, uploadGpxForVideo, processWithAI, resetVideoStatus } = useUpload();
   const [roads, setRoads] = useState<any[]>([]);
   const [selectedRoute, setSelectedRoute] = useState<string>("");
@@ -501,7 +503,7 @@ export default function SurveyUpload() {
                       <th className="text-left p-4 font-semibold text-sm">Video File</th>
                       <th className="text-left p-4 font-semibold text-sm">Survey Date</th>
                       <th className="text-left p-4 font-semibold text-sm">Surveyor</th>
-                      <th className="text-left p-4 font-semibold text-sm">GPX File</th>
+                      <th className="text-left p-4 font-semibold text-sm">GPS Route</th>
                       <th className="text-left p-4 font-semibold text-sm">Progress / Action</th>
                       <th className="text-left p-4 font-semibold text-sm">Status</th>
                       <th className="text-left p-4 font-semibold text-sm">Delete</th>
@@ -571,16 +573,16 @@ export default function SurveyUpload() {
                           <td className="p-4 text-sm">{video.surveyorName}</td>
                           <td className="p-4">
                             {video.gpxFile ? (
-                              <Link to={`/gis?id=${video.routeId}`} className="h-3 w-3">
-                                <Badge variant="secondary" className="gap-1.5 text-xs font-medium bg-green-50 dark:bg-green-950/30 text-green-700 dark:text-green-400 border-green-200 dark:border-green-800">
-                                  <MapPin className="h-3 w-3" />
-                                  Yes
-                                </Badge>
-                              </Link>
+                              <GpxMiniMap 
+                                gpxUrl={`${API_BASE}/gpx_files/${video.gpxFile}`}
+                                className="w-24 h-16"
+                                onMapClick={() => navigate(`/gis?id=${video.routeId}`)}
+                              />
                             ) : (
-                              <Badge variant="secondary" className="gap-1.5 text-xs font-medium bg-red-50 dark:bg-red-950/30 text-red-700 dark:text-red-400 border-red-200 dark:border-red-800">
-                                No
-                              </Badge>
+                              <div className="w-24 h-16 rounded-lg bg-muted/30 border border-dashed border-muted-foreground/30 flex flex-col items-center justify-center">
+                                <MapPin className="h-4 w-4 text-muted-foreground/50" />
+                                <span className="text-[10px] text-muted-foreground/50 mt-0.5">No GPS</span>
+                              </div>
                             )}
                           </td>
                           <td className="p-4">
@@ -679,6 +681,17 @@ export default function SurveyUpload() {
                                   <Link to={`/assets?route_id=${video.routeId}`}>
                                     <Database className="h-3 w-3 mr-1.5" />
                                     Reports
+                                  </Link>
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  asChild
+                                  className="h-8 border-blue-300 dark:border-blue-800 text-blue-700 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/30"
+                                >
+                                  <Link to={`/gis?id=${video.routeId}`}>
+                                    <Map className="h-3 w-3 mr-1.5" />
+                                    Map
                                   </Link>
                                 </Button>
                                 <Button
