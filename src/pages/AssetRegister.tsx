@@ -8,7 +8,7 @@ import {
   FileText, ArrowLeft, Calendar, User, Layers, Map, Package, BarChart3, PieChart,
   ChevronLeft, ChevronRight
 } from "lucide-react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import {
   Select,
   SelectContent,
@@ -65,12 +65,16 @@ interface Road {
 }
 
 export default function AssetRegister() {
+  const [searchParams] = useSearchParams();
+  const routeIdFromUrl = searchParams.get('route_id');
+  
   const [searchQuery, setSearchQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [assets, setAssets] = useState<Asset[]>([]);
   const [surveys, setSurveys] = useState<Survey[]>([]);
   const [roads, setRoads] = useState<Road[]>([]);
   const [selectedSurveyId, setSelectedSurveyId] = useState<string | null>(null);
+  const [selectedRouteId, setSelectedRouteId] = useState<string | null>(routeIdFromUrl);
   const [isDetailDialogOpen, setIsDetailDialogOpen] = useState(false);
   const [detailAssets, setDetailAssets] = useState<Asset[]>([]);
   const [filterCategory, setFilterCategory] = useState<string>("all");
@@ -82,6 +86,21 @@ export default function AssetRegister() {
   useEffect(() => {
     setCurrentPage(1);
   }, [filterCategory, filterCondition, detailAssets]);
+
+  // Update selectedRouteId if URL changes
+  useEffect(() => {
+    setSelectedRouteId(routeIdFromUrl);
+  }, [routeIdFromUrl]);
+
+  // Auto-load survey assets when route_id is in URL
+  useEffect(() => {
+    if (routeIdFromUrl && !loading && surveys.length > 0) {
+      const matchingSurvey = surveys.find(s => s.route_id.toString() === routeIdFromUrl);
+      if (matchingSurvey) {
+        loadSurveyAssets(matchingSurvey._id);
+      }
+    }
+  }, [routeIdFromUrl, loading, surveys]);
 
   // Load initial data
   useEffect(() => {
@@ -242,6 +261,11 @@ export default function AssetRegister() {
 
   // Filter enriched roads
   const filteredRoads = enrichedRoads.filter((road) => {
+    // If route_id is specified in URL, only show that road
+    if (selectedRouteId && road.route_id.toString() !== selectedRouteId) {
+      return false;
+    }
+    
     const matchesSearch =
       road.roadName.toLowerCase().includes(searchQuery.toLowerCase()) ||
       road.route_id.toString().includes(searchQuery.toLowerCase()) ||
@@ -348,16 +372,45 @@ export default function AssetRegister() {
           </Card>
         </div>
 
-        {/* Search */}
+        {/* Search & Filters */}
         <Card className="p-4 shadow-elevated border-0 gradient-card animate-fade-in">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
-            <Input
-              placeholder="Search by route ID, road name, or surveyor..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-11 h-12"
-            />
+          <div className="flex flex-col md:flex-row gap-4">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
+              <Input
+                placeholder="Search by route ID, road name, or surveyor..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-11 h-12"
+              />
+            </div>
+            <div className="w-full md:w-64">
+              <Select 
+                value={selectedRouteId || "all"} 
+                onValueChange={(val) => setSelectedRouteId(val === "all" ? null : val)}
+              >
+                <SelectTrigger className="h-12">
+                  <SelectValue placeholder="Filter by Route" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Routes</SelectItem>
+                  {roads.map((road) => (
+                    <SelectItem key={road.route_id} value={road.route_id.toString()}>
+                      #{road.route_id} - {road.road_name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            {selectedRouteId && (
+              <Button 
+                variant="outline" 
+                onClick={() => setSelectedRouteId(null)}
+                className="h-12"
+              >
+                Clear Filter
+              </Button>
+            )}
           </div>
         </Card>
 
