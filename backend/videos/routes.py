@@ -1,3 +1,4 @@
+from services.MultiEndpointSageMaker import MultiEndpointSageMaker
 import pymongo
 import os
 import time
@@ -471,13 +472,14 @@ def process_video_with_ai(video_id: str):
 
     # Initialize processor and check health FIRST (Synchronous check)
     from services.sagemaker_processor import SageMakerVideoProcessor
-    processor = SageMakerVideoProcessor()
-    is_healthy, error_msg = processor.check_endpoint_health()
+    # processor = SageMakerVideoProcessor()
+    processor = MultiEndpointSageMaker()
+    processor.check_endpoints_health()
     
-    if not is_healthy:
-        return jsonify({
-            "error": f"SageMaker Error: {error_msg}. Processing aborted to prevent local overload."
-        }), 400
+    # if not is_healthy:
+    #     return jsonify({
+    #         "error": f"SageMaker Error: {error_msg}. Processing aborted to prevent local overload."
+    #     }), 400
 
     # Update status to processing
     db.videos.update_one(
@@ -530,7 +532,7 @@ def process_video_with_ai(video_id: str):
                 print(f"[PROCESS] Starting SageMaker processing for video {video_id}")
 
                 # Initialize SageMaker processor
-                processor = SageMakerVideoProcessor()
+                processor = MultiEndpointSageMaker() #SageMakerVideoProcessor()
 
                 # Get MongoDB client directly (not using get_db() to avoid Flask context issues in callback)
                 from pymongo import MongoClient

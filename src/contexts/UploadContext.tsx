@@ -116,14 +116,13 @@ export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             try {
                 const [videosResp, surveysResp] = await Promise.all([
                     api.videos.list(),
-                    api.Surveys.list(),
+                    api.Surveys.list({ latest_only: false }),
                 ]);
 
                 if (cancelled) return;
 
                 const videoItems = videosResp.items as any[];
                 const surveyItems = surveysResp.items as any[];
-
                 // Helper to extract string from MongoDB ObjectId
                 const getIdString = (id: any): string => {
                     if (!id) return '';
