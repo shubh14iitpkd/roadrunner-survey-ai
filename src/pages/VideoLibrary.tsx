@@ -499,91 +499,96 @@ export default function VideoLibrary() {
             <DialogTitle className="text-2xl font-bold">Video Viewer</DialogTitle>
           </DialogHeader>
 
-          {/* Side-by-side Video Display */}
-          <div className={playerAnnotatedSrc ? "grid grid-cols-2 gap-4 p-6 pt-0 h-[calc(90vh-100px)]" : "p-6 pt-0 h-[calc(90vh-100px)]"}>
+          {/* Side-by-side Video Display - Always 2 columns */}
+          <div className="grid grid-cols-2 gap-4 p-6 pt-0 h-[calc(90vh-100px)]">
             {/* Left: Original Video */}
-            {playerSrc && (
-              <div className="space-y-3 flex flex-col h-full">
-                <Card className="p-4 gradient-card border-0">
-                  <div className="flex items-center justify-between">
-                    <h3 className="font-semibold text-lg">Original Survey Video</h3>
-                    <Badge variant="outline">Raw Footage</Badge>
-                  </div>
-                  <p className="text-sm text-muted-foreground mt-1">Unprocessed video from survey</p>
-                  {/* Spacer to match height if categories exist on right */}
-                  {Object.keys(playerCategoryVideos).length > 0 && <div className="mt-3 min-h-[32px]"></div>}
-                </Card>
+            <div className="space-y-3 flex flex-col h-full">
+              <Card className="p-4 gradient-card border-0">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-semibold text-lg">Original Survey Video</h3>
+                  <Badge variant="outline">Raw Footage</Badge>
+                </div>
+                <p className="text-sm text-muted-foreground mt-1">Unprocessed video from survey</p>
+                {/* Spacer to match height if categories exist on right */}
+                {Object.keys(playerCategoryVideos).length > 0 && <div className="mt-3 min-h-[32px]"></div>}
+              </Card>
 
-                <Card className="flex-1 overflow-hidden gradient-card border-0 flex items-center justify-center min-h-0">
-                  <div className="relative w-full h-full">
+              <Card className="flex-1 overflow-hidden gradient-card border-0 flex items-center justify-center min-h-0">
+                <div className="relative w-full h-full">
+                  {playerSrc ? (
                     <video
                       key={playerSrc}
                       src={playerSrc}
                       controls
                       className="absolute inset-0 w-full h-full object-contain rounded-lg"
                     />
-                  </div>
-                </Card>
-
-                <div className="flex gap-2">
-                  <Button size="sm" variant="outline" className="flex-1 gap-2" asChild>
-                    <a href={playerSrc} download>
-                      <Download className="h-4 w-4" />
-                      Download Original
-                    </a>
-                  </Button>
-                </div>
-              </div>
-            )}
-
-            {/* Right: AI Annotated Video */}
-            {(playerAnnotatedSrc || Object.keys(playerCategoryVideos).length > 0) && (
-              <div className="space-y-3 flex flex-col h-full">
-                <Card className="p-4 gradient-card border-0">
-                  <div className="flex items-center justify-between">
-                    <h3 className="font-semibold text-lg">AI Annotated Video</h3>
-                    <Badge className="bg-gradient-to-r from-blue-500 to-purple-500">AI Processed</Badge>
-                  </div>
-                  <p className="text-sm text-muted-foreground mt-1">Object detection with bounding boxes</p>
-
-                  {/* Category Buttons */}
-                  {Object.keys(playerCategoryVideos).length > 0 && (
-                    <div className="flex flex-wrap gap-2 mt-3 min-h-[32px]">
-                      {Object.keys(playerCategoryVideos).sort().map(cat => (
-                        <Button
-                          key={cat}
-                          size="sm"
-                          variant={activeCategory === cat ? "default" : "outline"}
-                          className={`text-xs h-7 ${activeCategory === cat ? "bg-blue-600 text-white" : ""}`}
-                          onClick={() => {
-                            const videoEl = document.getElementById('annotated-video-player') as HTMLVideoElement;
-                            const currentTime = videoEl ? videoEl.currentTime : 0;
-                            const isPlaying = videoEl ? !videoEl.paused : false;
-
-                            setActiveCategory(cat);
-                            setPlayerAnnotatedSrc(playerCategoryVideos[cat]);
-
-                            // Restore state after render
-                            requestAnimationFrame(() => {
-                              const newVideoEl = document.getElementById('annotated-video-player') as HTMLVideoElement;
-                              if (newVideoEl) {
-                                newVideoEl.onloadedmetadata = () => {
-                                  newVideoEl.currentTime = currentTime;
-                                  if (isPlaying) newVideoEl.play().catch(() => { });
-                                };
-                              }
-                            });
-                          }}
-                        >
-                          {CATEGORY_LABELS[cat] || cat}
-                        </Button>
-                      ))}
+                  ) : (
+                    <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
+                      <VideoIcon className="h-16 w-16 mb-2" />
+                      <p>No video available</p>
                     </div>
                   )}
-                </Card>
+                </div>
+              </Card>
 
-                <Card className="flex-1 overflow-hidden gradient-card border-0 flex items-center justify-center min-h-0">
-                  <div className="relative w-full h-full">
+              <div className="flex gap-2">
+                <Button size="sm" variant="outline" className="flex-1 gap-2" asChild disabled={!playerSrc}>
+                  <a href={playerSrc} download>
+                    <Download className="h-4 w-4" />
+                    Download Original
+                  </a>
+                </Button>
+              </div>
+            </div>
+
+            {/* Right: AI Annotated Video */}
+            <div className="space-y-3 flex flex-col h-full">
+              <Card className="p-4 gradient-card border-0">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-semibold text-lg">AI Annotated Video</h3>
+                  <Badge className="bg-gradient-to-r from-blue-500 to-purple-500">AI Processed</Badge>
+                </div>
+                <p className="text-sm text-muted-foreground mt-1">Object detection with bounding boxes</p>
+
+                {/* Category Buttons */}
+                {Object.keys(playerCategoryVideos).length > 0 && (
+                  <div className="flex flex-wrap gap-2 mt-3 min-h-[32px]">
+                    {Object.keys(playerCategoryVideos).sort().map(cat => (
+                      <Button
+                        key={cat}
+                        size="sm"
+                        variant={activeCategory === cat ? "default" : "outline"}
+                        className={`text-xs h-7 ${activeCategory === cat ? "bg-blue-600 text-white" : ""}`}
+                        onClick={() => {
+                          const videoEl = document.getElementById('annotated-video-player') as HTMLVideoElement;
+                          const currentTime = videoEl ? videoEl.currentTime : 0;
+                          const isPlaying = videoEl ? !videoEl.paused : false;
+
+                          setActiveCategory(cat);
+                          setPlayerAnnotatedSrc(playerCategoryVideos[cat]);
+
+                          // Restore state after render
+                          requestAnimationFrame(() => {
+                            const newVideoEl = document.getElementById('annotated-video-player') as HTMLVideoElement;
+                            if (newVideoEl) {
+                              newVideoEl.onloadedmetadata = () => {
+                                newVideoEl.currentTime = currentTime;
+                                if (isPlaying) newVideoEl.play().catch(() => { });
+                              };
+                            }
+                          });
+                        }}
+                      >
+                        {CATEGORY_LABELS[cat] || cat}
+                      </Button>
+                    ))}
+                  </div>
+                )}
+              </Card>
+
+              <Card className="flex-1 overflow-hidden gradient-card border-0 flex items-center justify-center min-h-0">
+                <div className="relative w-full h-full">
+                  {playerAnnotatedSrc ? (
                     <video
                       id="annotated-video-player"
                       key={playerAnnotatedSrc}
@@ -594,26 +599,24 @@ export default function VideoLibrary() {
                         console.error('[VideoLibrary] Error loading annotated video:', playerAnnotatedSrc);
                       }}
                     />
-                  </div>
-                </Card>
-
-                <div className="flex gap-2">
-                  <Button size="sm" variant="outline" className="flex-1 gap-2" asChild>
-                    <a href={playerAnnotatedSrc} download>
-                      <Download className="h-4 w-4" />
-                      Download Annotated
-                    </a>
-                  </Button>
+                  ) : (
+                    <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
+                      <VideoIcon className="h-16 w-16 mb-2" />
+                      <p>No AI processed video available</p>
+                    </div>
+                  )}
                 </div>
-              </div>
-            )}
+              </Card>
 
-            {/* Fallback if no videos available */}
-            {!playerAnnotatedSrc && !playerSrc && (
-              <div className="text-center p-8 col-span-2">
-                <p className="text-muted-foreground">No video available</p>
+              <div className="flex gap-2">
+                <Button size="sm" variant="outline" className="flex-1 gap-2" asChild disabled={!playerAnnotatedSrc}>
+                  <a href={playerAnnotatedSrc} download>
+                    <Download className="h-4 w-4" />
+                    Download Annotated
+                  </a>
+                </Button>
               </div>
-            )}
+            </div>
           </div>
         </DialogContent>
       </Dialog>
