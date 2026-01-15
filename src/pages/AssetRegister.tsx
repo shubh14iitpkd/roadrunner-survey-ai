@@ -100,16 +100,20 @@ export default function AssetRegister() {
   useEffect(() => {
     if (routeIdFromUrl && !loading && surveys.length > 0) {
       const matchingSurvey = surveys.find(s => s.route_id.toString() === routeIdFromUrl);
-      if (matchingSurvey) {
+      if (matchingSurvey && matchingSurvey._id !== selectedSurveyId) {
         loadSurveyAssets(matchingSurvey._id);
       }
     }
   }, [routeIdFromUrl, loading, surveys]);
 
-  // Load initial data
+  // Load initial data on mount and when routeIdFromUrl changes (for page reload)
   useEffect(() => {
+    // Reset state on URL change/reload
+    setDetailAssets([]);
+    setSelectedSurveyId(null);
+    setIsDetailDialogOpen(false);
     loadData();
-  }, []);
+  }, [routeIdFromUrl]);
 
   const loadData = async () => {
     try {
