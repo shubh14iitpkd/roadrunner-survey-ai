@@ -59,7 +59,60 @@ export default function SurveyUpload() {
   // Video player dialog state
   const [showVideoPlayer, setShowVideoPlayer] = useState(false);
   const [selectedVideo, setSelectedVideo] = useState<VideoFile | null>(null);
+  const [playerOriginalSrc, setPlayerOriginalSrc] = useState<string>("");
+  const [playerAnnotatedSrc, setPlayerAnnotatedSrc] = useState<string>("");
+  const [playerCategoryVideos, setPlayerCategoryVideos] = useState<Record<string, string>>({});
+  const [activeCategory, setActiveCategory] = useState<string>("");
   // isUploading state removed (using context)
+
+  // Function to open video player with category data
+  const openVideoPlayer = async (video: VideoFile) => {
+    setSelectedVideo(video);
+    setPlayerOriginalSrc(video.backendId ? `${API_BASE}/api/videos/${video.backendId}/stream` : "");
+    setPlayerAnnotatedSrc("");
+    setPlayerCategoryVideos({});
+    setActiveCategory("");
+    setShowVideoPlayer(true);
+
+    // Fetch video data to get category_videos if completed
+    if (video.backendId && video.status === "completed") {
+      try {
+        const videoData = await api.videos.get(video.backendId);
+        if (videoData.category_videos) {
+          const catVideos: Record<string, string> = {};
+          Object.entries(videoData.category_videos).forEach(([k, val]) => {
+            const path = val as string;
+            catVideos[k] = path.startsWith('http') ? path : `${API_BASE}${path}`;
+          });
+          setPlayerCategoryVideos(catVideos);
+          // Set first category as active by default
+          const firstCat = Object.keys(catVideos).sort()[0];
+          if (firstCat) {
+            setActiveCategory(firstCat);
+            setPlayerAnnotatedSrc(catVideos[firstCat]);
+          }
+        } else if (videoData.annotated_video_url) {
+          const url = videoData.annotated_video_url.startsWith('http')
+            ? videoData.annotated_video_url
+            : `${API_BASE}${videoData.annotated_video_url}`;
+          setPlayerAnnotatedSrc(url);
+        }
+      } catch (err) {
+        console.error("Failed to fetch video category data:", err);
+      }
+    }
+  };
+
+  const CATEGORY_LABELS: Record<string, string> = {
+    "corridor_fence": "Corridor Fence",
+    "corridor_pavement": "Pavement",
+    "corridor_structure": "Structures",
+    "directional_signage": "Signage",
+    "its": "ITS",
+    "roadway_lighting": "Lighting",
+    "oia": "OIA",
+    "default": "Default"
+  };
 
   // Load roads from API
   useEffect(() => {
@@ -603,10 +656,7 @@ export default function SurveyUpload() {
                               {video.thumbnailUrl ? (
                                 <div
                                   className="w-20 h-14 rounded-lg overflow-hidden shadow-sm border border-border bg-muted cursor-pointer hover:ring-2 hover:ring-primary transition-all"
-                                  onClick={() => {
-                                    setSelectedVideo(video);
-                                    setShowVideoPlayer(true);
-                                  }}
+                                  onClick={() => openVideoPlayer(video)}
                                 >
                                   <img
                                     src={`${API_BASE}${video.thumbnailUrl}`}
@@ -620,10 +670,7 @@ export default function SurveyUpload() {
                               ) : (
                                 <div
                                   className="w-20 h-14 rounded-lg overflow-hidden shadow-sm border border-border bg-gradient-to-br from-gray-100 to-gray-200 dark:from-gray-800 dark:to-gray-900 flex items-center justify-center cursor-pointer hover:ring-2 hover:ring-primary transition-all"
-                                  onClick={() => {
-                                    setSelectedVideo(video);
-                                    setShowVideoPlayer(true);
-                                  }}
+                                  onClick={() => openVideoPlayer(video)}
                                 >
                                   <Video className="h-6 w-6 text-gray-400" />
                                 </div>
@@ -784,10 +831,7 @@ export default function SurveyUpload() {
                                   <Button
                                     size="sm"
                                     variant="ghost"
-                                    onClick={() => {
-                                      setSelectedVideo(video);
-                                      setShowVideoPlayer(true);
-                                    }}
+                                    onClick={() => openVideoPlayer(video)}
                                     className="h-7 w-7 p-0 text-purple-600 hover:bg-purple-50"
                                   >
                                     <Video className="h-3 w-3" />
@@ -869,44 +913,110 @@ export default function SurveyUpload() {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Video Player Dialog */}
+      {/* Video Player Dialog - Side by Side View with Category Switching */}
       <Dialog open={showVideoPlayer} onOpenChange={setShowVideoPlayer}>
-        <DialogContent className="max-w-4xl max-h-[90vh] p-0">
+        <DialogContent className="max-w-[95vw] h-[90vh] p-0">
           <DialogHeader className="p-6 pb-4">
             <div className="flex items-center justify-between">
-              <DialogTitle className="text-xl font-bold">
-                {selectedVideo?.name || "Video Player"}
-              </DialogTitle>
-              <Button variant="ghost" size="icon" onClick={() => setShowVideoPlayer(false)}>
+              <div>
+                <DialogTitle className="text-xl font-bold">
+                  {selectedVideo?.name || "Video Player"}
+                </DialogTitle>
+                {selectedVideo && (
+                  <p className="text-sm text-muted-foreground mt-1">
+                    Route #{selectedVideo.routeId} • {roads.find(r => r.route_id === selectedVideo.routeId)?.road_name || `Road ${selectedVideo.routeId}`}
+                  </p>
+                )}
+              </div>
+              {/* <Button variant="ghost" size="icon" onClick={() => setShowVideoPlayer(false)}>
                 <X className="h-5 w-5" />
-              </Button>
+              </Button> */}
             </div>
-            {selectedVideo && (
-              <p className="text-sm text-muted-foreground">
-                Route #{selectedVideo.routeId} • {roads.find(r => r.route_id === selectedVideo.routeId)?.road_name || `Road ${selectedVideo.routeId}`}
-              </p>
-            )}
           </DialogHeader>
-          <div className="px-6 pb-6">
-            {selectedVideo?.backendId && (
-              <video
-                key={selectedVideo.backendId}
-                controls
-                autoPlay
-                className="w-full rounded-lg shadow-lg max-h-[60vh]"
-                src={`${API_BASE}/api/videos/${selectedVideo.backendId}/stream`}
-              >
-                Your browser does not support the video tag.
-              </video>
+
+          {/* Side-by-side Video Display */}
+          <div className={playerAnnotatedSrc || Object.keys(playerCategoryVideos).length > 0 ? "grid grid-cols-1 gap-4 p-6 pt-0 h-[calc(90vh-120px)]" : "p-6 pt-0 h-[calc(90vh-120px)]"}>
+            {/* Right: AI Annotated Video */}
+            {(playerAnnotatedSrc || Object.keys(playerCategoryVideos).length > 0) && (
+              <div className="space-y-3 flex flex-col h-full">
+                <Card className="p-4 gradient-card border-0">
+                  {/* <div className="flex items-center justify-between">
+                    <h3 className="font-semibold text-lg">AI Annotated Video</h3>
+                    <Badge className="bg-gradient-to-r from-blue-500 to-purple-500">AI Processed</Badge>
+                  </div> */}
+                  <p className="text-sm text-muted-foreground mt-1">Object detection with bounding boxes</p>
+
+                  {/* Category Buttons */}
+                  {Object.keys(playerCategoryVideos).length > 0 && (
+                    <div className="flex flex-wrap gap-2 mt-3 min-h-[32px]">
+                      {Object.keys(playerCategoryVideos).sort().map(cat => (
+                        <Button
+                          key={cat}
+                          size="sm"
+                          variant={activeCategory === cat ? "default" : "outline"}
+                          className={`text-xs h-7 ${activeCategory === cat ? "bg-blue-600 text-white" : ""}`}
+                          onClick={() => {
+                            const videoEl = document.getElementById('survey-annotated-video-player') as HTMLVideoElement;
+                            const currentTime = videoEl ? videoEl.currentTime : 0;
+                            const isPlaying = videoEl ? !videoEl.paused : false;
+
+                            setActiveCategory(cat);
+                            setPlayerAnnotatedSrc(playerCategoryVideos[cat]);
+
+                            // Restore state after render
+                            requestAnimationFrame(() => {
+                              const newVideoEl = document.getElementById('survey-annotated-video-player') as HTMLVideoElement;
+                              if (newVideoEl) {
+                                newVideoEl.onloadedmetadata = () => {
+                                  newVideoEl.currentTime = currentTime;
+                                  if (isPlaying) newVideoEl.play().catch(() => { });
+                                };
+                              }
+                            });
+                          }}
+                        >
+                          {CATEGORY_LABELS[cat] || cat}
+                        </Button>
+                      ))}
+                    </div>
+                  )}
+                </Card>
+
+                <Card className="flex-1 overflow-hidden gradient-card border-0 flex items-center justify-center min-h-0">
+                  <div className="relative w-full h-full">
+                    <video
+                      id="survey-annotated-video-player"
+                      key={playerAnnotatedSrc}
+                      src={playerAnnotatedSrc}
+                      controls
+                      className="absolute inset-0 w-full h-full object-contain rounded-lg"
+                      onError={(e) => {
+                        console.error('[SurveyUpload] Error loading annotated video:', playerAnnotatedSrc);
+                      }}
+                    />
+                  </div>
+                </Card>
+              </div>
             )}
-            {selectedVideo && (
-              <div className="mt-4 flex flex-wrap gap-4 text-sm text-muted-foreground">
-                <span><strong>Surveyor:</strong> {selectedVideo.surveyorName}</span>
-                <span><strong>Date:</strong> {selectedVideo.surveyDate}</span>
-                <span><strong>Size:</strong> {(selectedVideo.size / 1024 / 1024).toFixed(1)} MB</span>
+
+            {/* Fallback if no annotated video and original not already shown*/}
+            {!playerAnnotatedSrc && Object.keys(playerCategoryVideos).length === 0 && playerOriginalSrc && (
+              <div className="text-center p-8 flex flex-col items-center justify-center">
+                <p className="text-muted-foreground">No AI processed video available yet</p>
+                <p className="text-sm text-muted-foreground mt-1">Process this video with AI to see annotated results</p>
               </div>
             )}
           </div>
+
+          {/* Video Info Footer */}
+          {selectedVideo && (
+            <div className="px-6 pb-4 pt-2 border-t flex flex-wrap gap-4 text-sm text-muted-foreground">
+              <span><strong>Surveyor:</strong> {selectedVideo.surveyorName}</span>
+              <span><strong>Date:</strong> {selectedVideo.surveyDate}</span>
+              <span><strong>Size:</strong> {(selectedVideo.size / 1024 / 1024).toFixed(1)} MB</span>
+              <span><strong>Status:</strong> {selectedVideo.status}</span>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>
