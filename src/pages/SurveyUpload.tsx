@@ -102,9 +102,9 @@ export default function SurveyUpload() {
     // Add file names to uploading list
     const fileNames = files.map(f => f.name);
     setUploadingItems(prev => [...prev, ...fileNames]);
-    
+
     toast.success(`Started uploading ${files.length} video(s) in background`);
-    
+
     // Don't close dialog - let user add more if needed
     // Upload runs in background
     uploadFiles(files, selectedRoute, surveyDate, surveyorName, selectedGpxFile)
@@ -115,7 +115,7 @@ export default function SurveyUpload() {
       .catch(() => {
         setUploadingItems(prev => prev.filter(name => !fileNames.includes(name)));
       });
-    
+
     // Reset file input
     e.target.value = '';
     setSelectedGpxFile(null);
@@ -275,7 +275,7 @@ export default function SurveyUpload() {
                     Upload video and GPX files for road survey processing. You can add multiple videos - they will upload in parallel.
                   </DialogDescription>
                 </DialogHeader>
-                
+
                 {/* Upload Queue Status */}
                 {uploadingItems.length > 0 && (
                   <div className="p-3 rounded-lg bg-primary/5 border border-primary/20">
@@ -463,8 +463,8 @@ export default function SurveyUpload() {
                       </div>
                     </div>
                     <div>
-                      <VideoLibraryUpload 
-                        selectedRoute={selectedRoute} 
+                      <VideoLibraryUpload
+                        selectedRoute={selectedRoute}
                         surveyorName={surveyorName}
                         surveyDate={surveyDate}
                         handleFileSelect={handleLibraryFileSelect}
@@ -473,7 +473,7 @@ export default function SurveyUpload() {
                     </div>
                   </TabsContent>
                 </Tabs>
-                
+
                 {/* Footer with close button */}
                 <div className="flex justify-end pt-4 border-t">
                   <Button variant="outline" onClick={() => setIsUploadDialogOpen(false)}>
@@ -601,7 +601,7 @@ export default function SurveyUpload() {
                           <td className="p-3">
                             <div className="relative group">
                               {video.thumbnailUrl ? (
-                                <div 
+                                <div
                                   className="w-20 h-14 rounded-lg overflow-hidden shadow-sm border border-border bg-muted cursor-pointer hover:ring-2 hover:ring-primary transition-all"
                                   onClick={() => {
                                     setSelectedVideo(video);
@@ -618,7 +618,7 @@ export default function SurveyUpload() {
                                   />
                                 </div>
                               ) : (
-                                <div 
+                                <div
                                   className="w-20 h-14 rounded-lg overflow-hidden shadow-sm border border-border bg-gradient-to-br from-gray-100 to-gray-200 dark:from-gray-800 dark:to-gray-900 flex items-center justify-center cursor-pointer hover:ring-2 hover:ring-primary transition-all"
                                   onClick={() => {
                                     setSelectedVideo(video);
@@ -645,8 +645,8 @@ export default function SurveyUpload() {
                                   Route #{video.routeId}
                                 </span>
                               </div>
-                              <span 
-                                className="text-sm font-medium text-foreground leading-snug line-clamp-2" 
+                              <span
+                                className="text-sm font-medium text-foreground leading-snug line-clamp-2"
                                 title={road?.road_name || `Road ${video.routeId}`}
                               >
                                 {road?.road_name || `Road ${video.routeId}`}
@@ -669,15 +669,16 @@ export default function SurveyUpload() {
                           {/* GPS Mini Map */}
                           <td className="p-3">
                             {video.gpxFile ? (
-                              <GpxMiniMap 
-                                gpxUrl={`${API_BASE}/gpx_files/${video.gpxFile}`}
-                                className="w-16 h-12"
-                                onMapClick={() => navigate(`/gis?id=${video.routeId}`)}
-                              />
+                              <Link to={`/gis?id=${video.routeId}`} className="h-3 w-3">
+                                <Badge variant="secondary" className="gap-1.5 text-xs font-medium bg-green-50 dark:bg-green-950/30 text-green-700 dark:text-green-400 border-green-200 dark:border-green-800">
+                                  <MapPin className="h-3 w-3" />
+                                  Yes
+                                </Badge>
+                              </Link>
                             ) : (
-                              <div className="w-16 h-12 rounded bg-muted/30 border border-dashed border-muted-foreground/30 flex items-center justify-center">
-                                <span className="text-[9px] text-muted-foreground/50">No GPS</span>
-                              </div>
+                              <Badge variant="secondary" className="gap-1.5 text-xs font-medium bg-red-50 dark:bg-red-950/30 text-red-700 dark:text-red-400 border-red-200 dark:border-red-800">
+                                No
+                              </Badge>
                             )}
                           </td>
 

@@ -5,6 +5,7 @@ import base64
 import cv2
 import subprocess
 import numpy as np
+import time
 from pathlib import Path
 from io import BytesIO
 from PIL import Image
@@ -12,6 +13,7 @@ from typing import Dict, List, Tuple, Optional
 import concurrent.futures
 from dotenv import load_dotenv
 from datetime import datetime
+from botocore.config import Config as BotoConfig
 load_dotenv()
 
 class MultiEndpointSageMaker:
@@ -36,15 +38,39 @@ class MultiEndpointSageMaker:
         print(f"[SAGEMAKER] Found Endpoints: {self.endpoints}")
 
         self.region = config.get("region", "ap-south-1")
+        
+        # Configure boto3 with longer timeouts for serverless endpoints (cold starts)
+        boto_config = BotoConfig(
+            connect_timeout=60,
+            read_timeout=120,
+            retries={'max_attempts': 0}  # We handle retries ourselves
+        )
+        
         self.sagemaker_runtime = boto3.client(
             'sagemaker-runtime',
             region_name=self.region,
             aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
-            aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY")
+            aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
+            config=boto_config
         )
 
-        self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=min(7, len(self.endpoint_types)))
-        self.frame_interval = config.get("frame_interval", 30)
+        # Workers for endpoint invocations - conservative to avoid overwhelming endpoints
+        # For serverless endpoints, keep this low (5-8)
+        endpoint_workers = config.get("endpoint_workers", 8)
+        self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=endpoint_workers)
+        
+        # Workers for parallel frame batch processing (keep low for serverless: 2-3)
+        frame_batch_workers = config.get("frame_batch_workers", 3)
+        self.frame_executor = concurrent.futures.ThreadPoolExecutor(max_workers=frame_batch_workers)
+        
+        # Number of frames to process in parallel (keep low for serverless: 2-3)
+        self.frame_batch_size = config.get("frame_batch_size", 3)
+        
+        # Retry configuration
+        self.max_retries = config.get("max_retries", 3)
+        self.retry_base_delay = config.get("retry_base_delay", 2.0)  # seconds
+        
+        self.frame_interval = config.get("frame_interval", 3)
     
     def _load_multi_endpoint_config(self) -> Optional[str]:
         curr_dir = Path(__file__).parent
@@ -127,21 +153,36 @@ class MultiEndpointSageMaker:
         return json.dumps({'image': img_base64})
 
     def _invoke_single_endpoint(self, endpoint_name, payload):
-        try:
-            response = self.sagemaker_runtime.invoke_endpoint(
-                EndpointName=endpoint_name,
-                ContentType='application/json',
-                Body=payload
-            )
+        """
+        Invoke a single SageMaker endpoint with retry logic for robustness.
+        Uses exponential backoff for serverless endpoints that may have cold starts.
+        """
+        last_error = None
+        
+        for attempt in range(self.max_retries + 1):
+            try:
+                response = self.sagemaker_runtime.invoke_endpoint(
+                    EndpointName=endpoint_name,
+                    ContentType='application/json',
+                    Body=payload
+                )
 
-            results = json.loads(response['Body'].read().decode('utf-8'))
-            if not results.get("success"): 
-                print(results)
-            return (endpoint_name, results)
-        except Exception as e:
-            msg = f"AWS Error: {str(e)}"
-            print(f"[MULTI SAGEMAKER] Invoke endpoint error: {msg}")
-            return None
+                results = json.loads(response['Body'].read().decode('utf-8'))
+                if not results.get("success"): 
+                    print(f"[MULTI SAGEMAKER] Endpoint {endpoint_name} returned: {results}")
+                return (endpoint_name, results)
+                
+            except Exception as e:
+                last_error = e
+                if attempt < self.max_retries:
+                    # Exponential backoff: 2s, 4s, 8s...
+                    delay = self.retry_base_delay * (2 ** attempt)
+                    print(f"[MULTI SAGEMAKER] Endpoint {endpoint_name} failed (attempt {attempt + 1}/{self.max_retries + 1}), retrying in {delay}s...")
+                    time.sleep(delay)
+                else:
+                    print(f"[MULTI SAGEMAKER] Endpoint {endpoint_name} failed after {self.max_retries + 1} attempts: {str(e)}")
+        
+        return None
         
     def _get_frame_detections(self, frame):
         payload = self._encode_frame(frame)
@@ -154,11 +195,56 @@ class MultiEndpointSageMaker:
         total = 0
         for future in concurrent.futures.as_completed(future_to_model):
             e_type = future_to_model[future]
-            _, result = future.result()
-            if result:
-                det[e_type] = result.get("detections")
-                total+=len(det[e_type])
+            result = future.result()
+            if result and len(result) == 2:
+                _, res = result
+                if res:
+                    det[e_type] = res.get("detections")
+                    total += len(det[e_type])
         return det, total
+
+    def _process_frame_for_batch(self, frame_data: Tuple[int, np.ndarray, float]) -> Tuple[int, float, Dict, int]:
+        """
+        Process a single frame for batch processing.
+        
+        Args:
+            frame_data: Tuple of (frame_number, frame, timestamp)
+            
+        Returns:
+            Tuple of (frame_number, timestamp, detections, detection_count)
+        """
+        frame_number, frame, timestamp = frame_data
+        det, det_count = self._get_frame_detections(frame)
+        return (frame_number, timestamp, det, det_count, frame)
+
+    def _process_frame_batch(self, frame_batch: List[Tuple[int, np.ndarray, float]]) -> List[Tuple[int, float, Dict, int, np.ndarray]]:
+        """
+        Process a batch of frames in parallel using the frame executor.
+        
+        Args:
+            frame_batch: List of (frame_number, frame, timestamp) tuples
+            
+        Returns:
+            List of (frame_number, timestamp, detections, detection_count, frame) tuples
+        """
+        results = []
+        future_to_frame = {}
+        
+        for frame_data in frame_batch:
+            future = self.frame_executor.submit(self._process_frame_for_batch, frame_data)
+            future_to_frame[future] = frame_data[0]  # Store frame_number for ordering
+        
+        for future in concurrent.futures.as_completed(future_to_frame):
+            try:
+                result = future.result()
+                results.append(result)
+            except Exception as e:
+                frame_num = future_to_frame[future]
+                print(f"[MULTI SAGEMAKER] Error processing frame {frame_num}: {e}")
+        
+        # Sort by frame number to maintain order
+        results.sort(key=lambda x: x[0])
+        return results
 
     def process_video(
         self,
@@ -217,6 +303,13 @@ class MultiEndpointSageMaker:
         processed_count = 0
         detections_list = []
         frame_metadata = []
+        
+        # Buffer for frames to be processed in batches
+        frame_batch = []
+        # Buffer for non-AI frames (frames that don't need SageMaker processing)
+        pending_frames = []  # List of (frame_count, frame) tuples
+
+        print(f"[MULTI SAGEMAKER] Using batch size of {self.frame_batch_size} frames for parallel processing")
 
         try: 
             while frame_count < total_frames:
@@ -227,68 +320,153 @@ class MultiEndpointSageMaker:
                 timestamp = frame_count / fps
 
                 if frame_count % self.frame_interval == 0:
-                    det, det_count = self._get_frame_detections(frame)
+                    # Add frame to batch for AI processing
+                    frame_batch.append((frame_count, frame.copy(), timestamp))
+                    pending_frames.append((frame_count, frame, True))  # True = needs AI processing
                     
-                    # Flatten detections for drawing and storage
-                    flat_detections = self._flatten_detections(det)
-                    
-                    # Draw annotations on frame
-                    annotated_frame = self.draw_detections(frame.copy(), flat_detections)
+                    # Process batch when it reaches the configured size
+                    if len(frame_batch) >= self.frame_batch_size:
+                        # Process batch in parallel
+                        batch_results = self._process_frame_batch(frame_batch)
+                        
+                        # Create a map of frame_number -> detection results
+                        detection_results = {r[0]: (r[2], r[3], r[4]) for r in batch_results}  # frame_num -> (det, count, frame)
+                        
+                        # Process all pending frames in order
+                        for pf_count, pf_frame, needs_ai in pending_frames:
+                            pf_timestamp = pf_count / fps
+                            
+                            if needs_ai and pf_count in detection_results:
+                                det, det_count, original_frame = detection_results[pf_count]
+                                
+                                # Flatten detections for drawing and storage
+                                flat_detections = self._flatten_detections(det)
+                                
+                                # Draw annotations on frame
+                                annotated_frame = self.draw_detections(original_frame.copy(), flat_detections)
 
-                    # Save annotated frame as image
-                    frame_filename = f"frame_{frame_count:06d}_{timestamp:.2f}s.jpg"
-                    frame_path = frames_dir / frame_filename
-                    cv2.imwrite(str(frame_path), annotated_frame)
+                                # Save annotated frame as image
+                                frame_filename = f"frame_{pf_count:06d}_{pf_timestamp:.2f}s.jpg"
+                                frame_path = frames_dir / frame_filename
+                                cv2.imwrite(str(frame_path), annotated_frame)
 
-                    # Store frame metadata
-                    relative_frame_path = f"frames/{frames_identifier}/{video_id}/{frame_filename}"
-                    frame_doc = {
-                        "frame_number": frame_count,
-                        "timestamp": timestamp,
-                        "frame_path": relative_frame_path,
-                        "detections": det,  # Keep original structure with endpoint types
-                        "detections_count": det_count
-                    }
-                    frame_metadata.append(frame_doc)
+                                # Store frame metadata
+                                relative_frame_path = f"frames/{frames_identifier}/{video_id}/{frame_filename}"
+                                frame_doc = {
+                                    "frame_number": pf_count,
+                                    "timestamp": pf_timestamp,
+                                    "frame_path": relative_frame_path,
+                                    "detections": det,
+                                    "detections_count": det_count
+                                }
+                                frame_metadata.append(frame_doc)
 
-                    # Store frame in MongoDB
-                    if db is not None:
-                        mongo_frame_doc = {
-                            "video_id": video_id,
-                            "route_id": route_id,
-                            "survey_id": survey_id,
-                            "frame_number": frame_count,
-                            "timestamp": timestamp,
-                            "frame_path": f"/uploads/{relative_frame_path}",
-                            "detections": det,
-                            "detections_count": det_count,
-                            "created_at": datetime.utcnow().isoformat()
-                        }
-                        try:
-                            db.frames.insert_one(mongo_frame_doc)
-                        except Exception as e:
-                            print(f"[MULTI SAGEMAKER] Warning: Failed to store frame in MongoDB: {e}")
+                                # Store frame in MongoDB
+                                if db is not None:
+                                    mongo_frame_doc = {
+                                        "video_id": video_id,
+                                        "route_id": route_id,
+                                        "survey_id": survey_id,
+                                        "frame_number": pf_count,
+                                        "timestamp": pf_timestamp,
+                                        "frame_path": f"/uploads/{relative_frame_path}",
+                                        "detections": det,
+                                        "detections_count": det_count,
+                                        "created_at": datetime.utcnow().isoformat()
+                                    }
+                                    try:
+                                        db.frames.insert_one(mongo_frame_doc)
+                                    except Exception as e:
+                                        print(f"[MULTI SAGEMAKER] Warning: Failed to store frame in MongoDB: {e}")
 
-                    # Write annotated frame to output video
-                    try:
-                        ffmpeg_process.stdin.write(annotated_frame.tobytes())
-                    except Exception as e:
-                        print(f"[MULTI SAGEMAKER] Error writing frame to FFmpeg: {e}")
+                                # Write annotated frame to output video
+                                try:
+                                    ffmpeg_process.stdin.write(annotated_frame.tobytes())
+                                except Exception as e:
+                                    print(f"[MULTI SAGEMAKER] Error writing frame to FFmpeg: {e}")
 
-                    detections_list.extend(flat_detections)
-                    processed_count += 1
-
-                    if progress_callback:
-                        progress = int((frame_count / total_frames) * 100)
-                        progress_callback(progress, f"Processing frame {frame_count}/{total_frames}")
+                                detections_list.extend(flat_detections)
+                                processed_count += 1
+                            else:
+                                # Write original frame to output video
+                                try:
+                                    ffmpeg_process.stdin.write(pf_frame.tobytes())
+                                except Exception as e:
+                                    print(f"[MULTI SAGEMAKER] Error writing frame to FFmpeg: {e}")
+                        
+                        # Clear buffers
+                        frame_batch = []
+                        pending_frames = []
+                        
+                        if progress_callback:
+                            progress = int((frame_count / total_frames) * 100)
+                            progress_callback(progress, f"Processed batch up to frame {frame_count}/{total_frames}")
                 else:
-                    # Write original frame to output video
-                    try:
-                        ffmpeg_process.stdin.write(frame.tobytes())
-                    except Exception as e:
-                        print(f"[MULTI SAGEMAKER] Error writing frame to FFmpeg: {e}")
+                    # Non-AI frame - add to pending for ordered writing
+                    pending_frames.append((frame_count, frame, False))  # False = no AI processing
 
                 frame_count += 1
+            
+            # Process remaining frames in the last batch
+            if frame_batch:
+                batch_results = self._process_frame_batch(frame_batch)
+                detection_results = {r[0]: (r[2], r[3], r[4]) for r in batch_results}
+                
+                for pf_count, pf_frame, needs_ai in pending_frames:
+                    pf_timestamp = pf_count / fps
+                    
+                    if needs_ai and pf_count in detection_results:
+                        det, det_count, original_frame = detection_results[pf_count]
+                        
+                        flat_detections = self._flatten_detections(det)
+                        annotated_frame = self.draw_detections(original_frame.copy(), flat_detections)
+
+                        frame_filename = f"frame_{pf_count:06d}_{pf_timestamp:.2f}s.jpg"
+                        frame_path = frames_dir / frame_filename
+                        cv2.imwrite(str(frame_path), annotated_frame)
+
+                        relative_frame_path = f"frames/{frames_identifier}/{video_id}/{frame_filename}"
+                        frame_doc = {
+                            "frame_number": pf_count,
+                            "timestamp": pf_timestamp,
+                            "frame_path": relative_frame_path,
+                            "detections": det,
+                            "detections_count": det_count
+                        }
+                        frame_metadata.append(frame_doc)
+
+                        if db is not None:
+                            mongo_frame_doc = {
+                                "video_id": video_id,
+                                "route_id": route_id,
+                                "survey_id": survey_id,
+                                "frame_number": pf_count,
+                                "timestamp": pf_timestamp,
+                                "frame_path": f"/uploads/{relative_frame_path}",
+                                "detections": det,
+                                "detections_count": det_count,
+                                "created_at": datetime.utcnow().isoformat()
+                            }
+                            try:
+                                db.frames.insert_one(mongo_frame_doc)
+                            except Exception as e:
+                                print(f"[MULTI SAGEMAKER] Warning: Failed to store frame in MongoDB: {e}")
+
+                        try:
+                            ffmpeg_process.stdin.write(annotated_frame.tobytes())
+                        except Exception as e:
+                            print(f"[MULTI SAGEMAKER] Error writing frame to FFmpeg: {e}")
+
+                        detections_list.extend(flat_detections)
+                        processed_count += 1
+                    else:
+                        try:
+                            ffmpeg_process.stdin.write(pf_frame.tobytes())
+                        except Exception as e:
+                            print(f"[MULTI SAGEMAKER] Error writing frame to FFmpeg: {e}")
+                
+                if progress_callback:
+                    progress_callback(100, f"Processed final batch")
 
         finally:
             cap.release()

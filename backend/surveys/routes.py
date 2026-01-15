@@ -153,7 +153,7 @@ def delete_survey(survey_id: str):
         storage_url = video.get("storage_url", "")
         
         # 3. Delete frames associated with this video
-        db.frames.delete_many({"video_id": ObjectId(video_id)})
+        # db.frames.delete_many({"video_id": ObjectId(video_id)})
         
         # 4. Check if video is from library (preserve library files)
         is_library_video = "video_library" in storage_url

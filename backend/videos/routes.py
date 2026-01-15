@@ -333,13 +333,14 @@ def process_video_with_ai(video_id: str):
     Process video with SageMaker endpoint - extracts frames, runs inference, creates annotated video
     This endpoint is non-blocking - processing happens in background thread
     """
+    print("HIT")
     import threading
     from pathlib import Path
     import glob
 
     db = get_db()
     video = db.videos.find_one({"_id": ObjectId(video_id)})
-
+    print("here")
     if not video:
         return jsonify({"error": "Video not found"}), 404
 
@@ -361,13 +362,13 @@ def process_video_with_ai(video_id: str):
     filename_no_ext = os.path.splitext(filename)[0]
     
     annotated_lib_path = upload_root / "annotated_library"
-    
+    print(f"[PROCESS] Looking for annotated files in {annotated_lib_path}")
     # Look for matching annotated files
     # Pattern: *_{filename_no_ext}_annotated_compressed.mp4
     # Example: corridor_fence_000_2025_0817_115147_F_annotated_compressed.mp4
     # where 2025_0817_115147_F is the filename_no_ext
     
-    demo_matches = []
+    # demo_matches = []
     if annotated_lib_path.exists():
         search_pattern = f"*_{filename_no_ext}_annotated_compressed.mp4"
         demo_matches = list(annotated_lib_path.glob(search_pattern))
@@ -736,12 +737,24 @@ def get_video_frame_annotated(video_id: str):
         #     frame = cv2.resize(frame, (width, height))
 
         # sgm = SageMakerVideoProcessor()
-        query = {"video_id": video_id, "frame_number": frame_number}
-        # query = { "frame_number": frame_number}
-        # query = {"route_id": route_id, "frame_number": frame_number}
-        # print(query, "query")
-        frame_db_info = db.frames.find_one(query, sort=[('created_at', pymongo.DESCENDING)])
-        detections = frame_db_info.get("detections", [])
+        # Check if this is a demo video by matching storage_url basename with frame 'key'
+        storage_basename = os.path.splitext(os.path.basename(video_url))[0] if video_url else None
+        
+        # First try to find frame by key (for demo videos)
+        frame_db_info = None
+        print(storage_basename, "storage_basename")
+        if storage_basename:
+            key_query = {"key": storage_basename, "frame_number": frame_number}
+            frame_db_info = db.frames.find_one(key_query, sort=[('created_at', pymongo.DESCENDING)])
+            if frame_db_info:
+                print(f"[DEMO] Found frame by key '{storage_basename}' for frame {frame_number}")
+        
+        # Fall back to video_id-based lookup
+        if not frame_db_info:
+            query = {"video_id": video_id, "frame_number": frame_number}
+            frame_db_info = db.frames.find_one(query, sort=[('created_at', pymongo.DESCENDING)])
+        
+        detections = frame_db_info.get("detections", []) if frame_db_info else []
         annotclasses = request.args.getlist("class")
         # print(frame_db_info, "frame")
         print(f"Annotating frame for class: {annotclasses}")
@@ -786,6 +799,64 @@ def get_video_frame_annotated(video_id: str):
     except Exception as e:
         print(f"Error extracting frame from video {video_id}: {e}")
         return jsonify({"error": f"Failed to extract frame: {str(e)}"}), 500
+
+
+@videos_bp.get("/<video_id>/frames")
+def get_video_annotated_frames(video_id: str):
+    """
+    Fetch all frames for a video (metadata only, no image data).
+    Supports demo videos by matching storage_url basename with frame 'key'.
+    
+    Query parameters:
+    - has_detections: If true, only return frames with detections
+    """
+    db = get_db()
+    video = db.videos.find_one({"_id": ObjectId(video_id)})
+
+    if not video:
+        return jsonify({"error": "Video not found"}), 404
+
+    video_url = video.get("storage_url")
+    
+    # Check if this is a demo video by matching storage_url basename with frame 'key'
+    storage_basename = os.path.splitext(os.path.basename(video_url))[0] if video_url else None
+    
+    has_detections = request.args.get("has_detections", "").lower() == "true"
+    
+    # First try to find frames by key (for demo videos)
+    frames = []
+    is_demo = False
+    
+    if storage_basename:
+        key_query = {"key": storage_basename}
+        if has_detections:
+            key_query["detections_count"] = {"$gt": 0}
+        
+        frames = list(db.frames.find(key_query).sort("frame_number", 1))
+        if frames:
+            is_demo = True
+            print(f"[DEMO] Found {len(frames)} frames by key '{storage_basename}'")
+    
+    # Fall back to video_id-based lookup
+    if not frames:
+        query = {"video_id": video_id}
+        if has_detections:
+            query["detections_count"] = {"$gt": 0}
+        
+        frames = list(db.frames.find(query).sort("frame_number", 1))
+    
+    # Use bson.json_util for proper serialization
+    return Response(
+        json_util.dumps({
+            "video_id": video_id,
+            "is_demo": is_demo,
+            "items": frames,
+            "total": len(frames)
+        }),
+        mimetype="application/json"
+    )
+
+
 
 @videos_bp.get("/<video_id>/frame")
 def get_video_frame(video_id: str):

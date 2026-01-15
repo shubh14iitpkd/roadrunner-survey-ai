@@ -5,17 +5,37 @@ import { Button } from '@/components/ui/button';
 interface Detection {
   class_name: string;
   confidence: number;
-  bbox: {
-    x1: number;
-    y1: number;
-    x2: number;
-    y2: number;
-  };
+  // Box can be array format: [x1, y1, x2, y2]
+  box?: number[];
+  // Or bbox can be object format: { x1, y1, x2, y2 }
+  bbox?: { x1: number; y1: number; x2: number; y2: number };
+  // Or coordinates object
+  coordinates?: { x1: number; y1: number; x2: number; y2: number };
+}
+
+// Helper function to normalize bounding box to [x1, y1, x2, y2] format
+function getBoundingBox(detection: Detection): [number, number, number, number] | null {
+  // Handle array format: box: [x1, y1, x2, y2]
+  if (detection.box && Array.isArray(detection.box) && detection.box.length >= 4) {
+    return [detection.box[0], detection.box[1], detection.box[2], detection.box[3]];
+  }
+
+  // Handle object format: bbox: { x1, y1, x2, y2 }
+  if (detection.bbox && typeof detection.bbox === 'object') {
+    return [detection.bbox.x1, detection.bbox.y1, detection.bbox.x2, detection.bbox.y2];
+  }
+
+  // Handle coordinates format
+  if (detection.coordinates && typeof detection.coordinates === 'object') {
+    return [detection.coordinates.x1, detection.coordinates.y1, detection.coordinates.x2, detection.coordinates.y2];
+  }
+
+  return null;
 }
 
 interface FramePopupContentProps {
   frameData: {
-    image_data?: string;
+    image_data: string;
     detections: Detection[];
     width: number;
     height: number;
@@ -23,14 +43,25 @@ interface FramePopupContentProps {
     videoId: string;
     timestamp: string;
     baseUrl: string;
-    is_demo?: boolean;
   };
   trackTitle: string;
   pointIndex: number;
   totalPoints: number;
   onClose: () => void;
 }
+function normalizeClassName(input) {
+  if (typeof input !== "string") return "";
 
+  // Remove AssetCondition and anything after it
+  const namePart = input.split("_AssetCondition_")[0];
+
+  return namePart
+    .toLowerCase()
+    .split("_")
+    .filter(Boolean)
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+}
 export default function FramePopupContent({
   frameData,
   trackTitle,
@@ -67,17 +98,25 @@ export default function FramePopupContent({
 
     canvas.width = img.clientWidth;
     canvas.height = img.clientHeight;
-
+    console.log(frameData.detections)
     // Draw all detections
     frameData.detections.forEach((d) => {
+      console.log(frameData.frame_number)
       const isSelected = selectedClass === null || selectedClass === d.class_name;
       const alpha = isSelected ? 1 : 0;
 
+      // Get normalized bounding box (handles both array and object formats)
+      const box = getBoundingBox(d);
+      if (!box) {
+        console.warn('Detection has no valid bounding box:', d);
+        return; // Skip detections without valid bounding boxes
+      }
+
       // Scale coordinates to canvas size
-      const x = d.bbox.x1 * (canvas.width / frameData.width);
-      const y = d.bbox.y1 * (canvas.height / frameData.height);
-      const w = (d.bbox.x2 - d.bbox.x1) * (canvas.width / frameData.width);
-      const h = (d.bbox.y2 - d.bbox.y1) * (canvas.height / frameData.height);
+      const x = box[0] * (canvas.width / frameData.width);
+      const y = box[1] * (canvas.height / frameData.height);
+      const w = (box[2] - box[0]) * (canvas.width / frameData.width);
+      const h = (box[3] - box[1]) * (canvas.height / frameData.height);
 
       const color = colorMap[d.class_name] || '#ffffff';
 
@@ -90,9 +129,10 @@ export default function FramePopupContent({
       // Draw label background
       if (showLabels) {
         ctx.fillStyle = color;
-        const label = `${d.class_name} (${(d.confidence * 100).toFixed(0)}%)`;
+        // const label = `${normalizeClassName(d.class_name)} (${(d.confidence * 100).toFixed(0)}%)`;
+        const label = `${normalizeClassName(d.class_name)}`;
         const textMetrics = ctx.measureText(label);
-        ctx.fillRect(x, y - 20, textMetrics.width + 6, 20);
+        ctx.fillRect(x, y - 20, textMetrics.width + 12, 20);
 
         // Draw label text
         ctx.fillStyle = '#ffffff';
@@ -167,128 +207,59 @@ export default function FramePopupContent({
                 color: selectedClass === detectedClassName ? '#ffffff' : colorMap[detectedClassName],
               }}
             >
-              {detectedClassName} ({classCount?.[detectedClassName] || 0})
+              {normalizeClassName(detectedClassName)} ({classCount?.[detectedClassName] || 0})
             </Button>
           ))}
         </div>
       )}
 
-      {/* Image Container or Demo Summary */}
-      {frameData.is_demo ? (
-        // Demo mode - show detection summary without images
-        <div style={{ 
-          background: 'linear-gradient(135deg, #1e3a5f 0%, #0d1b2a 100%)',
-          padding: '20px',
-          borderRadius: '8px',
-          marginBottom: '10px',
-        }}>
-          <div style={{ 
-            display: 'flex', 
-            alignItems: 'center', 
-            gap: '8px', 
-            marginBottom: '16px',
-            color: '#60a5fa',
-          }}>
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M12 2L2 7l10 5 10-5-10-5z"/>
-              <path d="M2 17l10 5 10-5"/>
-              <path d="M2 12l10 5 10-5"/>
-            </svg>
-            <span style={{ fontWeight: 600 }}>Demo Detection Data</span>
-          </div>
-          
-          {frameData.detections?.length > 0 ? (
-            <div style={{ display: 'grid', gap: '8px' }}>
-              {Object.entries(classCount || {}).map(([className, count]) => (
-                <div key={className} style={{ 
-                  display: 'flex', 
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  background: 'rgba(255,255,255,0.1)',
-                  padding: '10px 14px',
-                  borderRadius: '6px',
-                }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <div style={{
-                      width: '10px',
-                      height: '10px',
-                      borderRadius: '50%',
-                      backgroundColor: colorMap[className],
-                    }}/>
-                    <span style={{ color: '#e2e8f0' }}>{className}</span>
-                  </div>
-                  <Badge 
-                    variant="secondary" 
-                    className="bg-primary/20 text-primary-foreground"
-                  >
-                    {count}
-                  </Badge>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div style={{ textAlign: 'center', color: '#94a3b8', padding: '16px' }}>
-              No detections at this location
-            </div>
-          )}
-          
-          <div style={{ 
-            marginTop: '12px', 
-            fontSize: '11px', 
-            color: '#64748b',
-            textAlign: 'center',
-          }}>
-            Frame #{frameData.frame_number} • {frameData.timestamp}s
+      {/* Image Container */}
+      <div style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
+        <div>
+          <img
+            //   ref={imgRef}
+            src={frameData.image_data}
+            alt="Road frame"
+            className='w-[380px] h-auto block rounded-sm'
+          />
+        </div>
+        <div style={{ position: 'relative', width: '380px', marginBottom: '10px' }}>
+          <img
+            ref={imgRef}
+            src={frameData.image_data}
+            alt="Road frame"
+            className='w-[380px] h-auto block rounded-sm'
+          />
+          <canvas
+            ref={canvasRef}
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              width: '100%',
+              height: '100%',
+              borderRadius: '4px',
+              cursor: 'pointer',
+            }}
+          />
+          <div
+            style={{
+              position: 'absolute',
+              top: '4px',
+              zIndex: 999,
+              right: '4px',
+              background: 'rgba(59, 130, 246, 0.9)',
+              color: 'white',
+              padding: '4px 8px',
+              borderRadius: '3px',
+              fontSize: '10px',
+              fontWeight: 600,
+            }}
+          >
+            AI Detected
           </div>
         </div>
-      ) : (
-        // Regular mode - show images with detections
-        <div style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
-          <div>
-            <img
-              src={frameData.image_data}
-              alt="Road frame"
-              className='w-[380px] h-auto block rounded-sm'
-            />
-          </div>
-          <div style={{ position: 'relative', width: '380px', marginBottom: '10px' }}>
-            <img
-              ref={imgRef}
-              src={frameData.image_data}
-              alt="Road frame"
-              className='w-[380px] h-auto block rounded-sm'
-            />
-            <canvas
-              ref={canvasRef}
-              style={{
-                position: 'absolute',
-                top: 0,
-                left: 0,
-                width: '100%',
-                height: '100%',
-                borderRadius: '4px',
-                cursor: 'pointer',
-              }}
-            />
-            <div
-              style={{
-                position: 'absolute',
-                top: '4px',
-                zIndex: 999,
-                right: '4px',
-                background: 'rgba(59, 130, 246, 0.9)',
-                color: 'white',
-                padding: '4px 8px',
-                borderRadius: '3px',
-                fontSize: '10px',
-                fontWeight: 600,
-              }}
-            >
-              AI Detected
-            </div>
-          </div>
-        </div>
-      )}
+      </div>
 
       {/* Detection Summary */}
       {/* {frameData.detections && frameData.detections.length > 0 && (

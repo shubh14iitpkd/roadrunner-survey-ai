@@ -2,14 +2,12 @@ import { useEffect, useRef, useState } from "react";
 import L, { canvas } from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { api, API_BASE } from "@/lib/api";
-import { demoDataCache } from "@/contexts/UploadContext";
-import { isDemoVideo, type ProcessedVideoData, type Detection, ANNOTATION_CATEGORIES } from "@/services/demoDataService";
 
 // Fix for default marker icons in Leaflet with Vite
 import markerIcon2x from 'leaflet/dist/images/marker-icon-2x.png';
 import markerIcon from 'leaflet/dist/images/marker-icon.png';
 import markerShadow from 'leaflet/dist/images/marker-shadow.png';
-import FrameComparisonPopup from "@/components/FrameComparisonPopup";
+import FramePopupContent from "@/components/FramePopupContent";
 import { createRoot } from "react-dom/client";
 delete (L.Icon.Default.prototype as any)._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -18,34 +16,34 @@ L.Icon.Default.mergeOptions({
   shadowUrl: markerShadow,
 });
 
-// Category colors for marker visualization
-const CATEGORY_COLORS: Record<string, string> = {
-  [ANNOTATION_CATEGORIES.OIA]: '#22c55e',           // Green
-  [ANNOTATION_CATEGORIES.ITS]: '#3b82f6',           // Blue
-  [ANNOTATION_CATEGORIES.ROADWAY_LIGHTING]: '#f59e0b', // Amber
-  [ANNOTATION_CATEGORIES.STRUCTURES]: '#8b5cf6',    // Purple
-  [ANNOTATION_CATEGORIES.DIRECTIONAL_SIGNAGE]: '#ec4899', // Pink
-  [ANNOTATION_CATEGORIES.CORRIDOR_PAVEMENT]: '#06b6d4', // Cyan
-};
-
 type GpxTrack = {
   path: L.LatLngExpression[];
   title: string;
   color: string;
   routeId: number;
   roadName: string;
-  videoId?: string;
-  isDemo?: boolean;
-  demoData?: ProcessedVideoData;
+  videoId: string;
+  videoDuration: number;
 };
 
 // Frame with detection data
 interface FrameWithDetection {
+  frame_number: number;
   timestamp: number;
   latitude?: number;
   longitude?: number;
-  detections: Array<{ class_name: string; confidence: number; condition?: string; category?: string; bbox?: any }>;
+  detections: Record<string, Array<{ class_name: string; confidence: number }>>;
+  detections_count: number;
 }
+
+// Video frames response from API
+interface VideoFramesData {
+  video_id: string;
+  is_demo: boolean;
+  items: FrameWithDetection[];
+  total: number;
+}
+
 
 interface LeafletMapViewProps {
   selectedRoadNames?: string[];
@@ -99,7 +97,7 @@ export default function LeafletMapView({ selectedRoadNames = [], roads = [], sel
   const polylinesRef = useRef<L.Polyline[]>([]);
   const markersRef = useRef<L.Marker[]>([]);
   const [tracks, setTracks] = useState<GpxTrack[]>([]);
-  const [framesWithDetections, setFramesWithDetections] = useState<Map<number, FrameWithDetection[]>>(new Map());
+  const [videoFramesMap, setVideoFramesMap] = useState<Map<string, VideoFramesData>>(new Map());
   const [popupState, setPopupState] = useState<{
     isOpen: boolean;
     frameData: any;
@@ -190,11 +188,6 @@ export default function LeafletMapView({ selectedRoadNames = [], roads = [], sel
             // Find the matching road for this video (for road name and filtering)
             const road = roads.find(r => r.route_id === video.route_id);
             const roadName = road?.road_name || video.title || `Video ${video._id?.$oid || video._id}`;
-            const videoId = video._id?.$oid || video._id;
-
-            // Check if this is a demo video with cached data
-            const demoKey = isDemoVideo(video.title || '');
-            const cachedDemoData = demoDataCache.get(videoId);
 
             const url = `${baseUrl}${video.gpx_file_url}`;
             const path = await fetchAndParseGpx(url);
@@ -203,16 +196,15 @@ export default function LeafletMapView({ selectedRoadNames = [], roads = [], sel
               continue;
             }
 
-            console.log(`Successfully loaded ${path.length} points from video GPX: ${roadName}${demoKey ? ' (DEMO)' : ''}`);
+            console.log(`Successfully loaded ${path.length} points from video GPX: ${roadName}`);
             loadedTracks.push({
               path,
               title: roadName,
               color: colors[i % colors.length],
               routeId: video.route_id,
               roadName: roadName,
-              videoId,
-              isDemo: !!demoKey || !!cachedDemoData,
-              demoData: cachedDemoData,
+              videoId: video._id?.$oid || video._id,
+              videoDuration: video.duration_seconds || 300,
             });
           }
         } catch (err) {
@@ -227,62 +219,27 @@ export default function LeafletMapView({ selectedRoadNames = [], roads = [], sel
     })();
   }, [roads]);
 
-  // Fetch frames with detections for each track's route (or use demo data)
+  // Fetch all frames for each video (supports demo videos with key-based lookup)
   useEffect(() => {
     if (tracks.length === 0) return;
 
     (async () => {
-      const framesMap = new Map<number, FrameWithDetection[]>();
+      const framesMap = new Map<string, VideoFramesData>();
 
       for (const track of tracks) {
         try {
-          // Check if we have demo data for this track
-          if (track.demoData) {
-            // Convert demo detections to frame format
-            const demoFrames: FrameWithDetection[] = [];
-            const detectionsByTimestamp = new Map<number, Detection[]>();
-            
-            // Group detections by timestamp (rounded to nearest second)
-            for (const detection of track.demoData.detections) {
-              const ts = Math.round(detection.timestamp);
-              if (!detectionsByTimestamp.has(ts)) {
-                detectionsByTimestamp.set(ts, []);
-              }
-              detectionsByTimestamp.get(ts)!.push(detection);
-            }
-            
-            // Convert to frame format
-            for (const [timestamp, detections] of detectionsByTimestamp) {
-              const firstDetection = detections[0];
-              demoFrames.push({
-                timestamp,
-                latitude: firstDetection.lat,
-                longitude: firstDetection.lon,
-                detections: detections.map(d => ({
-                  class_name: d.className,
-                  confidence: d.confidence,
-                  condition: d.condition,
-                  category: d.category,
-                })),
-              });
-            }
-            
-            framesMap.set(track.routeId, demoFrames);
-            console.log(`Using ${demoFrames.length} demo frames for route ${track.routeId}`);
-          } else {
-            // Fetch from API
-            const framesResp = await api.frames.withDetections({ route_id: track.routeId, limit: 10000 });
-            if (framesResp?.items) {
-              framesMap.set(track.routeId, framesResp.items);
-            }
+          const framesResp = await api.videos.getAllFrames(track.videoId);
+          if (framesResp) {
+            framesMap.set(track.videoId, framesResp as VideoFramesData);
+            console.log(`Loaded ${framesResp.total} frames for video ${track.videoId} (demo: ${framesResp.is_demo})`);
           }
         } catch (err) {
-          console.error(`Failed to fetch frames for route ${track.routeId}:`, err);
+          console.error(`Failed to fetch frames for video ${track.videoId}:`, err);
         }
       }
 
-      setFramesWithDetections(framesMap);
-      console.log(`Loaded frames with detections for ${framesMap.size} routes`);
+      setVideoFramesMap(framesMap);
+      console.log(`Loaded frames for ${framesMap.size} videos`);
     })();
   }, [tracks]);
 
@@ -312,96 +269,69 @@ export default function LeafletMapView({ selectedRoadNames = [], roads = [], sel
       mapRef.current.fitBounds(bounds, { padding: [50, 50] });
     }
 
-    // Draw dots/markers along the route instead of lines
-    filteredTracks.forEach(async (t) => {
-      const videosResp = await api.videos.list();
-      const video = videosResp.items.find((v: any) => v.route_id === t.routeId);
-      console.log(`Route ${t.routeId}: ${t.path.length} GPS points`);
-      
-      // Get frames with detections for this route
-      const routeFrames = framesWithDetections.get(t.routeId) || [];
+    // Draw dots/markers along the route
+    filteredTracks.forEach((t) => {
+      // Get frames data for this video
+      const videoFramesData = videoFramesMap.get(t.videoId);
+      const frames = videoFramesData?.items || [];
 
-      // For demo videos, show more points (all GPS points for 5-minute video = 300 points)
-      // For non-demo, sample to avoid overcrowding
-      const isDemo = t.isDemo || t.demoData;
-      const samplingRate = isDemo 
-        ? Math.max(1, Math.floor(t.path.length / 150)) // Show ~150 markers for demo
-        : Math.max(1, Math.floor(t.path.length / 100)); // Show ~100 for non-demo
+      console.log(`Track ${t.title}: ${t.path.length} GPX points, ${frames.length} frames`);
 
-      t.path.forEach(async (point, index) => {
+      // Pre-associate GPX points with frame numbers
+      // If more GPX points than frames, extra points use the last frame
+      const getFrameForPoint = (pointIndex: number): FrameWithDetection | null => {
+        if (frames.length === 0) return null;
+
+        // Map point index to frame index proportionally
+        const progress = t.path.length > 1 ? pointIndex / (t.path.length - 1) : 0;
+        let frameIndex = Math.floor(progress * frames.length);
+
+        // Clamp to valid range (use last frame for extra points)
+        frameIndex = Math.min(frameIndex, frames.length - 1);
+
+        return frames[frameIndex];
+      };
+
+      // Sample points along the route (every Nth point to avoid overcrowding)
+      const samplingRate = Math.max(1, Math.floor(t.path.length / 100)); // Show ~100 dots per route
+
+      t.path.forEach((point, index) => {
         // Only show every Nth point to avoid too many markers
         if (index % samplingRate !== 0 && index !== 0 && index !== t.path.length - 1) {
           return;
         }
 
-        // Calculate the timestamp for this point
-        const progress = t.path.length > 1 ? index / (t.path.length - 1) : 0;
-        const videoDuration = video?.duration_seconds || 300;
-        const pointTimestamp = progress * videoDuration;
-
-        // Find detections at this timestamp for coloring and filtering
-        let pointDetections: FrameWithDetection['detections'] = [];
-        
-        if (t.demoData) {
-          // Get demo detections near this timestamp
-          pointDetections = t.demoData.detections
-            .filter(d => Math.abs(d.timestamp - pointTimestamp) < 2)
-            .map(d => ({
-              class_name: d.className,
-              confidence: d.confidence,
-              condition: d.condition,
-              category: d.category,
-            }));
-        } else {
-          // Find closest frame from API data
-          let closestFrame: FrameWithDetection | null = null;
-          let minDiff = Infinity;
-          for (const frame of routeFrames) {
-            const diff = Math.abs(frame.timestamp - pointTimestamp);
-            if (diff < minDiff) {
-              minDiff = diff;
-              closestFrame = frame;
-            }
-          }
-          if (closestFrame) {
-            pointDetections = closestFrame.detections;
-          }
-        }
+        // Get the associated frame for this point
+        const associatedFrame = getFrameForPoint(index);
 
         // Filter based on selectedAssetTypes
         if (selectedAssetTypes.length > 0) {
-          const hasSelectedAssetType = pointDetections.some(detection =>
+          if (!associatedFrame || !associatedFrame.detections) {
+            return; // Skip - no frame data for this point
+          }
+
+          // Flatten detections from Record<string, Detection[]> to Detection[]
+          const allDetections = Object.values(associatedFrame.detections).flat();
+
+          const hasSelectedAssetType = allDetections.some(detection =>
             selectedAssetTypes.includes(detection.class_name)
           );
+
           if (!hasSelectedAssetType) {
-            return; // Skip this marker
+            return; // Skip this marker - doesn't have any of the selected asset types
           }
         }
 
         const latLng = point as L.LatLngTuple;
 
-        // Determine marker color based on detection categories
-        let markerColor = t.color; // Default to track color
-        if (pointDetections.length > 0) {
-          // Use the color of the first detection's category
-          const firstCategory = pointDetections[0]?.category;
-          if (firstCategory && CATEGORY_COLORS[firstCategory]) {
-            markerColor = CATEGORY_COLORS[firstCategory];
-          }
-        }
-
-        // Determine marker size based on number of detections
-        const detectionCount = pointDetections.length;
-        const markerRadius = detectionCount > 5 ? 7 : detectionCount > 2 ? 5 : 4;
-
         // Create circle marker (dot) for each point
         const circleMarker = L.circleMarker(latLng, {
-          radius: markerRadius,
-          fillColor: markerColor,
-          color: '#ffffff', // White border
+          radius: 4,
+          fillColor: t.color,
+          color: '#ffffff',
           weight: 1,
           opacity: 1,
-          fillOpacity: 0.9,
+          fillOpacity: 0.8,
         }).addTo(mapRef.current!);
 
         // Add popup on click with frame image
@@ -409,57 +339,27 @@ export default function LeafletMapView({ selectedRoadNames = [], roads = [], sel
           const baseUrl = API_BASE;
 
           try {
-            if (video && video._id) {
-              const progress = t.path.length > 1 ? index / (t.path.length - 1) : 0;
-              const videoDuration = video.duration_seconds || 60;
-              const timestamp = progress * videoDuration;
-              const video_id_real = video._id.$oid || video._id;
+            // Use the pre-associated frame number for the API call
+            const frameToShow = associatedFrame;
 
-              let frameData: any;
+            if (frameToShow) {
+              // Fetch frame data using frame_number (guaranteed to be valid)
+              const frameData = await api.videos.getFrameWithDetections(
+                t.videoId,
+                undefined, // no timestamp
+                frameToShow.frame_number // use frame_number directly
+              );
 
-              // Check if this track has demo data
-              if (t.demoData) {
-                // Use demo data - find detections closest to this timestamp
-                const nearbyDetections = t.demoData.detections.filter(
-                  d => Math.abs(d.timestamp - timestamp) < 2 // within 2 seconds
-                );
-                
-                // Create frame data for demo with proper bbox format
-                frameData = {
-                  image_data: '', // No image for demo - will show detection summary
-                  detections: nearbyDetections.map(d => ({
-                    class_name: d.className,
-                    confidence: d.confidence,
-                    bbox: {
-                      x: d.bbox.x,      // Keep as percentage (0-100)
-                      y: d.bbox.y,
-                      width: d.bbox.width,
-                      height: d.bbox.height,
-                    },
-                    condition: d.condition,
-                    category: d.category,
-                  })),
-                  width: 1920,
-                  height: 1080,
-                  frame_number: Math.round(timestamp * 30),
-                  is_demo: true,
-                };
-                console.log(`Demo popup at ${timestamp.toFixed(1)}s: ${nearbyDetections.length} detections from ${Object.keys(CATEGORY_COLORS).length} categories`);
-              } else {
-                // Fetch frame data from API
-                frameData = await api.videos.getFrameWithDetections(
-                  video_id_real,
-                  timestamp.toFixed(1)
-                );
-              }
+              let flatDetections: any[] = Object.values(frameData.detections).flat();
+              frameData.detections = flatDetections;
 
-              // Open custom React popup instead of HTML string
+              // Open custom React popup
               setPopupState({
                 isOpen: true,
                 frameData: {
                   ...frameData,
-                  videoId: video_id_real,
-                  timestamp: timestamp.toFixed(1),
+                  videoId: t.videoId,
+                  timestamp: frameToShow.timestamp.toFixed(1),
                   baseUrl,
                 },
                 trackTitle: t.title,
@@ -469,8 +369,8 @@ export default function LeafletMapView({ selectedRoadNames = [], roads = [], sel
 
               // Create a custom Leaflet popup with a container
               const popupContainer = L.popup({
-                maxWidth: 850,
-                minWidth: 800,
+                maxWidth: 780,
+                minWidth: 750,
                 className: 'custom-popup',
               })
                 .setLatLng(latLng)
@@ -483,13 +383,12 @@ export default function LeafletMapView({ selectedRoadNames = [], roads = [], sel
                 if (popupElement) {
                   const root = createRoot(popupElement);
                   root.render(
-                    <FrameComparisonPopup
+                    <FramePopupContent
                       frameData={{
                         ...frameData,
-                        videoId: video_id_real,
-                        timestamp: timestamp.toFixed(1),
+                        videoId: t.videoId,
+                        timestamp: frameToShow.timestamp.toFixed(1),
                         baseUrl,
-                        gpx_point: { lat: latLng[0], lon: latLng[1] },
                       }}
                       trackTitle={t.title}
                       pointIndex={index}
@@ -536,7 +435,7 @@ export default function LeafletMapView({ selectedRoadNames = [], roads = [], sel
 
       markersRef.current.push(startMarker as any);
     });
-  }, [tracks, selectedRoadNames, selectedAssetTypes, framesWithDetections]);
+  }, [tracks, selectedRoadNames, selectedAssetTypes, videoFramesMap]);
 
   return (
     <div

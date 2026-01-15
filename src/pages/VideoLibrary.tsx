@@ -83,7 +83,7 @@ export default function VideoLibrary() {
               catVideos[k] = buildUrl(val as string)!;
             });
           }
-
+          console.log(v)
           return {
             id: videoIdStr,
             title: v.title || `Video ${videoIdStr}`,

@@ -115,6 +115,10 @@ def create_app() -> Flask:
 			# Add headers for better browser compatibility (especially Chromium)
 			response.headers['Accept-Ranges'] = 'bytes'
 			response.headers['Cache-Control'] = 'public, max-age=43200'  # Cache for 12 hours
+			# Add CORS headers for cross-origin requests
+			response.headers['Access-Control-Allow-Origin'] = '*'
+			response.headers['Access-Control-Allow-Methods'] = 'GET, OPTIONS'
+			response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
 
 			return response
 

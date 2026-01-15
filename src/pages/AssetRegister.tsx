@@ -71,7 +71,7 @@ interface Road {
 export default function AssetRegister() {
   const [searchParams] = useSearchParams();
   const routeIdFromUrl = searchParams.get('route_id');
-  
+
   const [searchQuery, setSearchQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [assets, setAssets] = useState<Asset[]>([]);
@@ -281,7 +281,7 @@ export default function AssetRegister() {
     if (selectedRouteId && road.route_id.toString() !== selectedRouteId) {
       return false;
     }
-    
+
     const matchesSearch =
       road.roadName.toLowerCase().includes(searchQuery.toLowerCase()) ||
       road.route_id.toString().includes(searchQuery.toLowerCase()) ||
@@ -401,8 +401,8 @@ export default function AssetRegister() {
               />
             </div>
             <div className="w-full md:w-64">
-              <Select 
-                value={selectedRouteId || "all"} 
+              <Select
+                value={selectedRouteId || "all"}
                 onValueChange={(val) => setSelectedRouteId(val === "all" ? null : val)}
               >
                 <SelectTrigger className="h-12">
@@ -419,8 +419,8 @@ export default function AssetRegister() {
               </Select>
             </div>
             {selectedRouteId && (
-              <Button 
-                variant="outline" 
+              <Button
+                variant="outline"
                 onClick={() => setSelectedRouteId(null)}
                 className="h-12"
               >
@@ -627,7 +627,7 @@ export default function AssetRegister() {
                       })
                     }
                   </TabsList>
-                  
+
                   <Select value={filterCondition} onValueChange={setFilterCondition}>
                     <SelectTrigger className="w-[160px]">
                       <SelectValue placeholder="All Conditions" />
@@ -643,17 +643,17 @@ export default function AssetRegister() {
                 {/* Dynamic Content Based on Selected Category */}
                 {(() => {
                   const selectedCategory = filterCategory;
-                  const categoryAssets = selectedCategory === 'all' 
-                    ? detailAssets 
+                  const categoryAssets = selectedCategory === 'all'
+                    ? detailAssets
                     : detailAssets.filter(a => a.category === selectedCategory);
-                  
+
                   const filteredAssets = categoryAssets.filter(
                     asset => filterCondition === 'all' || asset.condition?.toLowerCase() === filterCondition
                   );
 
                   // Get unique asset types (labels) for this category - use asset_type or type
                   const assetTypes = Array.from(new Set(filteredAssets.map(a => a.asset_type || a.type || a.category).filter(Boolean)));
-                  
+
                   // Calculate stats by type
                   const typeStats = assetTypes.map(type => {
                     const typeAssets = filteredAssets.filter(a => (a.asset_type || a.type || a.category) === type);
@@ -717,7 +717,7 @@ export default function AssetRegister() {
                           <BarChart3 className="h-5 w-5 text-primary dark:text-foreground" />
                           {selectedCategory === 'all' ? 'Asset Types Overview' : `${selectedCategory} - Asset Types`}
                         </h3>
-                        
+
                         {typeStats.length > 0 ? (
                           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                             {typeStats.map(stat => (
@@ -726,25 +726,25 @@ export default function AssetRegister() {
                                   <h4 className="font-semibold text-sm truncate flex-1" title={stat.type}>{stat.type}</h4>
                                   <Badge variant="secondary" className="ml-2 font-bold">{stat.total}</Badge>
                                 </div>
-                                
+
                                 {/* Condition breakdown bar */}
                                 <div className="flex h-3 rounded-full overflow-hidden mb-2">
                                   {stat.good > 0 && (
-                                    <div 
-                                      className="bg-green-500 transition-all" 
+                                    <div
+                                      className="bg-green-500 transition-all"
                                       style={{ width: `${(stat.good / stat.total) * 100}%` }}
                                       title={`Good: ${stat.good}`}
                                     />
                                   )}
                                   {stat.fair > 0 && (
-                                    <div 
-                                      className="bg-amber-500 transition-all" 
+                                    <div
+                                      className="bg-amber-500 transition-all"
                                       style={{ width: `${(stat.fair / stat.total) * 100}%` }}
                                       title={`Fair: ${stat.fair}`}
                                     />
                                   )}
                                 </div>
-                                
+
                                 {/* Condition labels */}
                                 <div className="flex justify-between text-xs text-muted-foreground">
                                   <span className="flex items-center gap-1">
@@ -776,7 +776,7 @@ export default function AssetRegister() {
                             <Badge variant="outline" className="ml-2">{filteredAssets.length} items</Badge>
                           </h3>
                         </div>
-                        
+
                         <div className="overflow-x-auto">
                           <table className="w-full">
                             <thead className="bg-gradient-to-r from-primary/5 via-accent/5 to-primary/5 border-b">

@@ -24,8 +24,8 @@ interface VideoLibraryUploadProps {
   uploadingItems?: string[];
 }
 
-export const VideoLibraryUpload: React.FC<VideoLibraryUploadProps> = ({ 
-  selectedRoute, 
+export const VideoLibraryUpload: React.FC<VideoLibraryUploadProps> = ({
+  selectedRoute,
   surveyorName,
   surveyDate,
   handleFileSelect,
@@ -142,30 +142,28 @@ export const VideoLibraryUpload: React.FC<VideoLibraryUploadProps> = ({
               </div>
             </div>
           )}
-          
+
           <div className="rounded-lg bg-background border border-border">
             <ul className="divide-y">
               {items.map((video, i) => {
                 const isCurrentlyUploading = uploadingItems.includes(video.name);
                 const isClickable = isFormComplete && !isCurrentlyUploading;
-                
+
                 return (
-                  <li 
-                    key={video.name} 
-                    className={`flex items-center justify-between p-3 transition-all ${
-                      isCurrentlyUploading 
+                  <li
+                    key={video.name}
+                    className={`flex items-center justify-between p-3 transition-all ${isCurrentlyUploading
                         ? "bg-primary/5 cursor-default"
                         : isClickable
-                          ? "cursor-pointer hover:bg-primary/5" 
+                          ? "cursor-pointer hover:bg-primary/5"
                           : "cursor-not-allowed opacity-60"
-                    }`} 
+                      }`}
                     onClick={() => isClickable && handleVideoClick(video)}
                   >
                     <div className="flex items-center gap-3 min-w-0">
                       {video.thumb_url ? (
-                        <div className={`w-24 h-16 rounded-lg overflow-hidden shadow-md border bg-muted relative ${
-                          isCurrentlyUploading ? "border-primary" : "border-border"
-                        }`}>
+                        <div className={`w-24 h-16 rounded-lg overflow-hidden shadow-md border bg-muted relative ${isCurrentlyUploading ? "border-primary" : "border-border"
+                          }`}>
                           <img
                             src={`${API_BASE}${video.thumb_url}`}
                             alt={`Thumbnail for ${video.name}`}
@@ -181,9 +179,8 @@ export const VideoLibraryUpload: React.FC<VideoLibraryUploadProps> = ({
                           )}
                         </div>
                       ) : (
-                        <div className={`w-24 h-16 rounded-lg flex items-center justify-center bg-muted border ${
-                          isCurrentlyUploading ? "border-primary" : "border-border"
-                        }`}>
+                        <div className={`w-24 h-16 rounded-lg flex items-center justify-center bg-muted border ${isCurrentlyUploading ? "border-primary" : "border-border"
+                          }`}>
                           {isCurrentlyUploading ? (
                             <Loader2 className="w-6 h-6 text-primary animate-spin" />
                           ) : (
@@ -201,7 +198,7 @@ export const VideoLibraryUpload: React.FC<VideoLibraryUploadProps> = ({
                         <div className="text-xs text-muted-foreground truncate">{video.video_path}</div>
                       </div>
                     </div>
-                    
+
                     {isCurrentlyUploading ? (
                       <div className="ml-2 flex-shrink-0 px-3 py-1.5 text-xs font-medium text-primary bg-primary/10 rounded-md flex items-center gap-1">
                         <Loader2 className="h-3 w-3 animate-spin" />
@@ -215,7 +212,7 @@ export const VideoLibraryUpload: React.FC<VideoLibraryUploadProps> = ({
                   </li>
                 );
               })}
-          </ul>
+            </ul>
           </div>
         </>
       )}

@@ -1,7 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from "react";
 import { toast } from "sonner";
 import { api, API_BASE } from "@/lib/api";
-import { set } from "date-fns";
 import { isDemoVideo, loadDemoData, convertToAssets, type ProcessedVideoData } from "@/services/demoDataService";
 
 export type VideoStatus = "queue" | "uploading" | "uploaded" | "processing" | "completed" | "error" | "failed";
@@ -532,23 +531,30 @@ export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             toast.error("Video not found or not uploaded yet");
             return;
         }
-        
+
         // Check if this is a demo video
         const demoKey = isDemoVideo(video.name);
-        
+
         if (demoKey) {
             // Handle demo video with pre-loaded data
             console.log(`Processing demo video: ${video.name} (key: ${demoKey})`);
-            
+
             try {
                 setVideos((prev) =>
                     prev.map((v) =>
                         v.id === videoId ? { ...v, status: "processing" as VideoStatus, progress: 0 } : v
                     )
                 );
-                
+
+                // Call backend to start processing (backend also handles demo mode)
+                try {
+                    await api.videos.processWithAI(video.backendId);
+                } catch (err) {
+                    console.warn('Backend process call failed, continuing with frontend demo processing:', err);
+                }
+
                 toast.info(`Loading pre-processed AI data for ${video.name}...`);
-                
+
                 // Simulate processing time for demo effect
                 const progressSteps = [10, 25, 45, 65, 80, 95, 100];
                 for (let i = 0; i < progressSteps.length; i++) {
@@ -559,17 +565,17 @@ export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                         )
                     );
                 }
-                
+
                 // Load demo data
                 const demoData = await loadDemoData(demoKey);
-                
+
                 if (demoData) {
                     // Cache the demo data for use in Maps and Reports
                     demoDataCache.set(video.backendId, demoData);
-                    
+
                     // Convert to assets and store (for reports)
                     const assets = convertToAssets(demoData, video.routeId, video.surveyId || '');
-                    
+
                     // Try to bulk insert assets to backend
                     try {
                         await api.assets.bulkInsert(assets);
@@ -577,15 +583,15 @@ export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                     } catch (err) {
                         console.warn('Could not insert demo assets to backend (may already exist):', err);
                     }
-                    
+
                     toast.success(`AI processing completed for ${video.name}! Found ${demoData.totalDetections} detections.`);
-                    
+
                     setVideos((prev) =>
                         prev.map((v) =>
                             v.id === videoId ? { ...v, status: "completed" as VideoStatus, progress: 100 } : v
                         )
                     );
-                    
+
                     // Also update backend status
                     try {
                         await api.videos.updateStatus(video.backendId, { status: "completed", progress: 100 });
@@ -598,7 +604,7 @@ export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             } catch (error: any) {
                 console.error("Error processing demo video:", error);
                 toast.error(`Failed to process: ${error.message}`);
-                
+
                 setVideos((prev) =>
                     prev.map((v) =>
                         v.id === videoId ? { ...v, status: "error" as VideoStatus, progress: 0 } : v
@@ -607,7 +613,7 @@ export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             }
             return;
         }
-        
+
         // Regular video processing via backend
         // console.log("Starting AI processing for video:", videoId, video);
         try {

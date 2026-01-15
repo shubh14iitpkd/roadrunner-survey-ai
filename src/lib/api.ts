@@ -98,6 +98,12 @@ export const api = {
 			apiFetch("/api/videos/library", { method: "POST", body: JSON.stringify({ video_key, video_id, survey_id, route_id, thumb_path }) }),
 		getFrameWithDetections: (video_id: string, timestamp?: number | string, frame_number?: number, width?: number) =>
 			apiFetch(`/api/videos/${video_id}/frame_annotated?${timestamp != null ? `timestamp=${timestamp}` : ""}${frame_number != null ? `&frame_number=${frame_number}` : ""}${width != null ? `&width=${width}` : ""}`),
+		getAllFrames: (video_id: string, has_detections?: boolean) => {
+			const qs = new URLSearchParams();
+			if (has_detections) qs.set("has_detections", "true");
+			const q = qs.toString();
+			return apiFetch(`/api/videos/${video_id}/frames${q ? `?${q}` : ""}`);
+		},
 	},
 	assets: {
 		list: (params?: { survey_id?: string; route_id?: number; category?: string; condition?: string }) => {
