@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Upload, Play, CheckCircle, Clock, AlertCircle, Video, Cloud, FileVideo, Database, TrendingUp, Calendar, MapPin, Loader2, Trash2 } from "lucide-react";
+import { Upload, Play, CheckCircle, Clock, AlertCircle, Video, Cloud, FileVideo, Database, TrendingUp, Calendar, MapPin, Loader2, Trash2, X } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -30,7 +30,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api, API_BASE } from "@/lib/api";
-import { useUpload, VideoStatus } from "@/contexts/UploadContext";
+import { useUpload, VideoStatus, VideoFile } from "@/contexts/UploadContext";
 import VideoLibraryUpload from "@/components/VideoLibraryUpload";
 import { set } from "date-fns";
 import { LibraryVideoItem } from "@/contexts/UploadContext";
@@ -53,6 +53,9 @@ export default function SurveyUpload() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [videoToDelete, setVideoToDelete] = useState<{ id: string; surveyId: string; name: string } | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  // Video player dialog state
+  const [showVideoPlayer, setShowVideoPlayer] = useState(false);
+  const [selectedVideo, setSelectedVideo] = useState<VideoFile | null>(null);
   // isUploading state removed (using context)
 
   // Load roads from API
@@ -517,7 +520,13 @@ export default function SurveyUpload() {
                         >
                           <td className="p-4">
                             {video.thumbnailUrl ? (
-                              <div className="w-24 h-16 rounded-lg overflow-hidden shadow-md border border-border bg-muted">
+                              <div 
+                                className="w-24 h-16 rounded-lg overflow-hidden shadow-md border border-border bg-muted cursor-pointer hover:ring-2 hover:ring-primary transition-all"
+                                onClick={() => {
+                                  setSelectedVideo(video);
+                                  setShowVideoPlayer(true);
+                                }}
+                              >
                                 <img
                                   src={`${API_BASE}${video.thumbnailUrl}`}
                                   alt={`Thumbnail for ${video.name}`}
@@ -528,7 +537,13 @@ export default function SurveyUpload() {
                                 />
                               </div>
                             ) : (
-                              <div className="w-24 h-16 rounded-lg overflow-hidden shadow-md border border-border bg-gradient-to-br from-gray-100 to-gray-200 dark:from-gray-800 dark:to-gray-900 flex items-center justify-center">
+                              <div 
+                                className="w-24 h-16 rounded-lg overflow-hidden shadow-md border border-border bg-gradient-to-br from-gray-100 to-gray-200 dark:from-gray-800 dark:to-gray-900 flex items-center justify-center cursor-pointer hover:ring-2 hover:ring-primary transition-all"
+                                onClick={() => {
+                                  setSelectedVideo(video);
+                                  setShowVideoPlayer(true);
+                                }}
+                              >
                                 <Video className="h-8 w-8 text-gray-400 dark:text-gray-600" />
                               </div>
                             )}
@@ -661,7 +676,7 @@ export default function SurveyUpload() {
                                   asChild
                                   className="h-8 border-green-300 dark:border-green-800 text-green-700 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-950/30"
                                 >
-                                  <Link to="/assets">
+                                  <Link to={`/assets?route_id=${video.routeId}`}>
                                     <Database className="h-3 w-3 mr-1.5" />
                                     Reports
                                   </Link>
@@ -669,13 +684,14 @@ export default function SurveyUpload() {
                                 <Button
                                   size="sm"
                                   variant="outline"
-                                  asChild
-                                  className="h-8 border-green-300 dark:border-green-800 text-green-700 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-950/30"
+                                  onClick={() => {
+                                    setSelectedVideo(video);
+                                    setShowVideoPlayer(true);
+                                  }}
+                                  className="h-8 border-purple-300 dark:border-purple-800 text-purple-700 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-950/30"
                                 >
-                                  <Link to="/videos">
-                                    <Video className="h-3 w-3 mr-1.5" />
-                                    Video
-                                  </Link>
+                                  <Video className="h-3 w-3 mr-1.5" />
+                                  Video
                                 </Button>
                               </div>
                             )}
@@ -770,6 +786,47 @@ export default function SurveyUpload() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Video Player Dialog */}
+      <Dialog open={showVideoPlayer} onOpenChange={setShowVideoPlayer}>
+        <DialogContent className="max-w-4xl max-h-[90vh] p-0">
+          <DialogHeader className="p-6 pb-4">
+            <div className="flex items-center justify-between">
+              <DialogTitle className="text-xl font-bold">
+                {selectedVideo?.name || "Video Player"}
+              </DialogTitle>
+              <Button variant="ghost" size="icon" onClick={() => setShowVideoPlayer(false)}>
+                <X className="h-5 w-5" />
+              </Button>
+            </div>
+            {selectedVideo && (
+              <p className="text-sm text-muted-foreground">
+                Route #{selectedVideo.routeId} • {roads.find(r => r.route_id === selectedVideo.routeId)?.road_name || `Road ${selectedVideo.routeId}`}
+              </p>
+            )}
+          </DialogHeader>
+          <div className="px-6 pb-6">
+            {selectedVideo?.backendId && (
+              <video
+                key={selectedVideo.backendId}
+                controls
+                autoPlay
+                className="w-full rounded-lg shadow-lg max-h-[60vh]"
+                src={`${API_BASE}/api/videos/${selectedVideo.backendId}/stream`}
+              >
+                Your browser does not support the video tag.
+              </video>
+            )}
+            {selectedVideo && (
+              <div className="mt-4 flex flex-wrap gap-4 text-sm text-muted-foreground">
+                <span><strong>Surveyor:</strong> {selectedVideo.surveyorName}</span>
+                <span><strong>Date:</strong> {selectedVideo.surveyDate}</span>
+                <span><strong>Size:</strong> {(selectedVideo.size / 1024 / 1024).toFixed(1)} MB</span>
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
