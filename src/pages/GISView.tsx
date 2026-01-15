@@ -335,7 +335,7 @@ export default function GISView() {
   }, []);
 
   // Helper function to find which Asset Category an Asset Type belongs to
-  const findAssetCategoryForType = (assetType: string): { category: string; attributes: Record<string, string[]> } | null => {
+  const findAssetCategoryForType = (assetType: string): { category: string; attributes: Record<string, Record<string, string>[]> } | null => {
     for (const [categoryName, assetTypes] of Object.entries(CATEGORY_ATTRIBUTES)) {
       if (assetTypes[assetType]) {
         return { category: categoryName, attributes: assetTypes[assetType] };
@@ -346,7 +346,7 @@ export default function GISView() {
 
   // Build the hierarchical structure for display: Asset Category -> Asset Types -> Attributes -> Subtypes
   const assetCategoryHierarchy = useMemo(() => {
-    const hierarchy: Record<string, { assetTypes: string[]; categoryData: Record<string, Record<string, string[]>> }> = {};
+    const hierarchy: Record<string, { assetTypes: string[]; categoryData: Record<string, Record<string, Record<string, string>[]>> }> = {};
 
     // Group Asset Types by their Asset Category
     uniqueAssetCategories.forEach(assetType => {
