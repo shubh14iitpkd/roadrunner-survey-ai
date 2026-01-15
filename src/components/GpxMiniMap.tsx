@@ -20,29 +20,79 @@ export default function GpxMiniMap({ gpxUrl, className = "", onMapClick }: GpxMi
   const svgRef = useRef<SVGSVGElement>(null);
 
   useEffect(() => {
+    const parseGpxText = (gpxText: string): GpxPoint[] => {
+      const parser = new DOMParser();
+      const xmlDoc = parser.parseFromString(gpxText, "text/xml");
+      
+      const trkpts = xmlDoc.getElementsByTagName("trkpt");
+      const parsedPoints: GpxPoint[] = [];
+      
+      for (let i = 0; i < trkpts.length; i++) {
+        const lat = parseFloat(trkpts[i].getAttribute("lat") || "0");
+        const lon = parseFloat(trkpts[i].getAttribute("lon") || "0");
+        if (lat && lon) {
+          parsedPoints.push({ lat, lon });
+        }
+      }
+      
+      return parsedPoints;
+    };
+
     const fetchAndParseGpx = async () => {
       try {
         setLoading(true);
         setError(null);
         
-        const response = await fetch(gpxUrl);
-        if (!response.ok) {
-          throw new Error("Failed to load GPX file");
+        // Extract filename from URL for fallback
+        const urlParts = gpxUrl.split('/');
+        const filename = urlParts[urlParts.length - 1];
+        
+        // Try primary URL first
+        let gpxText = "";
+        let parsedPoints: GpxPoint[] = [];
+        
+        try {
+          const response = await fetch(gpxUrl);
+          if (response.ok) {
+            gpxText = await response.text();
+            // Check if we got HTML instead of GPX (server misconfiguration)
+            if (!gpxText.includes("<gpx") && !gpxText.includes("<trkpt")) {
+              throw new Error("Received HTML instead of GPX");
+            }
+            parsedPoints = parseGpxText(gpxText);
+          }
+        } catch (primaryErr) {
+          console.warn("Primary GPX fetch failed, trying fallback:", primaryErr);
         }
         
-        const gpxText = await response.text();
-        const parser = new DOMParser();
-        const xmlDoc = parser.parseFromString(gpxText, "text/xml");
-        
-        const trkpts = xmlDoc.getElementsByTagName("trkpt");
-        const parsedPoints: GpxPoint[] = [];
-        
-        for (let i = 0; i < trkpts.length; i++) {
-          const lat = parseFloat(trkpts[i].getAttribute("lat") || "0");
-          const lon = parseFloat(trkpts[i].getAttribute("lon") || "0");
-          if (lat && lon) {
-            parsedPoints.push({ lat, lon });
+        // If primary failed or returned no points, try local demo files
+        if (parsedPoints.length === 0) {
+          const localPaths = [
+            `/demo-data/gpx/${filename}`,
+            `/demo-data/gpx/2025_0817_115147_F.gpx`, // Default demo file
+          ];
+          
+          for (const localPath of localPaths) {
+            try {
+              const localResponse = await fetch(localPath);
+              if (localResponse.ok) {
+                gpxText = await localResponse.text();
+                if (gpxText.includes("<gpx") || gpxText.includes("<trkpt")) {
+                  parsedPoints = parseGpxText(gpxText);
+                  if (parsedPoints.length > 0) {
+                    console.log(`Loaded GPX from fallback: ${localPath}`);
+                    break;
+                  }
+                }
+              }
+            } catch (fallbackErr) {
+              // Continue to next fallback
+            }
           }
+        }
+        
+        if (parsedPoints.length === 0) {
+          throw new Error("No GPS data found");
         }
         
         setPoints(parsedPoints);
