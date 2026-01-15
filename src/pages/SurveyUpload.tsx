@@ -573,26 +573,21 @@ export default function SurveyUpload() {
                 </Button>
               </div>
             ) : (
-              <div className="overflow-x-auto rounded-xl border border-border">
+              <div className="rounded-xl border border-border overflow-hidden">
                 <table className="w-full">
                   <thead>
                     <tr className="bg-gradient-to-r from-blue-50 via-indigo-50 to-purple-50 dark:from-blue-950/30 dark:via-indigo-950/30 dark:to-purple-950/30 border-b border-border">
-                      <th className="text-left p-4 font-semibold text-sm">Thumbnail</th>
-                      <th className="text-left p-4 font-semibold text-sm">Route ID</th>
-                      <th className="text-left p-4 font-semibold text-sm">Road Name</th>
-                      <th className="text-left p-4 font-semibold text-sm">Video File</th>
-                      <th className="text-left p-4 font-semibold text-sm">Survey Date</th>
-                      <th className="text-left p-4 font-semibold text-sm">Surveyor</th>
-                      <th className="text-left p-4 font-semibold text-sm">GPS Route</th>
-                      <th className="text-left p-4 font-semibold text-sm">Progress / Action</th>
-                      <th className="text-left p-4 font-semibold text-sm">Status</th>
-                      <th className="text-left p-4 font-semibold text-sm">Delete</th>
+                      <th className="text-left p-3 font-semibold text-sm w-28">Preview</th>
+                      <th className="text-left p-3 font-semibold text-sm">Route</th>
+                      <th className="text-left p-3 font-semibold text-sm w-24">Date</th>
+                      <th className="text-left p-3 font-semibold text-sm w-24">Surveyor</th>
+                      <th className="text-left p-3 font-semibold text-sm w-24">GPS</th>
+                      <th className="text-left p-3 font-semibold text-sm">Status & Actions</th>
                     </tr>
                   </thead>
                   <tbody>
                     {videos.map((video, index) => {
                       const road = roads.find(r => r.route_id === video.routeId);
-                      // Use backendId first (from DB), then id, then fallback to index
                       const uniqueKey = video.backendId || video.id || `video-temp-${index}`;
 
                       return (
@@ -600,237 +595,211 @@ export default function SurveyUpload() {
                           key={uniqueKey}
                           className="border-b border-border hover:bg-blue-50/70 dark:hover:bg-blue-950/30 transition-colors duration-200"
                         >
-                          <td className="p-4">
-                            {video.thumbnailUrl ? (
-                              <div 
-                                className="w-24 h-16 rounded-lg overflow-hidden shadow-md border border-border bg-muted cursor-pointer hover:ring-2 hover:ring-primary transition-all"
-                                onClick={() => {
-                                  setSelectedVideo(video);
-                                  setShowVideoPlayer(true);
-                                }}
-                              >
-                                <img
-                                  src={`${API_BASE}${video.thumbnailUrl}`}
-                                  alt={`Thumbnail for ${video.name}`}
-                                  className="w-full h-full object-cover"
-                                  onError={(e) => {
-                                    e.currentTarget.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="100" height="60" viewBox="0 0 100 60"%3E%3Crect fill="%23ddd" width="100" height="60"/%3E%3Ctext x="50%25" y="50%25" fill="%23999" font-family="Arial" font-size="12" text-anchor="middle" dominant-baseline="middle"%3ENo Image%3C/text%3E%3C/svg%3E';
-                                  }}
-                                />
-                              </div>
-                            ) : (
-                              <div 
-                                className="w-24 h-16 rounded-lg overflow-hidden shadow-md border border-border bg-gradient-to-br from-gray-100 to-gray-200 dark:from-gray-800 dark:to-gray-900 flex items-center justify-center cursor-pointer hover:ring-2 hover:ring-primary transition-all"
-                                onClick={() => {
-                                  setSelectedVideo(video);
-                                  setShowVideoPlayer(true);
-                                }}
-                              >
-                                <Video className="h-8 w-8 text-gray-400 dark:text-gray-600" />
-                              </div>
-                            )}
-                          </td>
-                          <td className="p-4">
-                            <Badge variant="outline" className="font-mono font-semibold border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-400 bg-blue-50/50 dark:bg-blue-950/30">
-                              #{video.routeId}
-                            </Badge>
-                          </td>
-                          <td className="p-4">
-                            <div className="font-medium">{road?.road_name || `Road ${video.routeId}`}</div>
-                          </td>
-                          <td className="p-4">
-                            <div className="flex items-center gap-2 w-40">
-                              <Video className="h-4 w-4 text-purple-500 dark:text-purple-400" />
-                              <span className="font-medium truncate">{video.name}</span>
-                            </div>
-                          </td>
-                          <td className="p-4">
-                            <div className="flex items-center gap-2 text-sm">
-                              <Calendar className="h-4 w-4 text-muted-foreground" />
-                              <span className="text-foreground">{video.surveyDate}</span>
-                            </div>
-                          </td>
-                          <td className="p-4 text-sm">{video.surveyorName}</td>
-                          <td className="p-4">
-                            {video.gpxFile ? (
-                              <GpxMiniMap 
-                                gpxUrl={`${API_BASE}/gpx_files/${video.gpxFile}`}
-                                className="w-24 h-16"
-                                onMapClick={() => navigate(`/gis?id=${video.routeId}`)}
-                              />
-                            ) : (
-                              <div className="w-24 h-16 rounded-lg bg-muted/30 border border-dashed border-muted-foreground/30 flex flex-col items-center justify-center">
-                                <MapPin className="h-4 w-4 text-muted-foreground/50" />
-                                <span className="text-[10px] text-muted-foreground/50 mt-0.5">No GPS</span>
-                              </div>
-                            )}
-                          </td>
-                          <td className="p-4">
-                            {/* Show progress when uploading/processing */}
-                            {(video.status === "uploading" || video.status === "processing") && (
-                              <div className="space-y-1.5 min-w-[160px]">
-                                <Progress value={video.progress} className="h-2" />
-                                <div className="flex items-center justify-between text-xs">
-                                  <span className="font-semibold text-blue-600 dark:text-blue-400">{video.progress}%</span>
-                                  {video.eta && <span className="text-muted-foreground">ETA: {video.eta}</span>}
-                                </div>
-                              </div>
-                            )}
-
-                            {/* Show action buttons when ready for next step */}
-                            {video.status === "queue" && (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                disabled
-                                className="h-8 shadow-sm"
-                              >
-                                <Clock className="h-3 w-3 mr-1.5" />
-                                Queued
-                              </Button>
-                            )}
-
-                            {/* Show uploading status button (disabled) */}
-                            {video.status === "uploading" && (
-                              <Button
-                                size="sm"
-                                disabled
-                                className="h-8 bg-gradient-to-r from-purple-500 to-purple-600 text-white shadow-sm opacity-70 cursor-not-allowed"
-                              >
-                                <Loader2 className="h-3 w-3 mr-1.5 animate-spin" />
-                                Uploading...
-                              </Button>
-                            )}
-
-                            {video.status === "uploaded" && (
-                              <Button
-                                size="sm"
-                                onClick={() => processWithAI(video.id)}
-                                className="h-8 bg-gradient-to-r from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700 text-white shadow-sm"
-                              >
-                                <Play className="h-3 w-3 mr-1.5" />
-                                Process with AI
-                              </Button>
-                            )}
-
-                            {/* Show processing status button (disabled) with cancel option */}
-                            {video.status === "processing" && (
-                              <div className="flex gap-2">
-                                <Button
-                                  size="sm"
-                                  disabled
-                                  className="h-8 bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-sm opacity-70 cursor-not-allowed"
-                                >
-                                  <Loader2 className="h-3 w-3 mr-1.5 animate-spin" />
-                                  Processing...
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => {
-                                    resetVideoStatus(video.id);
-                                    toast.info(`Reset ${video.name} to uploaded state`);
-                                  }}
-                                  className="h-8 border-red-300 text-red-600 hover:bg-red-50"
-                                >
-                                  Cancel
-                                </Button>
-                              </div>
-                            )}
-
-                            {/* Show retry button for errors */}
-                            {video.status === "error" && (
-                              <Button
-                                size="sm"
-                                onClick={() => processWithAI(video.id)}
-                                className="h-8 bg-gradient-to-r from-orange-500 to-red-600 hover:from-orange-600 hover:to-red-700 text-white shadow-sm"
-                              >
-                                <Play className="h-3 w-3 mr-1.5" />
-                                Retry Processing
-                              </Button>
-                            )}
-
-                            {video.status === "completed" && (
-                              <div className="flex gap-2">
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  asChild
-                                  className="h-8 border-green-300 dark:border-green-800 text-green-700 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-950/30"
-                                >
-                                  <Link to={`/assets?route_id=${video.routeId}`}>
-                                    <Database className="h-3 w-3 mr-1.5" />
-                                    Reports
-                                  </Link>
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  asChild
-                                  className="h-8 border-blue-300 dark:border-blue-800 text-blue-700 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/30"
-                                >
-                                  <Link to={`/gis?id=${video.routeId}`}>
-                                    <Map className="h-3 w-3 mr-1.5" />
-                                    Map
-                                  </Link>
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="outline"
+                          {/* Preview with video name tooltip */}
+                          <td className="p-3">
+                            <div className="relative group">
+                              {video.thumbnailUrl ? (
+                                <div 
+                                  className="w-20 h-14 rounded-lg overflow-hidden shadow-sm border border-border bg-muted cursor-pointer hover:ring-2 hover:ring-primary transition-all"
                                   onClick={() => {
                                     setSelectedVideo(video);
                                     setShowVideoPlayer(true);
                                   }}
-                                  className="h-8 border-purple-300 dark:border-purple-800 text-purple-700 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-950/30"
                                 >
-                                  <Video className="h-3 w-3 mr-1.5" />
-                                  Video
-                                </Button>
+                                  <img
+                                    src={`${API_BASE}${video.thumbnailUrl}`}
+                                    alt={video.name}
+                                    className="w-full h-full object-cover"
+                                    onError={(e) => {
+                                      e.currentTarget.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="100" height="60" viewBox="0 0 100 60"%3E%3Crect fill="%23ddd" width="100" height="60"/%3E%3Ctext x="50%25" y="50%25" fill="%23999" font-family="Arial" font-size="10" text-anchor="middle" dominant-baseline="middle"%3ENo Thumb%3C/text%3E%3C/svg%3E';
+                                    }}
+                                  />
+                                </div>
+                              ) : (
+                                <div 
+                                  className="w-20 h-14 rounded-lg overflow-hidden shadow-sm border border-border bg-gradient-to-br from-gray-100 to-gray-200 dark:from-gray-800 dark:to-gray-900 flex items-center justify-center cursor-pointer hover:ring-2 hover:ring-primary transition-all"
+                                  onClick={() => {
+                                    setSelectedVideo(video);
+                                    setShowVideoPlayer(true);
+                                  }}
+                                >
+                                  <Video className="h-6 w-6 text-gray-400" />
+                                </div>
+                              )}
+                              {/* Video name tooltip on hover */}
+                              <div className="absolute left-0 bottom-full mb-1 hidden group-hover:block z-10">
+                                <div className="bg-foreground text-background text-xs px-2 py-1 rounded shadow-lg whitespace-nowrap max-w-[200px] truncate">
+                                  {video.name}
+                                </div>
+                              </div>
+                            </div>
+                          </td>
+
+                          {/* Route (combined ID + Name) */}
+                          <td className="p-3">
+                            <div className="flex items-center gap-2">
+                              <Badge variant="outline" className="font-mono text-xs border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-400 bg-blue-50/50 dark:bg-blue-950/30 flex-shrink-0">
+                                #{video.routeId}
+                              </Badge>
+                              <span className="text-sm font-medium truncate max-w-[120px]" title={road?.road_name || `Road ${video.routeId}`}>
+                                {road?.road_name || `Road ${video.routeId}`}
+                              </span>
+                            </div>
+                          </td>
+
+                          {/* Date */}
+                          <td className="p-3">
+                            <span className="text-sm text-muted-foreground">{video.surveyDate}</span>
+                          </td>
+
+                          {/* Surveyor */}
+                          <td className="p-3">
+                            <span className="text-sm truncate max-w-[80px] block" title={video.surveyorName}>
+                              {video.surveyorName}
+                            </span>
+                          </td>
+
+                          {/* GPS Mini Map */}
+                          <td className="p-3">
+                            {video.gpxFile ? (
+                              <GpxMiniMap 
+                                gpxUrl={`${API_BASE}/gpx_files/${video.gpxFile}`}
+                                className="w-16 h-12"
+                                onMapClick={() => navigate(`/gis?id=${video.routeId}`)}
+                              />
+                            ) : (
+                              <div className="w-16 h-12 rounded bg-muted/30 border border-dashed border-muted-foreground/30 flex items-center justify-center">
+                                <span className="text-[9px] text-muted-foreground/50">No GPS</span>
                               </div>
                             )}
                           </td>
-                          <td className="p-4">
-                            <div className="flex items-center gap-2">
-                              <div className="flex-shrink-0">
+
+                          {/* Status & Actions (combined) */}
+                          <td className="p-3">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              {/* Status badge */}
+                              <div className="flex items-center gap-1.5">
                                 {getStatusIcon(video.status)}
+                                <Badge
+                                  variant="secondary"
+                                  className={cn(
+                                    "text-[10px] font-medium px-1.5 py-0.5",
+                                    video.status === "completed" && "bg-green-100 dark:bg-green-950/30 text-green-700 dark:text-green-400",
+                                    video.status === "processing" && "bg-blue-100 dark:bg-blue-950/30 text-blue-700 dark:text-blue-400",
+                                    video.status === "uploading" && "bg-purple-100 dark:bg-purple-950/30 text-purple-700 dark:text-purple-400",
+                                    video.status === "uploaded" && "bg-amber-100 dark:bg-amber-950/30 text-amber-700 dark:text-amber-400",
+                                    video.status === "queue" && "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400",
+                                    video.status === "error" && "bg-red-100 dark:bg-red-950/30 text-red-700 dark:text-red-400"
+                                  )}
+                                >
+                                  {getStatusLabel(video.status)}
+                                </Badge>
                               </div>
-                              <Badge
-                                variant="secondary"
-                                className={cn(
-                                  "text-xs font-medium px-2.5 py-1",
-                                  video.status === "completed" && "bg-green-100 dark:bg-green-950/30 text-green-700 dark:text-green-400 border-green-200 dark:border-green-800",
-                                  video.status === "processing" && "bg-blue-100 dark:bg-blue-950/30 text-blue-700 dark:text-blue-400 border-blue-200 dark:border-blue-800",
-                                  video.status === "uploading" && "bg-purple-100 dark:bg-purple-950/30 text-purple-700 dark:text-purple-400 border-purple-200 dark:border-purple-800",
-                                  video.status === "uploaded" && "bg-amber-100 dark:bg-amber-950/30 text-amber-700 dark:text-amber-400 border-amber-200 dark:border-amber-800",
-                                  video.status === "queue" && "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700",
-                                  video.status === "error" && "bg-red-100 dark:bg-red-950/30 text-red-700 dark:text-red-400 border-red-200 dark:border-red-800"
-                                )}
+
+                              {/* Progress bar for uploading/processing */}
+                              {(video.status === "uploading" || video.status === "processing") && (
+                                <div className="flex items-center gap-2 min-w-[100px]">
+                                  <Progress value={video.progress} className="h-1.5 flex-1" />
+                                  <span className="text-[10px] font-medium text-primary">{video.progress}%</span>
+                                </div>
+                              )}
+
+                              {/* Action buttons */}
+                              {video.status === "uploaded" && (
+                                <Button
+                                  size="sm"
+                                  onClick={() => processWithAI(video.id)}
+                                  className="h-7 text-xs bg-gradient-to-r from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700 text-white"
+                                >
+                                  <Play className="h-3 w-3 mr-1" />
+                                  Process
+                                </Button>
+                              )}
+
+                              {video.status === "processing" && (
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => {
+                                    resetVideoStatus(video.id);
+                                    toast.info(`Reset ${video.name}`);
+                                  }}
+                                  className="h-7 text-xs text-red-600 hover:bg-red-50"
+                                >
+                                  Cancel
+                                </Button>
+                              )}
+
+                              {video.status === "error" && (
+                                <Button
+                                  size="sm"
+                                  onClick={() => processWithAI(video.id)}
+                                  className="h-7 text-xs bg-orange-500 hover:bg-orange-600 text-white"
+                                >
+                                  <Play className="h-3 w-3 mr-1" />
+                                  Retry
+                                </Button>
+                              )}
+
+                              {video.status === "completed" && (
+                                <>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    asChild
+                                    className="h-7 text-xs border-green-300 text-green-700 hover:bg-green-50"
+                                  >
+                                    <Link to={`/assets?route_id=${video.routeId}`}>
+                                      <Database className="h-3 w-3 mr-1" />
+                                      Reports
+                                    </Link>
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    asChild
+                                    className="h-7 text-xs border-blue-300 text-blue-700 hover:bg-blue-50"
+                                  >
+                                    <Link to={`/gis?id=${video.routeId}`}>
+                                      <Map className="h-3 w-3 mr-1" />
+                                      Map
+                                    </Link>
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    onClick={() => {
+                                      setSelectedVideo(video);
+                                      setShowVideoPlayer(true);
+                                    }}
+                                    className="h-7 text-xs text-purple-600 hover:bg-purple-50"
+                                  >
+                                    <Video className="h-3 w-3" />
+                                  </Button>
+                                </>
+                              )}
+
+                              {/* Delete button (always visible, end of row) */}
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => {
+                                  const surveyIdStr = typeof video.surveyId === 'object' && video.surveyId !== null
+                                    ? ((video.surveyId as any).$oid || String(video.surveyId))
+                                    : (video.surveyId || '');
+                                  setVideoToDelete({
+                                    id: video.id,
+                                    surveyId: surveyIdStr,
+                                    name: video.name
+                                  });
+                                  setDeleteDialogOpen(true);
+                                }}
+                                className="h-7 w-7 p-0 text-red-400 hover:text-red-600 hover:bg-red-50 ml-auto"
+                                disabled={video.status === "uploading" || video.status === "processing" || isDeleting || !video.surveyId}
                               >
-                                {getStatusLabel(video.status)}
-                              </Badge>
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
                             </div>
-                          </td>
-                          <td className="p-4">
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => {
-                                // Normalize surveyId - handle MongoDB ObjectId format
-                                const surveyIdStr = typeof video.surveyId === 'object' && video.surveyId !== null
-                                  ? ((video.surveyId as any).$oid || String(video.surveyId))
-                                  : (video.surveyId || '');
-                                setVideoToDelete({
-                                  id: video.id,
-                                  surveyId: surveyIdStr,
-                                  name: video.name
-                                });
-                                setDeleteDialogOpen(true);
-                              }}
-                              className="h-8 w-8 p-0 text-red-500 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/30"
-                              disabled={video.status === "uploading" || video.status === "processing" || isDeleting || !video.surveyId}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
                           </td>
                         </tr>
                       );
