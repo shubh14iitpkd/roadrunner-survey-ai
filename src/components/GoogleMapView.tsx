@@ -80,7 +80,7 @@ export default function GoogleMapView({ selectedRoadNames = [], roads = [] }: Go
   const [tracks, setTracks] = useState<GpxTrack[]>([]);
 
   useEffect(() => {
-    const key = import.meta.env.VITE_GOOGLE_MAPS_API_KEY as string;
+    const key = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || "AIzaSyAhKF8UGgJInOqimWMNUGvoY_s8sXPFi4k";
     if (!key) return; // user will add their key
     loadGoogleMaps(key)
       .then(() => setReady(true))

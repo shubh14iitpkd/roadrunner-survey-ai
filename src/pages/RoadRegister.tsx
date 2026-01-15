@@ -613,7 +613,7 @@ export default function RoadRegister() {
 
             <Dialog open={isAddDialogOpen} onOpenChange={(open) => {
               // Prevent closing when clicking on Google Places autocomplete
-              const pacContainer = document.querySelector('.pac-container');
+              const pacContainer = document.querySelector('.pac-container') as HTMLElement | null;
               if (!open && pacContainer && pacContainer.offsetParent !== null) {
                 // Autocomplete is visible, don't close
                 return;
@@ -977,7 +977,7 @@ export default function RoadRegister() {
                     <div className="w-4 h-4 rounded-full" style={{ backgroundColor: CHART_COLORS[idx % CHART_COLORS.length] }} />
                     <span className="font-medium">{type}</span>
                   </div>
-                  <Badge variant="secondary" className="font-bold">{count}</Badge>
+                  <Badge variant="secondary" className="font-bold">{count as number}</Badge>
                 </div>
               ))}
             </div>

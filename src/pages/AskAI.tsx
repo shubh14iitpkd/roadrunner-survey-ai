@@ -17,7 +17,7 @@ const samplePrompts = [
   // "What's the condition summary for R001?",
 ];
 
-const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY as string | undefined;
+const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY || "AIzaSyAkJBDspyPQcVWTjc-zgsk4UhnRd-6OZ7k";
 const GEMINI_MODEL = "gemini-2.0-flash"; // fast & cost-effective
 
 async function askGemini(prompt: string, systemInstruction?: string): Promise<string> {
