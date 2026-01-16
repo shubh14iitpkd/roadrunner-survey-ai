@@ -1,0 +1,106 @@
+{
+  "collection_name": "roads",
+  "priority": "medium",
+  "description": "This collection stores metadata about each surveyed road or route. It provides contextual information such as road name, start and end points, distance, road type, and GPX reference. It is mainly used to enrich answers coming from frames or surveys with human-readable road details.",
+  "primary_intent": "Answer questions about road identity, names, route extents, road types, distances, and GPX source information.",
+  "when_to_use": [
+    "User asks for road name from a route ID",
+    "User asks where a route starts or ends",
+    "User asks about road type or side",
+    "User asks for estimated road length",
+    "User asks for GPX file location of a route",
+    "User asks general information about a specific road"
+  ],
+  "fallback_to_gemini": true,
+  "fields": {
+    "_id": {
+      "meaning": "Unique identifier of the road record",
+      "use_for": "Internal reference",
+      "search_priority": "low"
+    },
+    "route_id": {
+      "meaning": "Unique route number assigned to a road",
+      "use_for": "Primary join key with frames and surveys",
+      "search_priority": "highest"
+    },
+    "road_name": {
+      "meaning": "Human-readable name of the road",
+      "use_for": "Answering road identification questions",
+      "search_priority": "highest"
+    },
+    "start_point_name": {
+      "meaning": "Name of the starting location of the road",
+      "use_for": "Explaining route origin",
+      "search_priority": "medium"
+    },
+    "start_lat": {
+      "meaning": "Latitude of the road start point",
+      "use_for": "Map plotting and geospatial queries",
+      "search_priority": "medium"
+    },
+    "start_lng": {
+      "meaning": "Longitude of the road start point",
+      "use_for": "Map plotting and geospatial queries",
+      "search_priority": "medium"
+    },
+    "end_point_name": {
+      "meaning": "Name of the ending location of the road",
+      "use_for": "Explaining route destination",
+      "search_priority": "medium"
+    },
+    "end_lat": {
+      "meaning": "Latitude of the road end point",
+      "use_for": "Map plotting and geospatial queries",
+      "search_priority": "medium"
+    },
+    "end_lng": {
+      "meaning": "Longitude of the road end point",
+      "use_for": "Map plotting and geospatial queries",
+      "search_priority": "medium"
+    },
+    "estimated_distance_km": {
+      "meaning": "Approximate length of the road in kilometers",
+      "use_for": "Distance-based questions and reports",
+      "search_priority": "high"
+    },
+    "road_type": {
+      "meaning": "Category of the road (e.g., Local Access Road, Highway, Main Road)",
+      "use_for": "Road classification and filtering",
+      "search_priority": "high"
+    },
+    "road_side": {
+      "meaning": "Side of the road surveyed (LHS/RHS)",
+      "use_for": "Survey orientation context",
+      "search_priority": "medium"
+    },
+    "gpx_file_url": {
+      "meaning": "File path or URL of the GPX track for the road",
+      "use_for": "Accessing raw GPS track data",
+      "search_priority": "high"
+    },
+    "created_at": {
+      "meaning": "Record creation timestamp",
+      "use_for": "Audit and tracking",
+      "search_priority": "low"
+    },
+    "updated_at": {
+      "meaning": "Last modification timestamp",
+      "use_for": "Data freshness",
+      "search_priority": "low"
+    }
+  },
+  "example_questions": [
+    "What is the name of route 226?",
+    "Where does route 226 start and end?",
+    "What type of road is Rawdat Al Khail Street?",
+    "How long is this road?",
+    "Give me the GPX file for route 226",
+    "Which roads are Local Access Roads?"
+  ],
+  "response_style": {
+    "tone": "Informative, concise, contextual",
+    "include_route_id": true,
+    "include_road_name": true,
+    "prefer_database_over_gemini": true
+  }
+}

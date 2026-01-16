@@ -1,0 +1,237 @@
+{
+  "collection_name": "video_processing_results",
+  "priority": "highest",
+  "description": "This collection stores the final summarized intelligence of a processed video. It represents the analytical outcome of AI processing including defect counts, severity distribution, defect types, per-defect spatial and temporal data, and metadata about the survey. It should be used for reporting, analytics, defect statistics, and high-level question answering.",
+  "primary_intent": "Answer questions about defect statistics, severity analysis, defect types, per-video summaries, defect locations, timestamps, GPS coordinates, and overall survey quality.",
+  "when_to_use": [
+    "User asks how many defects were found in a video",
+    "User asks severity distribution (minor, moderate, severe)",
+    "User asks what types of defects/assets were detected",
+    "User asks where a defect is located geographically",
+    "User asks defect details by timestamp",
+    "User asks summary of a processed survey",
+    "User asks processing status of a video",
+    "User asks about video metadata like duration, FPS, resolution"
+  ],
+  "fallback_to_gemini": false,
+  "fields": {
+    "_id": {
+      "meaning": "Unique identifier of the processing record",
+      "use_for": "Internal reference",
+      "search_priority": "low"
+    },
+    "video_id": {
+      "meaning": "Name or identifier of the processed video file",
+      "use_for": "Primary key to search results by video",
+      "search_priority": "highest"
+    },
+    "user_id": {
+      "meaning": "User who initiated the processing",
+      "use_for": "User-specific filtering",
+      "search_priority": "medium"
+    },
+    "chat_id": {
+      "meaning": "Chat session that generated this processing",
+      "use_for": "Conversation-level linking",
+      "search_priority": "medium"
+    },
+    "status": {
+      "meaning": "Current processing state of the video",
+      "use_for": "Answering whether processing is completed or pending",
+      "search_priority": "highest"
+    },
+    "road_name": {
+      "meaning": "Name of the road where video was recorded",
+      "use_for": "Contextual identification",
+      "search_priority": "high"
+    },
+    "road_section": {
+      "meaning": "Specific section of the road (if known)",
+      "use_for": "Sub-route clarification",
+      "search_priority": "medium"
+    },
+    "surveyor": {
+      "meaning": "Person or entity who performed the survey",
+      "use_for": "Audit and reporting",
+      "search_priority": "low"
+    },
+    "total_defects": {
+      "meaning": "Total number of detected defects/assets in the video",
+      "use_for": "High-level statistics",
+      "search_priority": "highest"
+    },
+    "severity_distribution": {
+      "meaning": "Breakdown of defects by severity",
+      "use_for": "Risk and priority analysis",
+      "search_priority": "highest",
+      "structure": {
+        "minor": {
+          "meaning": "Count of minor defects",
+          "use_for": "Low priority issues",
+          "search_priority": "high"
+        },
+        "moderate": {
+          "meaning": "Count of moderate defects",
+          "use_for": "Medium priority issues",
+          "search_priority": "high"
+        },
+        "severe": {
+          "meaning": "Count of severe defects",
+          "use_for": "Critical safety issues",
+          "search_priority": "highest"
+        }
+      }
+    },
+    "type_distribution": {
+      "meaning": "Distribution of detected assets/defects by type",
+      "use_for": "Asset inventory and defect category analysis",
+      "search_priority": "high"
+    },
+    "defects": {
+      "meaning": "Detailed list of each detected defect/asset",
+      "use_for": "Precise defect-level answers",
+      "search_priority": "highest",
+      "structure": {
+        "timestamp": {
+          "meaning": "Video timestamp of detection",
+          "use_for": "Temporal navigation",
+          "search_priority": "high"
+        },
+        "timestamp_seconds": {
+          "meaning": "Timestamp in seconds",
+          "use_for": "Numeric filtering and sorting",
+          "search_priority": "high"
+        },
+        "category": {
+          "meaning": "High-level defect category",
+          "use_for": "Grouping defects",
+          "search_priority": "medium"
+        },
+        "asset_type": {
+          "meaning": "Specific detected asset type",
+          "use_for": "Identifying what object was detected",
+          "search_priority": "highest"
+        },
+        "condition": {
+          "meaning": "Condition of the asset (Good, Unknown, etc.)",
+          "use_for": "Health and quality assessment",
+          "search_priority": "high"
+        },
+        "confidence": {
+          "meaning": "AI confidence score",
+          "use_for": "Reliability filtering",
+          "search_priority": "medium"
+        },
+        "position": {
+          "meaning": "Relative position in the frame",
+          "use_for": "Spatial description",
+          "search_priority": "low"
+        },
+        "estimated_size": {
+          "meaning": "Approximate size in pixels",
+          "use_for": "Relative scale explanation",
+          "search_priority": "low"
+        },
+        "bbox": {
+          "meaning": "Bounding box of detection",
+          "use_for": "Visual overlay and frame mapping",
+          "search_priority": "medium"
+        },
+        "gps_coords": {
+          "meaning": "Geographic location of detection",
+          "use_for": "Map positioning",
+          "search_priority": "highest"
+        },
+        "defect_type": {
+          "meaning": "Normalized defect classification",
+          "use_for": "Filtering by defect standard",
+          "search_priority": "highest"
+        },
+        "severity": {
+          "meaning": "Severity classification of the defect",
+          "use_for": "Risk-based responses",
+          "search_priority": "highest"
+        },
+        "description": {
+          "meaning": "Human-readable explanation of the detection",
+          "use_for": "Natural language responses",
+          "search_priority": "medium"
+        }
+      }
+    },
+    "metadata": {
+      "meaning": "Technical metadata of the processed video",
+      "use_for": "Video details and validation",
+      "search_priority": "medium",
+      "structure": {
+        "video_path": {
+          "meaning": "Filesystem path of the video",
+          "use_for": "Accessing original file",
+          "search_priority": "low"
+        },
+        "duration_seconds": {
+          "meaning": "Length of the video",
+          "use_for": "Time-based queries",
+          "search_priority": "high"
+        },
+        "fps": {
+          "meaning": "Frames per second",
+          "use_for": "Frame calculations",
+          "search_priority": "medium"
+        },
+        "total_frames": {
+          "meaning": "Total number of frames",
+          "use_for": "Frame-level analytics",
+          "search_priority": "medium"
+        },
+        "width": {
+          "meaning": "Video width in pixels",
+          "use_for": "Resolution awareness",
+          "search_priority": "low"
+        },
+        "height": {
+          "meaning": "Video height in pixels",
+          "use_for": "Resolution awareness",
+          "search_priority": "low"
+        },
+        "file_size_mb": {
+          "meaning": "Size of the video file",
+          "use_for": "Storage and performance analysis",
+          "search_priority": "low"
+        },
+        "gps_start": {
+          "meaning": "Starting GPS coordinate of the video",
+          "use_for": "Survey boundary",
+          "search_priority": "high"
+        },
+        "gps_end": {
+          "meaning": "Ending GPS coordinate of the video",
+          "use_for": "Survey boundary",
+          "search_priority": "high"
+        }
+      }
+    },
+    "created_at": {
+      "meaning": "Record creation time",
+      "use_for": "Timeline tracking",
+      "search_priority": "low"
+    }
+  },
+  "example_questions": [
+    "How many defects were detected in this video?",
+    "What is the severity distribution?",
+    "Where are the moderate defects located?",
+    "At what time was the first street light detected?",
+    "Give me all severe defects with GPS coordinates",
+    "Summarize the survey results for this road",
+    "Which asset type appears the most?",
+    "Is the video processing completed?"
+  ],
+  "response_style": {
+    "tone": "Analytical, statistical, professional",
+    "include_counts": true,
+    "include_severity": true,
+    "include_gps": true,
+    "prefer_database_over_gemini": true
+  }
+}

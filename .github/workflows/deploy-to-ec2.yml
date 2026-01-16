@@ -1,0 +1,69 @@
+name: Deploy to EC2
+
+on:
+  push:
+    branches:
+      - main
+      - sid-backend
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: Deploy to EC2
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup SSH
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
+          SSH_HOST: ${{ secrets.EC2_HOST }}
+          SSH_USER: ${{ secrets.EC2_USER }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H $SSH_HOST >> ~/.ssh/known_hosts
+
+          # Test SSH connection
+          ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa $SSH_USER@$SSH_HOST "echo 'SSH connection successful'"
+
+      - name: Deploy to EC2
+        env:
+          SSH_HOST: ${{ secrets.EC2_HOST }}
+          SSH_USER: ${{ secrets.EC2_USER }}
+          DEPLOY_PATH: ${{ secrets.EC2_DEPLOY_PATH }}
+        run: |
+          # Create deployment directory if it doesn't exist
+          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no $SSH_USER@$SSH_HOST "mkdir -p $DEPLOY_PATH"
+
+          # Sync files to EC2 (excluding node_modules, venv, uploads, etc.)
+          rsync -avz --delete \
+            -e "ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no" \
+            --exclude 'node_modules' \
+            --exclude 'backend/venv' \
+            --exclude 'backend/uploads' \
+            --exclude 'uploads' \
+            --exclude '.git' \
+            --exclude '.env' \
+            --exclude '.env.production' \
+            --exclude '__pycache__' \
+            --exclude '*.pyc' \
+            --exclude '.DS_Store' \
+            ./ $SSH_USER@$SSH_HOST:$DEPLOY_PATH/
+
+          # Copy deployment script to EC2
+          scp -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no .github/scripts/deploy.sh $SSH_USER@$SSH_HOST:$DEPLOY_PATH/
+
+          # Execute deployment script on EC2
+          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no $SSH_USER@$SSH_HOST "cd $DEPLOY_PATH && chmod +x deploy.sh && ./deploy.sh"
+
+      - name: Deployment status
+        if: success()
+        run: echo "Deployment completed successfully!"
+
+      - name: Deployment failed
+        if: failure()
+        run: echo "Deployment failed. Please check the logs."

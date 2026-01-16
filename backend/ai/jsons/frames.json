@@ -1,0 +1,125 @@
+{
+  "collection_name": "frames",
+  "priority": "high",
+  "description": "This collection represents every processed video frame with detected road assets and defects. It is the core visual intelligence source of the system and should be used whenever the question involves objects, detections, counts, locations, routes, videos, frames, timestamps, or GPS positions.",
+  "primary_intent": "Answer questions related to what is visible on the road, object detection results, infrastructure presence, defect analysis, frame-level evidence, and spatial positioning.",
+  "when_to_use": [
+    "User asks what objects are present in a frame or video",
+    "User asks how many times an object appears",
+    "User asks about detections on a route or survey",
+    "User asks where something is located",
+    "User asks about confidence, bounding boxes, or AI detections",
+    "User asks for visual proof or frame paths"
+  ],
+  "fallback_to_gemini": false,
+  "fields": {
+    "_id": {
+      "meaning": "Unique identifier of the frame record",
+      "use_for": "Internal reference, joining with other collections",
+      "search_priority": "low"
+    },
+    "video_id": {
+      "meaning": "ID of the source video from which this frame was extracted",
+      "use_for": "Grouping frames by video, answering video-level questions",
+      "search_priority": "high"
+    },
+    "survey_id": {
+      "meaning": "Survey identifier for the road survey session",
+      "use_for": "Filtering frames belonging to a specific survey",
+      "search_priority": "high"
+    },
+    "route_id": {
+      "meaning": "Route number where this frame was captured",
+      "use_for": "Route-based querying and reporting",
+      "search_priority": "highest"
+    },
+    "frame_number": {
+      "meaning": "Sequential number of the frame inside the video",
+      "use_for": "Finding exact frames",
+      "search_priority": "medium"
+    },
+    "timestamp": {
+      "meaning": "Time in seconds when this frame was captured in the video",
+      "use_for": "Temporal navigation inside video",
+      "search_priority": "medium"
+    },
+    "frame_path": {
+      "meaning": "File path to the stored image frame",
+      "use_for": "Showing visual evidence or rendering images",
+      "search_priority": "high"
+    },
+    "detections": {
+      "meaning": "List of all detected objects in this frame",
+      "use_for": "Core answering field for object presence, defect detection, asset identification",
+      "search_priority": "highest",
+      "structure": {
+        "detection_id": {
+          "meaning": "Index of detection inside the frame",
+          "use_for": "Referencing individual detections",
+          "search_priority": "low"
+        },
+        "class_id": {
+          "meaning": "Numerical class identifier of the detected object",
+          "use_for": "Internal classification",
+          "search_priority": "low"
+        },
+        "class_name": {
+          "meaning": "Human-readable name of detected object (e.g., Street lights, Road markings)",
+          "use_for": "Answering what object is detected",
+          "search_priority": "highest"
+        },
+        "confidence": {
+          "meaning": "Model confidence score of detection",
+          "use_for": "Reliability assessment, filtering weak detections",
+          "search_priority": "medium"
+        },
+        "bbox": {
+          "meaning": "Bounding box of detected object in image coordinates",
+          "use_for": "Visual annotation, spatial positioning inside frame",
+          "search_priority": "medium"
+        }
+      }
+    },
+    "detections_count": {
+      "meaning": "Total number of detected objects in the frame",
+      "use_for": "Counting queries",
+      "search_priority": "high"
+    },
+    "gpx_timestamp": {
+      "meaning": "Exact GPS time mapping to the frame",
+      "use_for": "Synchronizing frame with GPX track",
+      "search_priority": "medium"
+    },
+    "location": {
+      "meaning": "Geographic coordinates of the frame",
+      "use_for": "Map-based queries and spatial search",
+      "search_priority": "highest"
+    },
+    "created_at": {
+      "meaning": "When the frame record was created",
+      "use_for": "Audit and timeline",
+      "search_priority": "low"
+    },
+    "updated_at": {
+      "meaning": "Last update time of this record",
+      "use_for": "Data freshness",
+      "search_priority": "low"
+    }
+  },
+  "example_questions": [
+    "What objects were detected on route 105?",
+    "How many street lights are present in the last survey?",
+    "Show frames where advertisement boards were detected",
+    "At what GPS location was a road marking detected?",
+    "Give me the frame where confidence of street light detection is highest",
+    "Which frames contain more than 10 detections?",
+    "Show image evidence for detections on route 105"
+  ],
+  "response_style": {
+    "tone": "Analytical, precise, evidence-based",
+    "include_frame_path": true,
+    "include_location": true,
+    "prefer_database_over_gemini": true
+  }
+}
+
