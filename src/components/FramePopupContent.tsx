@@ -5,12 +5,32 @@ import { Button } from '@/components/ui/button';
 interface Detection {
   class_name: string;
   confidence: number;
-  bbox: {
-    x1: number;
-    y1: number;
-    x2: number;
-    y2: number;
-  };
+  // Box can be array format: [x1, y1, x2, y2]
+  box?: number[];
+  // Or bbox can be object format: { x1, y1, x2, y2 }
+  bbox?: { x1: number; y1: number; x2: number; y2: number };
+  // Or coordinates object
+  coordinates?: { x1: number; y1: number; x2: number; y2: number };
+}
+
+// Helper function to normalize bounding box to [x1, y1, x2, y2] format
+function getBoundingBox(detection: Detection): [number, number, number, number] | null {
+  // Handle array format: box: [x1, y1, x2, y2]
+  if (detection.box && Array.isArray(detection.box) && detection.box.length >= 4) {
+    return [detection.box[0], detection.box[1], detection.box[2], detection.box[3]];
+  }
+
+  // Handle object format: bbox: { x1, y1, x2, y2 }
+  if (detection.bbox && typeof detection.bbox === 'object') {
+    return [detection.bbox.x1, detection.bbox.y1, detection.bbox.x2, detection.bbox.y2];
+  }
+
+  // Handle coordinates format
+  if (detection.coordinates && typeof detection.coordinates === 'object') {
+    return [detection.coordinates.x1, detection.coordinates.y1, detection.coordinates.x2, detection.coordinates.y2];
+  }
+
+  return null;
 }
 
 interface FramePopupContentProps {
@@ -29,7 +49,19 @@ interface FramePopupContentProps {
   totalPoints: number;
   onClose: () => void;
 }
+function normalizeClassName(input) {
+  if (typeof input !== "string") return "";
 
+  // Remove AssetCondition and anything after it
+  const namePart = input.split("_AssetCondition_")[0];
+
+  return namePart
+    .toLowerCase()
+    .split("_")
+    .filter(Boolean)
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+}
 export default function FramePopupContent({
   frameData,
   trackTitle,
@@ -66,17 +98,25 @@ export default function FramePopupContent({
 
     canvas.width = img.clientWidth;
     canvas.height = img.clientHeight;
-
+    console.log(frameData.detections)
     // Draw all detections
     frameData.detections.forEach((d) => {
+      console.log(frameData.frame_number)
       const isSelected = selectedClass === null || selectedClass === d.class_name;
       const alpha = isSelected ? 1 : 0;
 
+      // Get normalized bounding box (handles both array and object formats)
+      const box = getBoundingBox(d);
+      if (!box) {
+        console.warn('Detection has no valid bounding box:', d);
+        return; // Skip detections without valid bounding boxes
+      }
+
       // Scale coordinates to canvas size
-      const x = d.bbox.x1 * (canvas.width / frameData.width);
-      const y = d.bbox.y1 * (canvas.height / frameData.height);
-      const w = (d.bbox.x2 - d.bbox.x1) * (canvas.width / frameData.width);
-      const h = (d.bbox.y2 - d.bbox.y1) * (canvas.height / frameData.height);
+      const x = box[0] * (canvas.width / frameData.width);
+      const y = box[1] * (canvas.height / frameData.height);
+      const w = (box[2] - box[0]) * (canvas.width / frameData.width);
+      const h = (box[3] - box[1]) * (canvas.height / frameData.height);
 
       const color = colorMap[d.class_name] || '#ffffff';
 
@@ -89,9 +129,10 @@ export default function FramePopupContent({
       // Draw label background
       if (showLabels) {
         ctx.fillStyle = color;
-        const label = `${d.class_name} (${(d.confidence * 100).toFixed(0)}%)`;
+        // const label = `${normalizeClassName(d.class_name)} (${(d.confidence * 100).toFixed(0)}%)`;
+        const label = `${normalizeClassName(d.class_name)}`;
         const textMetrics = ctx.measureText(label);
-        ctx.fillRect(x, y - 20, textMetrics.width + 6, 20);
+        ctx.fillRect(x, y - 20, textMetrics.width + 12, 20);
 
         // Draw label text
         ctx.fillStyle = '#ffffff';
@@ -166,7 +207,7 @@ export default function FramePopupContent({
                 color: selectedClass === detectedClassName ? '#ffffff' : colorMap[detectedClassName],
               }}
             >
-              {detectedClassName} ({classCount?.[detectedClassName] || 0})
+              {normalizeClassName(detectedClassName)} ({classCount?.[detectedClassName] || 0})
             </Button>
           ))}
         </div>

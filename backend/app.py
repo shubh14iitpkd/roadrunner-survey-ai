@@ -2,7 +2,6 @@ from flask import Flask, jsonify, send_from_directory
 from flask_cors import CORS
 from flask_jwt_extended import JWTManager, jwt_required, get_jwt_identity
 from dotenv import load_dotenv
-import logging
 
 from config import Config
 from db import init_app_db
@@ -12,10 +11,6 @@ def create_app() -> Flask:
 	load_dotenv()
 	app = Flask(__name__)
 	app.config.from_object(Config())
-
-	# Suppress Flask's werkzeug request logs (OPTIONS, GET, POST, etc.)
-	log = logging.getLogger('werkzeug')
-	log.setLevel(logging.ERROR)  # Only show errors, not every request
 
 	CORS(
 		app,
@@ -120,6 +115,10 @@ def create_app() -> Flask:
 			# Add headers for better browser compatibility (especially Chromium)
 			response.headers['Accept-Ranges'] = 'bytes'
 			response.headers['Cache-Control'] = 'public, max-age=43200'  # Cache for 12 hours
+			# Add CORS headers for cross-origin requests
+			response.headers['Access-Control-Allow-Origin'] = '*'
+			response.headers['Access-Control-Allow-Methods'] = 'GET, OPTIONS'
+			response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
 
 			return response
 
@@ -161,5 +160,5 @@ def create_app() -> Flask:
 app = create_app()
 
 if __name__ == "__main__":
-	app.run(host="0.0.0.0", port=5001, debug=True)
+	app.run(host="0.0.0.0", port=5000, debug=True)
 

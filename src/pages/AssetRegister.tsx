@@ -5,9 +5,10 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
   Search, MapPin, TrendingUp, CheckCircle, AlertTriangle,
-  FileText, ArrowLeft, Calendar, User, Layers, Map, Package, BarChart3, PieChart
+  FileText, ArrowLeft, Calendar, User, Layers, Map, Package, BarChart3,
+  ChevronLeft, ChevronRight
 } from "lucide-react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import {
   Select,
   SelectContent,
@@ -22,15 +23,18 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { isDemoVideo, loadDemoData, convertToAssets, ANNOTATION_CATEGORIES } from "@/services/demoDataService";
 
 interface Asset {
   _id: string;
   route_id: number;
   survey_id: string;
-  category: string;
+  category: string;          // Annotation category: OIA, ITS, Roadway Lighting, etc.
+  asset_type?: string;       // The specific asset label (e.g., "Guardrail")
   type?: string;
   condition: string;
   confidence?: number;
@@ -64,16 +68,42 @@ interface Road {
 }
 
 export default function AssetRegister() {
+  const [searchParams] = useSearchParams();
+  const routeIdFromUrl = searchParams.get('route_id');
+
   const [searchQuery, setSearchQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [assets, setAssets] = useState<Asset[]>([]);
   const [surveys, setSurveys] = useState<Survey[]>([]);
   const [roads, setRoads] = useState<Road[]>([]);
   const [selectedSurveyId, setSelectedSurveyId] = useState<string | null>(null);
+  const [selectedRouteId, setSelectedRouteId] = useState<string | null>(routeIdFromUrl);
   const [isDetailDialogOpen, setIsDetailDialogOpen] = useState(false);
   const [detailAssets, setDetailAssets] = useState<Asset[]>([]);
   const [filterCategory, setFilterCategory] = useState<string>("all");
   const [filterCondition, setFilterCondition] = useState<string>("all");
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 50;
+
+  // Reset page when filters or detail assets change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [filterCategory, filterCondition, detailAssets]);
+
+  // Update selectedRouteId if URL changes
+  useEffect(() => {
+    setSelectedRouteId(routeIdFromUrl);
+  }, [routeIdFromUrl]);
+
+  // Auto-load survey assets when route_id is in URL
+  useEffect(() => {
+    if (routeIdFromUrl && !loading && surveys.length > 0) {
+      const matchingSurvey = surveys.find(s => s.route_id.toString() === routeIdFromUrl);
+      if (matchingSurvey) {
+        loadSurveyAssets(matchingSurvey._id);
+      }
+    }
+  }, [routeIdFromUrl, loading, surveys]);
 
   // Load initial data
   useEffect(() => {
@@ -83,8 +113,8 @@ export default function AssetRegister() {
   const loadData = async () => {
     try {
       setLoading(true);
-      const [framesResp, surveysResp, roadsResp] = await Promise.all([
-        api.frames.list({ has_detections: true, limit: 1000 }),
+      const [videosResp, surveysResp, roadsResp] = await Promise.all([
+        api.videos.list(),
         api.Surveys.list({ latest_only: true }),
         api.roads.list(),
       ]);
@@ -97,31 +127,77 @@ export default function AssetRegister() {
           : String(survey._id)
       }));
 
-      // Convert frames with detections to assets
-      const assetsFromFrames: Asset[] = [];
-      (framesResp?.items || []).forEach((frame: any) => {
-        if (frame.detections && Array.isArray(frame.detections)) {
-          frame.detections.forEach((detection: any, index: number) => {
-            assetsFromFrames.push({
-              _id: `${frame._id}_${index}`,
-              route_id: frame.route_id,
-              survey_id: frame.survey_id || '',
-              category: detection.class_name || 'Unknown',
-              type: detection.class_name || 'Unknown',
-              condition: detection.confidence > 0.8 ? 'good' : detection.confidence > 0.5 ? 'fair' : 'poor',
-              confidence: detection.confidence,
-              lat: frame.latitude,
-              lng: frame.longitude,
-              detected_at: frame.created_at || new Date().toISOString(),
-              image_url: frame.frame_path,
-              description: `${detection.class_name} detected with ${(detection.confidence * 100).toFixed(0)}% confidence`
-            });
-          });
+      // Get videos and group by survey_id
+      const videos = (videosResp?.items || []) as any[];
+      const videosBySurveyMap: Record<string, any[]> = {};
+      const videosByRouteMap: Record<number, any[]> = {};
+
+      videos.forEach((video: any) => {
+        const surveyId = typeof video.survey_id === 'object' && video.survey_id.$oid
+          ? video.survey_id.$oid
+          : String(video.survey_id || '');
+
+        if (!videosBySurveyMap[surveyId]) videosBySurveyMap[surveyId] = [];
+        videosBySurveyMap[surveyId].push(video);
+
+        const routeId = video.route_id;
+        if (routeId) {
+          if (!videosByRouteMap[routeId]) videosByRouteMap[routeId] = [];
+          videosByRouteMap[routeId].push(video);
         }
       });
 
-      setAssets(assetsFromFrames);
-      setSurveys(normalizedSurveys);
+      // Filter surveys to only those that have videos
+      const surveysWithVideos = normalizedSurveys.filter((survey: any) =>
+        videosBySurveyMap[survey._id]?.length > 0
+      );
+
+      // Get the latest survey per route (for KPI counting)
+      const latestSurveyByRoute: Record<number, any> = {};
+      surveysWithVideos.forEach((survey: any) => {
+        const routeId = survey.route_id;
+        if (!latestSurveyByRoute[routeId] ||
+          new Date(survey.survey_date) > new Date(latestSurveyByRoute[routeId].survey_date)) {
+          latestSurveyByRoute[routeId] = survey;
+        }
+      });
+
+      // Create a set of latest survey IDs for quick lookup
+      const latestSurveyIds = new Set(Object.values(latestSurveyByRoute).map(s => s._id));
+
+      // Pre-load demo data ONLY for videos belonging to the latest survey per route
+      const allAssets: Asset[] = [];
+      const processedDemoKeys = new Set<string>(); // Avoid duplicate demo data loading
+
+      for (const video of videos) {
+        const surveyId = typeof video.survey_id === 'object' && video.survey_id.$oid
+          ? video.survey_id.$oid
+          : String(video.survey_id || '');
+
+        // Only process videos from the latest survey for each route
+        if (!latestSurveyIds.has(surveyId)) {
+          continue;
+        }
+
+        const demoKey = isDemoVideo(video.title || '');
+        if (demoKey && !processedDemoKeys.has(demoKey)) {
+          processedDemoKeys.add(demoKey); // Mark as processed to avoid duplicates
+
+          try {
+            const demoData = await loadDemoData(demoKey);
+            if (demoData) {
+              const demoAssets = convertToAssets(demoData, video.route_id || 0, surveyId);
+              allAssets.push(...demoAssets as Asset[]);
+            }
+          } catch (err) {
+            console.warn(`Failed to load demo data for ${demoKey}:`, err);
+          }
+        }
+        // For non-demo videos, we could try to load metadata here too if needed
+      }
+
+      setAssets(allAssets);
+      setSurveys(surveysWithVideos);
       setRoads(roadsResp?.items || []);
     } catch (err: any) {
       toast.error("Failed to load data: " + (err?.message || "Unknown error"));
@@ -132,7 +208,7 @@ export default function AssetRegister() {
 
   const loadSurveyAssets = async (surveyId: string) => {
     try {
-      // First, get videos for this survey
+      // Get videos for this survey
       const videosResp = await api.videos.list({ survey_id: surveyId });
       const videos = videosResp?.items || [];
 
@@ -141,14 +217,31 @@ export default function AssetRegister() {
         return;
       }
 
-      // Fetch metadata for all videos and combine detections
-      const assetsFromMetadata: Asset[] = [];
+      // Fetch assets for all videos
+      const allAssets: Asset[] = [];
 
       for (const video of videos) {
         const videoId = typeof video._id === 'object' && video._id.$oid
           ? video._id.$oid
           : String(video._id);
 
+        // Check if this is a demo video
+        const demoKey = isDemoVideo(video.title || '');
+
+        if (demoKey) {
+          // For demo videos, load data directly from JSON files
+          console.log(`Loading demo data for video ${videoId} (key: ${demoKey})`);
+          const demoData = await loadDemoData(demoKey);
+
+          if (demoData) {
+            const demoAssets = convertToAssets(demoData, video.route_id || 0, surveyId);
+            allAssets.push(...demoAssets as Asset[]);
+            console.log(`Loaded ${demoAssets.length} demo assets for ${demoKey}`);
+          }
+          continue;
+        }
+
+        // For non-demo videos, try to load from metadata
         try {
           const metadataResp = await api.videos.getMetadata(videoId);
           const metadata = metadataResp?.metadata || [];
@@ -157,7 +250,7 @@ export default function AssetRegister() {
           metadata.forEach((frame: any) => {
             if (frame.detections && Array.isArray(frame.detections)) {
               frame.detections.forEach((detection: any, index: number) => {
-                assetsFromMetadata.push({
+                allAssets.push({
                   _id: `${videoId}_frame${frame.frame_number}_det${index}`,
                   route_id: video.route_id || 0,
                   survey_id: surveyId,
@@ -176,29 +269,20 @@ export default function AssetRegister() {
           });
         } catch (metaErr: any) {
           console.warn(`No metadata for video ${videoId}:`, metaErr.message);
-          // Continue with other videos even if one fails
         }
       }
 
-      if (assetsFromMetadata.length === 0) {
-        toast.info("No AI detections found in metadata for this survey");
+      if (allAssets.length === 0) {
+        toast.info("No AI detections found for this survey. Process the video with AI first.");
       }
 
-      setDetailAssets(assetsFromMetadata);
+      setDetailAssets(allAssets);
       setSelectedSurveyId(surveyId);
       setIsDetailDialogOpen(true);
     } catch (err: any) {
       toast.error("Failed to load assets: " + (err?.message || "Unknown error"));
     }
   };
-
-  // Group assets by survey
-  const surveyAssetMap = assets.reduce((acc, asset) => {
-    const sid = asset.survey_id;
-    if (!acc[sid]) acc[sid] = [];
-    acc[sid].push(asset);
-    return acc;
-  }, {} as Record<string, Asset[]>);
 
   // Group surveys by route_id (get latest survey for each road)
   const surveyByRouteMap = surveys.reduce((acc, survey) => {
@@ -208,32 +292,30 @@ export default function AssetRegister() {
     return acc;
   }, {} as Record<number, Survey>);
 
-  // Create enriched road data with survey/asset information
-  const enrichedRoads = roads.map((road) => {
-    const latestSurvey = surveyByRouteMap[road.route_id];
-    const surveyAssets = latestSurvey ? (surveyAssetMap[latestSurvey._id] || []) : [];
+  // Create enriched road data - only for roads that have surveys
+  const enrichedRoads = roads
+    .filter((road) => surveyByRouteMap[road.route_id]) // Only roads with surveys
+    .map((road) => {
+      const latestSurvey = surveyByRouteMap[road.route_id];
 
-    const goodCount = surveyAssets.filter(a => a.condition?.toLowerCase() === 'good').length;
-    const fairCount = surveyAssets.filter(a => a.condition?.toLowerCase() === 'fair').length;
-    const poorCount = surveyAssets.filter(a => a.condition?.toLowerCase() === 'poor').length;
+      return {
+        route_id: road.route_id,
+        roadName: road.road_name,
+        lengthKm: road.estimated_distance_km || 0,
+        surveyId: latestSurvey?._id || null,
+        surveyDate: latestSurvey?.survey_date || null,
+        surveyorName: latestSurvey?.surveyor_name || null,
+        hasSurvey: !!latestSurvey,
+      };
+    });
 
-    return {
-      route_id: road.route_id,
-      roadName: road.road_name,
-      lengthKm: road.estimated_distance_km || 0,
-      surveyId: latestSurvey?._id || null,
-      surveyDate: latestSurvey?.survey_date || null,
-      surveyorName: latestSurvey?.surveyor_name || null,
-      totalAssets: surveyAssets.length,
-      goodCondition: goodCount,
-      fairCondition: fairCount,
-      poorCondition: poorCount,
-      hasSurvey: !!latestSurvey,
-    };
-  });
-
-  // Filter enriched roads
+  // Filter enriched roads based on search
   const filteredRoads = enrichedRoads.filter((road) => {
+    // If route_id is specified in URL, only show that road
+    if (selectedRouteId && road.route_id.toString() !== selectedRouteId) {
+      return false;
+    }
+
     const matchesSearch =
       road.roadName.toLowerCase().includes(searchQuery.toLowerCase()) ||
       road.route_id.toString().includes(searchQuery.toLowerCase()) ||
@@ -241,9 +323,10 @@ export default function AssetRegister() {
     return matchesSearch;
   });
 
-  // Calculate KPIs
+  // Calculate KPIs - based on pre-loaded assets
   const totalRoads = roads.length;
-  const surveyedRoads = enrichedRoads.filter(r => r.hasSurvey).length;
+  const surveyedRoads = enrichedRoads.length; // Only roads with surveys/videos
+  // Asset counts from pre-loaded demo data
   const totalAssets = assets.length;
   const totalGood = assets.filter(a => a.condition?.toLowerCase() === 'good').length;
   const totalFair = assets.filter(a => a.condition?.toLowerCase() === 'fair').length;
@@ -302,7 +385,7 @@ export default function AssetRegister() {
             <div className="flex items-start justify-between">
               <div className="space-y-2">
                 <p className="text-sm font-semibold text-purple-600 dark:text-purple-400 uppercase tracking-wide">Total Assets</p>
-                <p className="text-5xl font-bold bg-gradient-to-br from-purple-600 to-purple-400 bg-clip-text text-transparent">{Math.round(totalAssets / 2).toLocaleString("en-US")}</p>
+                <p className="text-5xl font-bold bg-gradient-to-br from-purple-600 to-purple-400 bg-clip-text text-transparent">{totalAssets.toLocaleString("en-US")}</p>
                 <p className="text-xs font-medium text-muted-foreground">AI Detected</p>
               </div>
               <div className="p-4 rounded-2xl bg-gradient-to-br from-purple-500 to-purple-600 shadow-lg">
@@ -324,7 +407,7 @@ export default function AssetRegister() {
             </div>
           </Card>
 
-          
+
           <Card className="p-6 shadow-elevated border-0 bg-gradient-to-br from-red-50 to-white dark:from-red-950/20 dark:to-card animate-fade-in hover:shadow-glow transition-all duration-300">
             <div className="flex items-start justify-between">
               <div className="space-y-2">
@@ -333,23 +416,52 @@ export default function AssetRegister() {
                 {/* <p className="text-xs font-medium text-muted-foreground">Poor condition</p> */}
               </div>
               <div className="p-4 rounded-2xl bg-gradient-to-br from-red-500 to-red-600 shadow-lg">
-            
+
                 <AlertTriangle className="h-7 w-7 text-white" />
               </div>
             </div>
           </Card>
         </div>
 
-        {/* Search */}
+        {/* Search & Filters */}
         <Card className="p-4 shadow-elevated border-0 gradient-card animate-fade-in">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
-            <Input
-              placeholder="Search by route ID, road name, or surveyor..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-11 h-12"
-            />
+          <div className="flex flex-col md:flex-row gap-4">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
+              <Input
+                placeholder="Search by route ID, road name, or surveyor..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-11 h-12"
+              />
+            </div>
+            <div className="w-full md:w-64">
+              <Select
+                value={selectedRouteId || "all"}
+                onValueChange={(val) => setSelectedRouteId(val === "all" ? null : val)}
+              >
+                <SelectTrigger className="h-12">
+                  <SelectValue placeholder="Filter by Route" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Routes</SelectItem>
+                  {roads.map((road) => (
+                    <SelectItem key={road.route_id} value={road.route_id.toString()}>
+                      #{road.route_id} - {road.road_name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            {selectedRouteId && (
+              <Button
+                variant="outline"
+                onClick={() => setSelectedRouteId(null)}
+                className="h-12"
+              >
+                Clear Filter
+              </Button>
+            )}
           </div>
         </Card>
 
@@ -370,7 +482,6 @@ export default function AssetRegister() {
                     <th className="text-left p-5 font-bold text-sm uppercase tracking-wide">Surveyor</th>
                     <th className="text-left p-5 font-bold text-sm uppercase tracking-wide">Survey Date</th>
                     {/* <th className="text-left p-5 font-bold text-sm uppercase tracking-wide">Asset Condition</th> */}
-                    <th className="text-left p-5 font-bold text-sm uppercase tracking-wide">Total Assets</th>
                     <th className="text-left p-5 font-bold text-sm uppercase tracking-wide">Actions</th>
                   </tr>
                 </thead>
@@ -439,11 +550,6 @@ export default function AssetRegister() {
                           </Badge>
                         )}
                       </td> */}
-                      <td className="p-5">
-                        <Badge variant="secondary" className="font-bold text-lg px-3 py-1">
-                          {road.totalAssets}
-                        </Badge>
-                      </td>
                       <td className="p-5">
                         <div className="flex gap-2">
                           {road.surveyId ? (
@@ -529,265 +635,291 @@ export default function AssetRegister() {
 
           {detailAssets.length > 0 ? (
             <>
-              {/* Analytics Dashboard */}
-              <div className="space-y-6">
-                {/* KPI Summary Cards */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <Card className="p-4 bg-gradient-to-br from-purple-50 to-white dark:from-purple-950/20 dark:to-card border-purple-200">
-                    <div className="space-y-2">
-                      <p className="text-xs font-semibold text-purple-600 dark:text-purple-400 uppercase tracking-wide">Total Detected</p>
-                      <p className="text-3xl font-bold bg-gradient-to-br from-purple-600 to-purple-400 bg-clip-text text-transparent">
-                        {detailAssets.length}
-                      </p>
-                      <p className="text-xs text-muted-foreground">AI-detected assets</p>
-                    </div>
-                  </Card>
+              {/* Category Tabs Navigation */}
+              <Tabs value={filterCategory} onValueChange={setFilterCategory} className="w-full">
+                <div className="flex items-center justify-between mb-4">
+                  <TabsList className="bg-muted/50 p-1 h-auto flex-wrap">
+                    <TabsTrigger value="all" className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
+                      All Categories
+                      <Badge variant="secondary" className="ml-2 text-xs">{detailAssets.length}</Badge>
+                    </TabsTrigger>
+                    {Object.values(ANNOTATION_CATEGORIES)
+                      .filter(category => detailAssets.some(a => a.category === category))
+                      .map(category => {
+                        const count = detailAssets.filter(a => a.category === category).length;
+                        return (
+                          <TabsTrigger key={category} value={category} className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
+                            {category}
+                            <Badge variant="secondary" className="ml-2 text-xs">{count}</Badge>
+                          </TabsTrigger>
+                        );
+                      })
+                    }
+                  </TabsList>
 
-                  <Card className="p-4 bg-gradient-to-br from-green-50 to-white dark:from-green-950/20 dark:to-card border-green-200">
-                    <div className="space-y-2">
-                      <p className="text-xs font-semibold text-green-600 dark:text-green-400 uppercase tracking-wide">Good Condition</p>
-                      <p className="text-3xl font-bold bg-gradient-to-br from-green-600 to-green-400 bg-clip-text text-transparent">
-                        {detailAssets.filter(a => a.condition?.toLowerCase() === 'good').length}
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        {detailAssets.length > 0 ? ((detailAssets.filter(a => a.condition?.toLowerCase() === 'good').length / detailAssets.length) * 100).toFixed(0) : 0}% of total
-                      </p>
-                    </div>
-                  </Card>
-
-                  <Card className="p-4 bg-gradient-to-br from-amber-50 to-white dark:from-amber-950/20 dark:to-card border-amber-200">
-                    <div className="space-y-2">
-                      <p className="text-xs font-semibold text-amber-600 dark:text-amber-400 uppercase tracking-wide">Fair Condition</p>
-                      <p className="text-3xl font-bold bg-gradient-to-br from-amber-600 to-amber-400 bg-clip-text text-transparent">
-                        {detailAssets.filter(a => a.condition?.toLowerCase() === 'fair').length}
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        {detailAssets.length > 0 ? ((detailAssets.filter(a => a.condition?.toLowerCase() === 'fair').length / detailAssets.length) * 100).toFixed(0) : 0}% of total
-                      </p>
-                    </div>
-                  </Card>
-
-                  {/* <Card className="p-4 bg-gradient-to-br from-red-50 to-white dark:from-red-950/20 dark:to-card border-red-200">
-                    <div className="space-y-2">
-                      <p className="text-xs font-semibold text-red-600 dark:text-red-400 uppercase tracking-wide">Poor Condition</p>
-                      <p className="text-3xl font-bold bg-gradient-to-br from-red-600 to-red-400 bg-clip-text text-transparent">
-                        {detailAssets.filter(a => a.condition?.toLowerCase() === 'poor').length}
-                      </p>
-                      <p className="text-xs text-muted-foreground">Needs attention</p>
-                    </div>
-                  </Card> */}
+                  <Select value={filterCondition} onValueChange={setFilterCondition}>
+                    <SelectTrigger className="w-[160px]">
+                      <SelectValue placeholder="All Conditions" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Conditions</SelectItem>
+                      <SelectItem value="good">Good</SelectItem>
+                      <SelectItem value="fair">Fair</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
 
-                {/* Charts Row */}
-                <div className="grid grid-cols-1 md:grid-cols-1 gap-6">
-                  {/* Condition Distribution Chart */}
-                  {/* <Card className="p-6">
-                    <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
-                      <PieChart className="h-5 w-5 text-primary" />
-                      Condition Distribution
-                    </h3>
-                    <div className="space-y-3">
-                      {[
-                        { label: 'Good', count: detailAssets.filter(a => a.condition?.toLowerCase() === 'good').length, color: 'bg-green-500', textColor: 'text-green-700' },
-                        { label: 'Fair', count: detailAssets.filter(a => a.condition?.toLowerCase() === 'fair').length, color: 'bg-amber-500', textColor: 'text-amber-700' },
-                        { label: 'Poor', count: detailAssets.filter(a => a.condition?.toLowerCase() === 'poor').length, color: 'bg-red-500', textColor: 'text-red-700' },
-                      ].map(item => {
-                        const percentage = detailAssets.length > 0 ? (item.count / detailAssets.length) * 100 : 0;
-                        return (
-                          <div key={item.label}>
-                            <div className="flex items-center justify-between mb-1">
-                              <span className={`text-sm font-semibold ${item.textColor}`}>{item.label}</span>
-                              <span className="text-sm font-bold">{item.count} ({percentage.toFixed(0)}%)</span>
-                            </div>
-                            <div className="w-full h-3 bg-muted rounded-full overflow-hidden">
-                              <div
-                                className={`h-full ${item.color} transition-all duration-500`}
-                                style={{ width: `${percentage}%` }}
-                              />
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </Card> */}
+                {/* Dynamic Content Based on Selected Category */}
+                {(() => {
+                  const selectedCategory = filterCategory;
+                  const categoryAssets = selectedCategory === 'all'
+                    ? detailAssets
+                    : detailAssets.filter(a => a.category === selectedCategory);
 
-                  {/* Category Distribution Chart */}
-                  <Card className="p-6">
-                    <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
-                      <BarChart3 className="h-5 w-5 text-primary dark:text-foreground" />
-                      Asset Categories
-                    </h3>
-                    <div className="space-y-3">
-                      {Array.from(new Set(detailAssets.map(a => a.category).filter(Boolean)))
-                        .map(category => {
-                          const count = detailAssets.filter(a => a.category === category).length;
-                          const percentage = detailAssets.length > 0 ? (count / detailAssets.length) * 100 : 0;
+                  const filteredAssets = categoryAssets.filter(
+                    asset => filterCondition === 'all' || asset.condition?.toLowerCase() === filterCondition
+                  );
+
+                  // Get unique asset types (labels) for this category - use asset_type or type
+                  const assetTypes = Array.from(new Set(filteredAssets.map(a => a.asset_type || a.type || a.category).filter(Boolean)));
+
+                  // Calculate stats by type
+                  const typeStats = assetTypes.map(type => {
+                    const typeAssets = filteredAssets.filter(a => (a.asset_type || a.type || a.category) === type);
+                    return {
+                      type,
+                      total: typeAssets.length,
+                      good: typeAssets.filter(a => a.condition?.toLowerCase() === 'good').length,
+                      fair: typeAssets.filter(a => a.condition?.toLowerCase() === 'fair').length,
+                      poor: typeAssets.filter(a => a.condition?.toLowerCase() === 'poor').length,
+                      avgConfidence: typeAssets.reduce((sum, a) => sum + (a.confidence || 0), 0) / (typeAssets.length || 1),
+                    };
+                  }).sort((a, b) => b.total - a.total);
+
+                  const totalGood = filteredAssets.filter(a => a.condition?.toLowerCase() === 'good').length;
+                  const totalFair = filteredAssets.filter(a => a.condition?.toLowerCase() === 'fair').length;
+
+                  return (
+                    <div className="space-y-6">
+                      {/* Category Overview KPIs */}
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        <Card className="p-4 bg-gradient-to-br from-purple-50 to-white dark:from-purple-950/20 dark:to-card border-purple-200">
+                          <p className="text-xs font-semibold text-purple-600 dark:text-purple-400 uppercase tracking-wide">Total Assets</p>
+                          <p className="text-3xl font-bold bg-gradient-to-br from-purple-600 to-purple-400 bg-clip-text text-transparent">
+                            {filteredAssets.length}
+                          </p>
+                          <p className="text-xs text-muted-foreground">{assetTypes.length} types</p>
+                        </Card>
+
+                        <Card className="p-4 bg-gradient-to-br from-green-50 to-white dark:from-green-950/20 dark:to-card border-green-200">
+                          <p className="text-xs font-semibold text-green-600 dark:text-green-400 uppercase tracking-wide">Good</p>
+                          <p className="text-3xl font-bold bg-gradient-to-br from-green-600 to-green-400 bg-clip-text text-transparent">
+                            {totalGood}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            {filteredAssets.length > 0 ? ((totalGood / filteredAssets.length) * 100).toFixed(0) : 0}%
+                          </p>
+                        </Card>
+
+                        <Card className="p-4 bg-gradient-to-br from-amber-50 to-white dark:from-amber-950/20 dark:to-card border-amber-200">
+                          <p className="text-xs font-semibold text-amber-600 dark:text-amber-400 uppercase tracking-wide">Fair</p>
+                          <p className="text-3xl font-bold bg-gradient-to-br from-amber-600 to-amber-400 bg-clip-text text-transparent">
+                            {totalFair}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            {filteredAssets.length > 0 ? ((totalFair / filteredAssets.length) * 100).toFixed(0) : 0}%
+                          </p>
+                        </Card>
+
+                        <Card className="p-4 bg-gradient-to-br from-blue-50 to-white dark:from-blue-950/20 dark:to-card border-blue-200">
+                          <p className="text-xs font-semibold text-blue-600 dark:text-blue-400 uppercase tracking-wide">Avg Confidence</p>
+                          <p className="text-3xl font-bold bg-gradient-to-br from-blue-600 to-blue-400 bg-clip-text text-transparent">
+                            {(filteredAssets.reduce((sum, a) => sum + (a.confidence || 0), 0) / (filteredAssets.length || 1) * 100).toFixed(0)}%
+                          </p>
+                          <p className="text-xs text-muted-foreground">AI detection</p>
+                        </Card>
+                      </div>
+
+                      {/* Asset Types Breakdown for Selected Category */}
+                      <Card className="p-6">
+                        <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
+                          <BarChart3 className="h-5 w-5 text-primary dark:text-foreground" />
+                          {selectedCategory === 'all' ? 'Asset Types Overview' : `${selectedCategory} - Asset Types`}
+                        </h3>
+
+                        {typeStats.length > 0 ? (
+                          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                            {typeStats.map(stat => (
+                              <Card key={stat.type} className="p-4 bg-muted/20 hover:bg-muted/40 transition-colors">
+                                <div className="flex items-center justify-between mb-3">
+                                  <h4 className="font-semibold text-sm truncate flex-1" title={stat.type}>{stat.type}</h4>
+                                  <Badge variant="secondary" className="ml-2 font-bold">{stat.total}</Badge>
+                                </div>
+
+                                {/* Condition breakdown bar */}
+                                <div className="flex h-3 rounded-full overflow-hidden mb-2">
+                                  {stat.good > 0 && (
+                                    <div
+                                      className="bg-green-500 transition-all"
+                                      style={{ width: `${(stat.good / stat.total) * 100}%` }}
+                                      title={`Good: ${stat.good}`}
+                                    />
+                                  )}
+                                  {stat.fair > 0 && (
+                                    <div
+                                      className="bg-amber-500 transition-all"
+                                      style={{ width: `${(stat.fair / stat.total) * 100}%` }}
+                                      title={`Fair: ${stat.fair}`}
+                                    />
+                                  )}
+                                </div>
+
+                                {/* Condition labels */}
+                                <div className="flex justify-between text-xs text-muted-foreground">
+                                  <span className="flex items-center gap-1">
+                                    <span className="w-2 h-2 rounded-full bg-green-500"></span>
+                                    {stat.good}
+                                  </span>
+                                  <span className="flex items-center gap-1">
+                                    <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+                                    {stat.fair}
+                                  </span>
+                                  <span className="text-primary dark:text-foreground font-medium">
+                                    {(stat.avgConfidence * 100).toFixed(0)}% conf
+                                  </span>
+                                </div>
+                              </Card>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="text-muted-foreground text-center py-8">No assets found for the selected filters</p>
+                        )}
+                      </Card>
+
+                      {/* Detailed Assets Table */}
+                      <Card className="overflow-hidden">
+                        <div className="p-4 border-b bg-muted/30">
+                          <h3 className="font-bold flex items-center gap-2">
+                            <FileText className="h-5 w-5" />
+                            Detailed Asset List
+                            <Badge variant="outline" className="ml-2">{filteredAssets.length} items</Badge>
+                          </h3>
+                        </div>
+
+                        <div className="overflow-x-auto">
+                          <table className="w-full">
+                            <thead className="bg-gradient-to-r from-primary/5 via-accent/5 to-primary/5 border-b">
+                              <tr>
+                                <th className="text-left p-3 font-bold text-xs uppercase tracking-wide">Asset Type</th>
+                                <th className="text-left p-3 font-bold text-xs uppercase tracking-wide">Category</th>
+                                <th className="text-left p-3 font-bold text-xs uppercase tracking-wide">Location</th>
+                                <th className="text-left p-3 font-bold text-xs uppercase tracking-wide">Confidence</th>
+                                <th className="text-left p-3 font-bold text-xs uppercase tracking-wide">Condition</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {(() => {
+                                const totalPages = Math.ceil(filteredAssets.length / itemsPerPage);
+                                const startIndex = (currentPage - 1) * itemsPerPage;
+                                const paginatedAssets = filteredAssets.slice(startIndex, startIndex + itemsPerPage);
+
+                                return paginatedAssets.map((asset) => {
+                                  const assetType = asset.asset_type || asset.type || 'Unknown';
+                                  return (
+                                    <tr key={asset._id} className="border-b hover:bg-primary/5 transition-colors">
+                                      <td className="p-3">
+                                        <div className="flex items-center gap-2">
+                                          <span className="font-semibold text-sm">{assetType}</span>
+                                        </div>
+                                      </td>
+                                      <td className="p-3">
+                                        <Badge variant="outline" className="text-xs bg-primary/5">
+                                          {asset.category}
+                                        </Badge>
+                                      </td>
+                                      <td className="p-3">
+                                        {asset.lat && asset.lng ? (
+                                          <div className="flex items-center gap-1 text-xs font-mono text-muted-foreground">
+                                            <MapPin className="h-3 w-3" />
+                                            {asset.lat.toFixed(4)}, {asset.lng.toFixed(4)}
+                                          </div>
+                                        ) : (
+                                          <span className="text-xs text-muted-foreground">—</span>
+                                        )}
+                                      </td>
+                                      <td className="p-3">
+                                        <div className="flex items-center gap-2">
+                                          <div className="w-12 h-2 bg-muted rounded-full overflow-hidden">
+                                            <div
+                                              className="h-full bg-gradient-to-r from-primary to-accent"
+                                              style={{ width: `${(asset.confidence || 0) * 100}%` }}
+                                            />
+                                          </div>
+                                          <span className="text-xs font-bold">
+                                            {((asset.confidence || 0) * 100).toFixed(0)}%
+                                          </span>
+                                        </div>
+                                      </td>
+                                      <td className="p-3">
+                                        <Badge variant="outline" className={cn("font-semibold capitalize text-xs", getConditionColor(asset.condition))}>
+                                          {asset.condition || "Unknown"}
+                                        </Badge>
+                                      </td>
+                                    </tr>
+                                  );
+                                });
+                              })()}
+                            </tbody>
+                          </table>
+                        </div>
+
+                        {/* Pagination */}
+                        {(() => {
+                          const totalPages = Math.ceil(filteredAssets.length / itemsPerPage);
+                          const startIndex = (currentPage - 1) * itemsPerPage;
+                          const endIndex = Math.min(startIndex + itemsPerPage, filteredAssets.length);
+
+                          if (totalPages <= 1) return null;
+
                           return (
-                            <div key={category}>
-                              <div className="flex items-center justify-between mb-1">
-                                <span className="text-sm font-semibold text-primary dark:text-foreground">{category}</span>
-                                <span className="text-sm font-bold">{count} ({percentage.toFixed(0)}%)</span>
+                            <div className="flex items-center justify-between px-4 py-3 border-t bg-muted/30">
+                              <div className="text-sm text-muted-foreground">
+                                Showing {startIndex + 1} - {endIndex} of {filteredAssets.length} assets
                               </div>
-                              <div className="w-full h-3 bg-muted rounded-full overflow-hidden">
-                                <div
-                                  className="h-full bg-gradient-to-r from-blue-500 to-purple-500 transition-all duration-500"
-                                  style={{ width: `${percentage}%` }}
-                                />
+                              <div className="flex items-center gap-2">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                                  disabled={currentPage === 1}
+                                  className="h-8"
+                                >
+                                  <ChevronLeft className="h-4 w-4 mr-1" />
+                                  Previous
+                                </Button>
+                                <span className="text-sm font-medium px-3">
+                                  Page {currentPage} of {totalPages}
+                                </span>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                                  disabled={currentPage === totalPages}
+                                  className="h-8"
+                                >
+                                  Next
+                                  <ChevronRight className="h-4 w-4 ml-1" />
+                                </Button>
                               </div>
                             </div>
                           );
-                        })
-                      }
+                        })()}
+                      </Card>
                     </div>
-                  </Card>
-                </div>
-
-                {/* Confidence Score Distribution */}
-                <Card className="p-6">
-                  <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
-                    <TrendingUp className="h-5 w-5 text-primary" />
-                    AI Confidence Scores
-                  </h3>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    {[
-                      { label: 'High Confidence (>80%)', min: 0.8, color: 'from-green-500 to-green-600' },
-                      { label: 'Medium Confidence (50-80%)', min: 0.5, max: 0.8, color: 'from-amber-500 to-amber-600' },
-                      { label: 'Low Confidence (<50%)', max: 0.5, color: 'from-red-500 to-red-600' },
-                    ].map(range => {
-                      const count = detailAssets.filter(a => {
-                        const conf = a.confidence || 0;
-                        if (range.max && range.min) return conf >= range.min && conf < range.max;
-                        if (range.min) return conf >= range.min;
-                        if (range.max) return conf < range.max;
-                        return false;
-                      }).length;
-                      const avgConf = detailAssets.filter(a => {
-                        const conf = a.confidence || 0;
-                        if (range.max && range.min) return conf >= range.min && conf < range.max;
-                        if (range.min) return conf >= range.min;
-                        if (range.max) return conf < range.max;
-                        return false;
-                      }).reduce((sum, a) => sum + (a.confidence || 0), 0) / (count || 1);
-
-                      return (
-                        <Card key={range.label} className="p-4 bg-gradient-to-br from-slate-50 to-white dark:from-slate-950/20 dark:to-card">
-                          <p className="text-xs font-semibold text-muted-foreground mb-2">{range.label}</p>
-                          <p className="text-2xl font-bold mb-1">{count}</p>
-                          <p className="text-xs text-muted-foreground">Avg: {(avgConf * 100).toFixed(0)}%</p>
-                          <div className={`w-full h-2 bg-gradient-to-r ${range.color} rounded-full mt-2`}
-                               style={{ opacity: count > 0 ? 1 : 0.2 }} />
-                        </Card>
-                      );
-                    })}
-                  </div>
-                </Card>
-              </div>
-
-              {/* Filters */}
-              <div className="flex gap-4 pt-4">
-                <Select value={filterCategory} onValueChange={setFilterCategory}>
-                  <SelectTrigger className="w-[200px]">
-                    <SelectValue placeholder="All Categories" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Categories</SelectItem>
-                    {categories.map((cat) => (
-                      <SelectItem key={cat} value={cat}>{cat}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-
-                <Select value={filterCondition} onValueChange={setFilterCondition}>
-                  <SelectTrigger className="w-[200px]">
-                    <SelectValue placeholder="All Conditions" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Conditions</SelectItem>
-                    <SelectItem value="good">Good</SelectItem>
-                    <SelectItem value="fair">Fair</SelectItem>
-                    <SelectItem value="poor">Poor</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+                  );
+                })()}
+              </Tabs>
             </>
-          ) : null}
-
-          {detailAssets.length > 0 ? (
-            <div className="overflow-x-auto rounded-xl border">
-              <table className="w-full">
-                <thead className="bg-gradient-to-r from-primary/5 via-accent/5 to-primary/5 border-b-2 border-primary/20">
-                  <tr>
-                    <th className="text-left p-4 font-bold text-sm uppercase tracking-wide">Asset ID</th>
-                    <th className="text-left p-4 font-bold text-sm uppercase tracking-wide">Category</th>
-                    <th className="text-left p-4 font-bold text-sm uppercase tracking-wide">Type</th>
-                    <th className="text-left p-4 font-bold text-sm uppercase tracking-wide">Location</th>
-                    <th className="text-left p-4 font-bold text-sm uppercase tracking-wide">Confidence</th>
-                    <th className="text-left p-4 font-bold text-sm uppercase tracking-wide">Condition</th>
-                    <th className="text-left p-4 font-bold text-sm uppercase tracking-wide">Detected</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {detailAssets
-                    .filter(asset => filterCategory === 'all' || asset.category === filterCategory)
-                    .filter(asset => filterCondition === 'all' || asset.condition?.toLowerCase() === filterCondition)
-                    .map((asset) => (
-                    <tr
-                      key={asset._id}
-                      className="border-b hover:bg-primary/5 transition-colors"
-                    >
-                      <td className="p-4">
-                        <Badge variant="outline" className="font-mono font-bold">
-                          {asset._id.substring(0, 8)}
-                        </Badge>
-                      </td>
-                      <td className="p-4">
-                        <Badge variant="secondary" className="text-xs">
-                          {asset.category || "Unknown"}
-                        </Badge>
-                      </td>
-                      <td className="p-4 font-semibold">{asset.type || asset.category}</td>
-                      <td className="p-4">
-                        {asset.lat && asset.lng ? (
-                          <div className="flex items-center gap-2">
-                            <MapPin className="h-3 w-3 text-muted-foreground" />
-                            <span className="text-xs font-mono">
-                              {asset.lat.toFixed(4)}, {asset.lng.toFixed(4)}
-                            </span>
-                          </div>
-                        ) : (
-                          <span className="text-xs text-muted-foreground">—</span>
-                        )}
-                      </td>
-                      <td className="p-4">
-                        {asset.confidence ? (
-                          <div className="flex items-center gap-2">
-                            <div className="w-16 h-2 bg-muted rounded-full overflow-hidden">
-                              <div
-                                className="h-full bg-gradient-to-r from-primary to-accent"
-                                style={{ width: `${asset.confidence * 100}%` }}
-                              />
-                            </div>
-                            <span className="text-xs font-bold text-primary dark:text-foreground">
-                              {(asset.confidence * 100).toFixed(0)}%
-                            </span>
-                          </div>
-                        ) : (
-                          <span className="text-xs text-muted-foreground">—</span>
-                        )}
-                      </td>
-                      <td className="p-4">
-                        <Badge variant="outline" className={cn("font-semibold capitalize", getConditionColor(asset.condition))}>
-                          {asset.condition || "Unknown"}
-                        </Badge>
-                      </td>
-                      <td className="p-4 text-xs text-muted-foreground">
-                        {new Date(asset.detected_at).toLocaleDateString()}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
           ) : (
             <Card className="p-12 text-center border-2 border-dashed">
               <div className="inline-flex p-6 rounded-full bg-primary/10 mb-4">

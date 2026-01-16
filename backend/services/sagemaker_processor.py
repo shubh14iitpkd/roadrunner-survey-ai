@@ -74,6 +74,7 @@ class SageMakerVideoProcessor:
         ]
 
         for config_path in possible_paths:
+            print(config_path, config_path.exists())
             if config_path.exists():
                 try:
                     with open(config_path, 'r') as f:
@@ -396,10 +397,10 @@ class SageMakerVideoProcessor:
 
             # Parse response
             result = json.loads(response['Body'].read().decode())
-
+            print(result)
             # YOLO pipeline format: {"predictions": [{"class_name": str, "confidence": float, "bbox": {...}}, ...]}
             detections = result.get('predictions', [])
-
+            print(detections)
             # Filter by confidence threshold (0.25 default)
             confidence_threshold = float(os.getenv("CONFIDENCE_THRESHOLD", "0.25"))
             detections = [d for d in detections if d.get('confidence', 0) >= confidence_threshold]

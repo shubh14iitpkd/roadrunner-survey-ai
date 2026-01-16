@@ -1,3 +1,5 @@
+import os
+from pathlib import Path
 from flask import Blueprint, request
 from bson import ObjectId
 from pymongo import DESCENDING
@@ -121,3 +123,106 @@ def get_survey_history(route_id: int):
     db = get_db()
     surveys = list(db.surveys.find({"route_id": route_id}).sort("survey_version", DESCENDING))
     return mongo_response({"items": surveys, "count": len(surveys), "route_id": route_id})
+
+@surveys_bp.delete("/<survey_id>")
+@role_required(["admin", "surveyor"])
+def delete_survey(survey_id: str):
+    """Delete a survey and all associated videos/frames.
+    
+    For videos from video_library, only DB entries are deleted (files preserved).
+    For uploaded videos, both DB entries and files are deleted.
+    """
+    db = get_db()
+    
+    # 1. Find the survey first
+    survey = db.surveys.find_one({"_id": ObjectId(survey_id)})
+    if not survey:
+        return mongo_response({"error": "Survey not found"}, 404)
+    
+    route_id = survey.get("route_id")
+    upload_root = Path(os.getenv("UPLOAD_DIR", Path(__file__).resolve().parents[1] / "uploads"))
+    
+    # 2. Find all videos for this survey
+    videos = list(db.videos.find({"survey_id": ObjectId(survey_id)}))
+    
+    deleted_files = []
+    preserved_files = []
+    
+    for video in videos:
+        video_id = video["_id"]
+        storage_url = video.get("storage_url", "")
+        
+        # 3. Delete frames associated with this video
+        # db.frames.delete_many({"video_id": ObjectId(video_id)})
+        
+        # 4. Check if video is from library (preserve library files)
+        is_library_video = "video_library" in storage_url
+        
+        if not is_library_video and storage_url:
+            # Delete the actual video file
+            # storage_url is like /uploads/filename.mp4
+            relative_path = storage_url.lstrip("/")
+            if relative_path.startswith("uploads/"):
+                relative_path = relative_path[8:]  # Remove 'uploads/' prefix
+            file_path = upload_root / relative_path
+            
+            if file_path.exists():
+                try:
+                    file_path.unlink()
+                    deleted_files.append(str(file_path))
+                except Exception as e:
+                    print(f"[DELETE] Failed to delete file {file_path}: {e}")
+            
+            # Also try to delete thumbnail if exists
+            thumb_url = video.get("thumbnail_url", "")
+            if thumb_url:
+                thumb_rel = thumb_url.lstrip("/")
+                if thumb_rel.startswith("uploads/"):
+                    thumb_rel = thumb_rel[8:]
+                thumb_path = upload_root / thumb_rel
+                if thumb_path.exists():
+                    try:
+                        thumb_path.unlink()
+                    except Exception:
+                        pass
+            
+            # Delete GPX file if exists
+            gpx_url = video.get("gpx_file_url", "")
+            if gpx_url:
+                gpx_rel = gpx_url.lstrip("/")
+                if gpx_rel.startswith("uploads/"):
+                    gpx_rel = gpx_rel[8:]
+                gpx_path = upload_root / gpx_rel
+                if gpx_path.exists():
+                    try:
+                        gpx_path.unlink()
+                    except Exception:
+                        pass
+        else:
+            preserved_files.append(storage_url)
+    
+    # 5. Delete all videos from DB
+    videos_deleted = db.videos.delete_many({"survey_id": ObjectId(survey_id)})
+    
+    # 6. Delete the survey
+    db.surveys.delete_one({"_id": ObjectId(survey_id)})
+    
+    # 7. Update is_latest flag for remaining surveys on this route
+    if route_id:
+        # Find the most recent survey for this route and mark it as latest
+        latest = db.surveys.find_one(
+            {"route_id": route_id},
+            sort=[("survey_date", DESCENDING)]
+        )
+        if latest:
+            db.surveys.update_one(
+                {"_id": latest["_id"]},
+                {"$set": {"is_latest": True}}
+            )
+    
+    return mongo_response({
+        "ok": True,
+        "deleted_videos": videos_deleted.deleted_count,
+        "deleted_files": len(deleted_files),
+        "preserved_library_files": len(preserved_files)
+    })

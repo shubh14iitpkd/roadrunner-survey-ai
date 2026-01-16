@@ -35,38 +35,37 @@ const App = () => (
           }}
         >
           <AuthProvider>
-            <UploadProvider>
             <Routes>
               {/* Public routes */}
               <Route path="/login" element={<Login />} />
               <Route path="/signup" element={<SignUp />} />
-
               {/* Protected routes */}
               <Route
                 path="/*"
                 element={
                   <ProtectedRoute>
-                    <Layout>
-                      <Routes>
-                        <Route path="/" element={<Dashboard />} />
-                        <Route path="/roads" element={<RoadRegister />} />
-                        <Route path="/upload" element={<SurveyUpload />} />
-                        <Route path="/videos" element={<VideoLibrary />} />
-                        <Route path="/assets" element={<AssetRegister />} />
-                        <Route path="/gis" element={<GISView />} />
-                        <Route path="/ask-ai" element={<AskAI />} />
-                        <Route path="/settings" element={<Settings />} />
-                        <Route path="*" element={<NotFound />} />
-                      </Routes>
-                    </Layout>
+                    <UploadProvider>
+                      <Layout>
+                        <Routes>
+                          <Route path="/" element={<Dashboard />} />
+                          <Route path="/roads" element={<RoadRegister />} />
+                          <Route path="/upload" element={<SurveyUpload />} />
+                          <Route path="/videos" element={<VideoLibrary />} />
+                          <Route path="/assets" element={<AssetRegister />} />
+                          <Route path="/gis" element={<GISView />} />
+                          <Route path="/ask-ai" element={<AskAI />} />
+                          <Route path="/settings" element={<Settings />} />
+                          <Route path="*" element={<NotFound />} />
+                        </Routes>
+                      </Layout>
+                    </UploadProvider>
                   </ProtectedRoute>
                 }
               />
             </Routes>
-          </UploadProvider>
-        </AuthProvider>
-      </BrowserRouter>
-    </TooltipProvider>
+          </AuthProvider>
+        </BrowserRouter>
+      </TooltipProvider>
     </ThemeProvider>
   </QueryClientProvider>
 );

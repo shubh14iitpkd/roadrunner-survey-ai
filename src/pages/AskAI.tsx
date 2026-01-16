@@ -2,533 +2,543 @@ import { useState, useEffect, useRef } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { MessageSquare, Send, Sparkles, Plus, Trash2, ChevronLeft, ChevronRight, Video, Upload, Loader2, CheckCircle, AlertCircle } from "lucide-react";
+import { MessageSquare, Send, Sparkles, Video, Clock, MapPin, Loader2, Image as ImageIcon, ChevronDown } from "lucide-react";
 import { api } from "@/lib/api";
-import { toast } from "sonner";
-import { MarkdownMessage } from "@/components/MarkdownMessage";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Badge } from "@/components/ui/badge";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 
 interface Message {
   role: "user" | "assistant";
   content: string;
+  frames?: FrameData[];
+  timestamp?: string;
 }
 
-interface Chat {
+interface FrameData {
+  frame_id: string;
+  frame_number: number;
+  timestamp: number;
+  image_url?: string;
+  detections: Detection[];
+  location?: { lat: number; lon: number };
+}
+
+interface Detection {
+  class_name: string;
+  confidence: number;
+  bbox?: number[];
+}
+
+interface VideoInfo {
   _id: string;
   title: string;
-  created_at: string;
-  updated_at: string;
-  last_message_preview?: string;
-  videoCount?: number;
-  videoInfo?: string;
+  route_id: number;
+  status: string;
+  duration_seconds?: number;
+  thumbnail_url?: string;
 }
 
-const samplePrompts = [
-  "How many street lights are on route 105?",
-  "Show me videos from route 258",
-  "What defects are available in the database?",
-  "List all severe potholes found in videos",
-  "Show me all road defects detected",
-];
+const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY || "AIzaSyAkJBDspyPQcVWTjc-zgsk4UhnRd-6OZ7k";
+const GEMINI_MODEL = "gemini-2.0-flash";
 
-interface VideoProcessingStatus {
-  processing: boolean;
-  progress: number;
-  status: string;
-  error?: string;
-  result?: any;
+async function askGeminiWithContext(
+  prompt: string,
+  videoContext: string,
+  framesContext: string,
+  conversationHistory: Message[]
+): Promise<string> {
+  if (!GEMINI_API_KEY) throw new Error("Missing VITE_GEMINI_API_KEY");
+
+  const systemPrompt = `You are an AI assistant specialized in road asset analysis for RoadSight AI.
+You have access to video survey data with frames extracted at regular intervals.
+Each frame contains AI-detected road assets like traffic signs, street lights, guardrails, etc.
+
+${videoContext}
+
+${framesContext}
+
+Answer questions about:
+- Assets detected at specific timestamps
+- Asset conditions and types
+- Location-based queries
+- Statistics and summaries
+- Anomalies and issues
+
+Be concise and reference specific timestamps/frame numbers when relevant.
+If asked about a specific time, find the closest frame and describe what was detected.`;
+
+  // Build conversation for context
+  const messages = conversationHistory.slice(-6).map(m =>
+    `${m.role === "user" ? "User" : "Assistant"}: ${m.content}`
+  ).join("\n\n");
+
+  const fullPrompt = messages
+    ? `${systemPrompt}\n\nConversation history:\n${messages}\n\nUser: ${prompt}`
+    : `${systemPrompt}\n\nUser: ${prompt}`;
+
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ role: "user", parts: [{ text: fullPrompt }] }],
+        generationConfig: {
+          temperature: 0.4,
+          maxOutputTokens: 1024,
+        },
+      }),
+    }
+  );
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || `HTTP ${res.status}`);
+  }
+
+  const data = await res.json();
+  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+  return text.trim() || "(No response)";
+}
+
+// Parse timestamp from user query (e.g., "at 2:30", "at 150 seconds", "frame 45")
+function parseTimestampFromQuery(query: string): { timestamp?: number; frameNumber?: number } {
+  // Match "at X:XX" or "X:XX"
+  const timeMatch = query.match(/(?:at\s+)?(\d+):(\d{2})/i);
+  if (timeMatch) {
+    const minutes = parseInt(timeMatch[1]);
+    const seconds = parseInt(timeMatch[2]);
+    return { timestamp: minutes * 60 + seconds };
+  }
+
+  // Match "at X seconds" or "X seconds"
+  const secondsMatch = query.match(/(?:at\s+)?(\d+)\s*(?:seconds?|sec|s)\b/i);
+  if (secondsMatch) {
+    return { timestamp: parseInt(secondsMatch[1]) };
+  }
+
+  // Match "frame X" or "frame number X"
+  const frameMatch = query.match(/frame\s*(?:number\s*)?(\d+)/i);
+  if (frameMatch) {
+    return { frameNumber: parseInt(frameMatch[1]) };
+  }
+
+  return {};
 }
 
 export default function AskAI() {
-  const [chats, setChats] = useState<Chat[]>([]);
-  const [currentChatId, setCurrentChatId] = useState<string | null>(null);
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [messages, setMessages] = useState<Message[]>([
+    {
+      role: "assistant",
+      content: "Hello! I'm RoadSight AI Assistant. Select a processed video above to start analyzing its content. I can answer questions about detected assets, specific timestamps, and provide insights from the survey data.",
+    },
+  ]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
-  const [loadingChats, setLoadingChats] = useState(true);
-  const [loadingMessages, setLoadingMessages] = useState(false);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
-  
-  // Video upload states
-  const [showVideoUpload, setShowVideoUpload] = useState(false);
-  const [videoFile, setVideoFile] = useState<File | null>(null);
-  const [roadName, setRoadName] = useState("");
-  const [roadSection, setRoadSection] = useState("");
-  const [surveyor, setSurveyor] = useState("");
-  const [videoProcessing, setVideoProcessing] = useState<VideoProcessingStatus>({
-    processing: false,
-    progress: 0,
-    status: 'idle'
-  });
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [chatId, setChatId] = useState<string | null>(null);
+  // Video selection
+  const [videos, setVideos] = useState<VideoInfo[]>([]);
+  const [selectedVideoId, setSelectedVideoId] = useState<string>("");
+  const [selectedVideo, setSelectedVideo] = useState<VideoInfo | null>(null);
+  const [videoFrames, setVideoFrames] = useState<FrameData[]>([]);
+  const [loadingFrames, setLoadingFrames] = useState(false);
 
-  // Load all chats on mount
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Debug: wrapper for setSelectedVideoId
+  const handleVideoSelect = (value: string) => {
+    console.log("Video selected:", value);
+    setSelectedVideoId(value);
+  };
+
+  // Load completed videos
   useEffect(() => {
-    loadChats();
+    (async () => {
+      try {
+        const resp = await api.videos.list({ status: "completed" });
+        if (resp?.items) {
+          // Parse the response properly
+          const videoList = resp.items.map((v: any) => ({
+            _id: typeof v._id === 'object' ? v._id.$oid : v._id,
+            title: v.title,
+            route_id: v.route_id,
+            status: v.status,
+            duration_seconds: v.duration_seconds,
+            thumbnail_url: v.thumbnail_url,
+          }));
+          setVideos(videoList);
+          console.log("Loaded videos:", videoList);
+        }
+      } catch (err) {
+        console.error("Failed to load videos:", err);
+      }
+    })();
   }, []);
 
-  // Load messages when chat changes
+  // Load frames when video is selected
   useEffect(() => {
-    if (currentChatId) {
-      loadMessages(currentChatId);
-    } else {
-      setMessages([
-        {
-          role: "assistant",
-          content:
-            "Hello! I'm RoadRunner AI Assistant. I can help you analyze road survey data, search for detections, and query videos. Ask me about routes, street lights, road markings, or any other road assets in our database.",
-        },
-      ]);
+    console.log("Selected video ID:", selectedVideoId);
+    if (!selectedVideoId) {
+      setVideoFrames([]);
+      setSelectedVideo(null);
+      return;
     }
-  }, [currentChatId]);
 
-  const loadChats = async () => {
-    try {
-      setLoadingChats(true);
-      const response = await api.ai.listChats();
-      const chatList = response.items || [];
-      
-      // Fetch video info for each chat
-      const chatsWithVideos = await Promise.all(
-        chatList.map(async (chat: Chat) => {
-          try {
-            const videoResponse = await api.ai.getChatVideos(chat._id);
-            const videos = videoResponse.videos || [];
+    const video = videos.find(v => v._id === selectedVideoId);
+    setSelectedVideo(video || null);
+    console.log(selectedVideoId);
+    (async () => {
+      setLoadingFrames(true);
+      try {
+        // Use the getAllFrames endpoint with has_detections filter
+        const resp = await api.videos.getAllFrames(selectedVideoId, true);
+        console.log(resp);
+        if (resp?.items) {
+          const frames: FrameData[] = resp.items.map((f: any) => {
+            // Flatten detections from all endpoints (detections is an object with endpoint names as keys)
+            const allDetections: Detection[] = [];
+            if (f.detections && typeof f.detections === 'object') {
+              Object.values(f.detections).forEach((endpointDets: any) => {
+                if (Array.isArray(endpointDets)) {
+                  endpointDets.forEach((d: any) => {
+                    allDetections.push({
+                      class_name: d.class_name,
+                      confidence: d.confidence,
+                      bbox: d.box || d.bbox,
+                    });
+                  });
+                }
+              });
+            }
+
+            // Extract location from GeoJSON Point format or direct lat/lon
+            let location: { lat: number; lon: number } | undefined;
+            if (f.location?.coordinates) {
+              // GeoJSON format: [lon, lat]
+              location = { lat: f.location.coordinates[1], lon: f.location.coordinates[0] };
+            } else if (f.lat && f.lon) {
+              location = { lat: f.lat, lon: f.lon };
+            }
+
             return {
-              ...chat,
-              videoCount: videos.length,
-              videoInfo: videos.length > 0 
-                ? `📹 ${videos[0].road_name || videos[0].video_id}${videos.length > 1 ? ` +${videos.length - 1}` : ''}`
-                : undefined
+              frame_id: typeof f._id === 'object' ? f._id.$oid : String(f._id),
+              frame_number: f.frame_number,
+              timestamp: f.timestamp || f.frame_number,
+              image_url: f.frame_path,
+              detections: allDetections,
+              location,
             };
-          } catch (err) {
-            return chat;
+          });
+          setVideoFrames(frames);
+
+          // Add a system message about the loaded video
+          if (video) {
+            setMessages(prev => [...prev, {
+              role: "assistant",
+              content: `Loaded video "${video.title}" (Route ${video.route_id}). Found ${frames.length} frames with detections. You can now ask me about:\n• What assets are at a specific timestamp (e.g., "What's at 2:30?")\n• Asset summaries (e.g., "How many traffic signs are there?")\n• Condition analysis\n• Location-based queries`,
+            }]);
           }
-        })
-      );
-      
-      setChats(chatsWithVideos);
-    } catch (err) {
-      console.error("Failed to load chats:", err);
-    } finally {
-      setLoadingChats(false);
-    }
-  };
-
-  const loadMessages = async (chatId: string) => {
-    try {
-      setLoadingMessages(true);
-      const response = await api.ai.listMessages(chatId);
-      const msgs = response.items || [];
-      setMessages(
-        msgs.map((m: any) => ({
-          role: m.role,
-          content: m.content,
-        }))
-      );
-    } catch (err) {
-      console.error("Failed to load messages:", err);
-      setMessages([]);
-    } finally {
-      setLoadingMessages(false);
-    }
-  };
-
-  const createNewChat = async () => {
-    try {
-      const title = "New Chat";
-      const response = await api.ai.createChat(title);
-      const newChat = response.chat;
-      setChats((prev) => [newChat, ...prev]);
-      setCurrentChatId(newChat._id);
-    } catch (err) {
-      console.error("Failed to create chat:", err);
-    }
-  };
-
-  const deleteChat = async (chatId: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (!confirm("Delete this chat?")) return;
-
-    try {
-      await api.ai.deleteChat(chatId);
-      setChats((prev) => prev.filter((c) => c._id !== chatId));
-      if (currentChatId === chatId) {
-        setCurrentChatId(null);
+        }
+      } catch (err) {
+        console.error("Failed to load frames:", err);
+      } finally {
+        setLoadingFrames(false);
       }
-    } catch (err) {
-      console.error("Failed to delete chat:", err);
+    })();
+  }, [selectedVideoId, videos]);
+
+  // Auto-scroll to bottom
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
+  const ensureChat = async () => {
+    if (chatId) return chatId;
+    try {
+      const title = input.trim().slice(0, 60) || "Video Analysis Chat";
+      const resp = await api.ai.createChat(title);
+      setChatId(resp.chat._id);
+      return resp.chat._id as string;
+    } catch {
+      return null;
     }
+  };
+
+  const persistMessage = async (cid: string, msg: Message) => {
+    try {
+      await api.ai.addMessage(cid, msg.role, msg.content);
+    } catch {
+      // ignore persistence errors
+    }
+  };
+
+  // Find frames near a timestamp
+  const findFramesNearTimestamp = (targetTimestamp: number, count: number = 3): FrameData[] => {
+    if (videoFrames.length === 0) return [];
+
+    // Sort by distance to target timestamp
+    const sorted = [...videoFrames].sort((a, b) =>
+      Math.abs(a.timestamp - targetTimestamp) - Math.abs(b.timestamp - targetTimestamp)
+    );
+
+    return sorted.slice(0, count);
+  };
+
+  // Find frame by number
+  const findFrameByNumber = (frameNumber: number): FrameData | undefined => {
+    return videoFrames.find(f => f.frame_number === frameNumber);
+  };
+
+  // Build context strings for Gemini
+  const buildVideoContext = (): string => {
+    if (!selectedVideo) return "No video selected.";
+    return `Current Video: "${selectedVideo.title}"
+Route ID: ${selectedVideo.route_id}
+Duration: ${selectedVideo.duration_seconds ? `${Math.floor(selectedVideo.duration_seconds / 60)}:${(selectedVideo.duration_seconds % 60).toString().padStart(2, '0')}` : 'Unknown'}
+Total frames with detections: ${videoFrames.length}`;
+  };
+
+  const buildFramesContext = (): string => {
+    if (videoFrames.length === 0) return "No frames loaded.";
+
+    // Summarize detections
+    const detectionCounts: Record<string, number> = {};
+    videoFrames.forEach(frame => {
+      frame.detections.forEach(det => {
+        detectionCounts[det.class_name] = (detectionCounts[det.class_name] || 0) + 1;
+      });
+    });
+
+    const sortedDetections = Object.entries(detectionCounts)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 15)
+      .map(([name, count]) => `${name}: ${count}`)
+      .join(", ");
+
+    // Sample frames for context
+    const sampleFrames = videoFrames.slice(0, 20).map(f => {
+      const dets = f.detections.map(d => d.class_name).join(", ");
+      return `Frame ${f.frame_number} (${formatTimestamp(f.timestamp)}): ${dets || "No detections"}`;
+    }).join("\n");
+
+    return `Detection Summary: ${sortedDetections}
+
+Sample Frames:
+${sampleFrames}`;
+  };
+
+  const formatTimestamp = (seconds: number): string => {
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
   const handleSend = async () => {
     if (!input.trim() || busy) return;
 
     const userMessage: Message = { role: "user", content: input };
-    setMessages((prev) => [...prev, userMessage]);
+    setMessages(prev => [...prev, userMessage]);
     setInput("");
     setBusy(true);
 
+    const cid = await ensureChat();
+    if (cid) persistMessage(cid, userMessage);
+
     try {
-      // Create chat if needed
-      let chatId = currentChatId;
-      if (!chatId) {
-        const title = input.trim().slice(0, 60) || "New Chat";
-        const response = await api.ai.createChat(title);
-        chatId = response.chat._id;
-        setCurrentChatId(chatId);
-        setChats((prev) => [response.chat, ...prev]);
+      // Check if user is asking about a specific timestamp
+      const { timestamp, frameNumber } = parseTimestampFromQuery(input);
+      let relevantFrames: FrameData[] = [];
+      let additionalContext = "";
+
+      if (timestamp !== undefined) {
+        relevantFrames = findFramesNearTimestamp(timestamp);
+        if (relevantFrames.length > 0) {
+          additionalContext = `\n\nFrames near timestamp ${formatTimestamp(timestamp)}:\n` +
+            relevantFrames.map(f => {
+              const dets = f.detections.map(d => `${d.class_name} (${(d.confidence * 100).toFixed(1)}%)`).join(", ");
+              return `Frame ${f.frame_number} at ${formatTimestamp(f.timestamp)}: ${dets || "No detections"}`;
+            }).join("\n");
+        }
+      } else if (frameNumber !== undefined) {
+        const frame = findFrameByNumber(frameNumber);
+        if (frame) {
+          relevantFrames = [frame];
+          const dets = frame.detections.map(d => `${d.class_name} (${(d.confidence * 100).toFixed(1)}%)`).join(", ");
+          additionalContext = `\n\nFrame ${frameNumber} at ${formatTimestamp(frame.timestamp)}: ${dets || "No detections"}`;
+        }
       }
 
-      // Send message to backend
-      const response = await api.ai.addMessage(chatId, userMessage.content);
+      const reply = await askGeminiWithContext(
+        input,
+        buildVideoContext(),
+        buildFramesContext() + additionalContext,
+        messages
+      );
 
-      // Backend returns { user_message, assistant_message }
       const aiMessage: Message = {
         role: "assistant",
-        content: response.assistant_message.content,
+        content: reply,
+        frames: relevantFrames.length > 0 ? relevantFrames : undefined,
+        timestamp: timestamp !== undefined ? formatTimestamp(timestamp) : undefined,
       };
 
-      setMessages((prev) => [...prev, aiMessage]);
-
-      // Update chat list
-      loadChats();
+      setMessages(prev => [...prev, aiMessage]);
+      if (cid) persistMessage(cid, aiMessage);
     } catch (e: any) {
-      console.error("Error sending message:", e);
-      const errorMessage: Message = {
+      const aiMessage: Message = {
         role: "assistant",
-        content: `Error: ${e?.message || "Failed to get response. Please try again."}`,
+        content: `Error: ${e?.message || e}`,
       };
-      setMessages((prev) => [...prev, errorMessage]);
+      setMessages(prev => [...prev, aiMessage]);
+      if (cid) persistMessage(cid, aiMessage);
     } finally {
       setBusy(false);
     }
   };
 
-  const handleVideoUpload = async () => {
-    if (!videoFile) {
-      toast.error("Please select a video file");
-      return;
-    }
-
-    // Create chat if needed
-    let chatId = currentChatId;
-    if (!chatId) {
-      try {
-        const response = await api.ai.createChat("Video Analysis");
-        chatId = response.chat._id;
-        setCurrentChatId(chatId);
-        setChats((prev) => [response.chat, ...prev]);
-      } catch (e: any) {
-        toast.error("Failed to create chat");
-        return;
-      }
-    }
-
-    setVideoProcessing({ processing: true, progress: 5, status: 'Preparing upload...' });
-
-    try {
-      // Upload and process video with chat_id (with progress tracking)
-      const result = await api.ai.processVideo(
-        videoFile, 
-        {
-          road_name: roadName || 'Unknown Road',
-          road_section: roadSection || 'Unknown Section',
-          surveyor: surveyor || 'Unknown',
-          chat_id: chatId
-        },
-        (progress) => {
-          // Update progress: 0-80% = upload, 80-100% = processing
-          const status = progress < 80 
-            ? `Uploading to S3: ${Math.round(progress)}%`
-            : progress < 90
-            ? 'Processing video...'
-            : 'Analyzing defects...';
-          setVideoProcessing({ processing: true, progress, status });
-        }
-      );
-
-      setVideoProcessing({ 
-        processing: false, 
-        progress: 100, 
-        status: 'completed',
-        result 
-      });
-
-      toast.success(`Video processed successfully! Found ${result.total_defects} defects.`);
-
-      // Reload chat list to show video info
-      await loadChats();
-
-      // Add AI message with results
-      const aiMessage: Message = {
-        role: "assistant",
-        content: `✅ Video processed successfully!\n\n📊 Results:\n- Total defects: ${result.total_defects}\n- Processing time: ${result.processing_time}\n- Severity distribution: ${JSON.stringify(result.severity_distribution)}\n- Type distribution: ${JSON.stringify(result.type_distribution)}\n\nYou can now ask me questions about the defects found in this video!`
-      };
-      setMessages((prev) => [...prev, aiMessage]);
-
-      // Reset form
-      setVideoFile(null);
-      setRoadName("");
-      setRoadSection("");
-      setSurveyor("");
-      setShowVideoUpload(false);
-
-    } catch (e: any) {
-      console.error("Error processing video:", e);
-      setVideoProcessing({ 
-        processing: false, 
-        progress: 0, 
-        status: 'error',
-        error: e?.message 
-      });
-      toast.error(`Failed to process video: ${e?.message || 'Unknown error'}`);
-    }
-  };
+  const samplePrompts = selectedVideoId ? [
+    "What assets were detected in this video?",
+    "What's at timestamp 1:30?",
+    "How many traffic signs are there?",
+    "Are there any damaged or poor condition assets?",
+    "Summarize the road infrastructure",
+    "What's at frame 60?",
+  ] : [];
 
   return (
     <div className="h-screen flex w-full overflow-hidden">
-      {/* Sidebar */}
-      <div
-        className={cn(
-          "border-r border-border bg-card transition-all duration-300",
-          sidebarOpen ? "w-80" : "w-0"
-        )}
-      >
-        {sidebarOpen && (
-          <div className="flex flex-col h-full">
-            {/* Sidebar Header */}
-            <div className="p-4 border-b border-border">
-              <Button onClick={createNewChat} className="w-full" size="sm">
-                <Plus className="h-4 w-4 mr-2" />
-                New Chat
-              </Button>
-            </div>
-
-            {/* Chat List */}
-            <div className="flex-1 overflow-y-auto p-2">
-              {loadingChats ? (
-                <div className="text-center text-sm text-muted-foreground p-4">Loading chats...</div>
-              ) : chats.length === 0 ? (
-                <div className="text-center text-sm text-muted-foreground p-4">No chats yet. Start a new one!</div>
-              ) : (
-                <div className="space-y-1">
-                  {chats.map((chat) => (
-                    <div
-                      key={chat._id}
-                      onClick={() => setCurrentChatId(chat._id)}
-                      className={cn(
-                        "p-3 rounded-lg cursor-pointer transition-colors group relative",
-                        currentChatId === chat._id
-                          ? "bg-primary/10 border border-primary/20"
-                          : "hover:bg-accent/50"
-                      )}
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium truncate">{chat.title}</p>
-                          {chat.videoInfo && (
-                            <p className="text-xs text-primary mt-1">{chat.videoInfo}</p>
-                          )}
-                          {chat.last_message_preview && (
-                            <p className="text-xs text-muted-foreground truncate mt-1">
-                              {chat.last_message_preview}
-                            </p>
-                          )}
-                          <p className="text-xs text-muted-foreground mt-1">
-                            {new Date(chat.updated_at).toLocaleDateString()}
-                          </p>
-                        </div>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
-                          onClick={(e) => deleteChat(chat._id, e)}
-                        >
-                          <Trash2 className="h-3 w-3 text-destructive" />
-                        </Button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Toggle Sidebar Button */}
-      <Button
-        variant="ghost"
-        size="icon"
-        className="absolute left-2 top-4 z-10"
-        onClick={() => setSidebarOpen(!sidebarOpen)}
-      >
-        {sidebarOpen ? <ChevronLeft className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-      </Button>
-
-      {/* Main Chat Area */}
       <div className="flex-1 flex flex-col max-w-4xl mx-auto w-full">
-        {/* Header */}
-        <div className="p-6 border-b border-border">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-primary to-primary/60 flex items-center justify-center">
-                <Sparkles className="h-5 w-5 text-white" />
-              </div>
-              <div>
-                <h1 className="text-2xl font-bold">Ask AI</h1>
-                <p className="text-sm text-muted-foreground">Intelligent assistant for road asset analysis & video defect detection</p>
-              </div>
+        {/* Header with Video Selector */}
+        <div className="p-6 border-b border-border space-y-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-primary to-primary/60 flex items-center justify-center">
+              <Sparkles className="h-5 w-5 text-white" />
             </div>
-            <Button 
-              onClick={() => setShowVideoUpload(!showVideoUpload)} 
-              variant={showVideoUpload ? "secondary" : "default"}
-              size="sm"
-            >
-              <Video className="h-4 w-4 mr-2" />
-              {showVideoUpload ? "Hide Upload" : "Upload Video"}
-            </Button>
+            <div className="flex-1">
+              <h1 className="text-2xl font-bold">Ask AI</h1>
+              <p className="text-sm text-muted-foreground">Query video data with natural language</p>
+            </div>
           </div>
+
+          {/* Video Selector */}
+          <div className="flex items-center gap-3">
+            <Video className="h-5 w-5 text-muted-foreground" />
+            <Select value={selectedVideoId} onValueChange={handleVideoSelect}>
+              <SelectTrigger className="flex-1">
+                <SelectValue placeholder="Select a processed video to analyze..." />
+              </SelectTrigger>
+              <SelectContent>
+                {videos.length === 0 ? (
+                  <SelectItem value="none" disabled>No processed videos available</SelectItem>
+                ) : (
+                  videos.map((video) => (
+                    <SelectItem key={video._id} value={video._id}>
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium">{video.title}</span>
+                        <Badge variant="outline" className="text-xs">Route {video.route_id}</Badge>
+                      </div>
+                    </SelectItem>
+                  ))
+                )}
+              </SelectContent>
+            </Select>
+            {loadingFrames && <Loader2 className="h-5 w-5 animate-spin text-primary" />}
+          </div>
+
+          {/* Video Info Badge */}
+          {selectedVideo && videoFrames.length > 0 && (
+            <div className="flex gap-2 flex-wrap">
+              <Badge variant="secondary" className="gap-1">
+                <ImageIcon className="h-3 w-3" />
+                {videoFrames.length} frames
+              </Badge>
+              <Badge variant="secondary" className="gap-1">
+                <Clock className="h-3 w-3" />
+                {selectedVideo.duration_seconds ? formatTimestamp(selectedVideo.duration_seconds) : "Unknown duration"}
+              </Badge>
+              <Badge variant="secondary" className="gap-1">
+                <MapPin className="h-3 w-3" />
+                Route {selectedVideo.route_id}
+              </Badge>
+            </div>
+          )}
         </div>
 
-        {/* Video Upload Panel */}
-        {showVideoUpload && (
-          <Card className="m-6 p-6 bg-accent/50">
-            <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-              <Upload className="h-5 w-5" />
-              Upload Video for RAG Processing
-            </h3>
-            <div className="space-y-4">
-              <div>
-                <label className="text-sm font-medium mb-2 block">Video File</label>
-                <Input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="video/*"
-                  onChange={(e) => setVideoFile(e.target.files?.[0] || null)}
-                  disabled={videoProcessing.processing}
-                />
-                {videoFile && (
-                  <p className="text-sm text-muted-foreground mt-1">
-                    Selected: {videoFile.name} ({(videoFile.size / (1024 * 1024)).toFixed(2)} MB)
-                  </p>
-                )}
-              </div>
-              <div className="grid grid-cols-3 gap-4">
-                <div>
-                  <label className="text-sm font-medium mb-2 block">Road Name</label>
-                  <Input
-                    placeholder="e.g., Al Corniche"
-                    value={roadName}
-                    onChange={(e) => setRoadName(e.target.value)}
-                    disabled={videoProcessing.processing}
-                  />
-                </div>
-                <div>
-                  <label className="text-sm font-medium mb-2 block">Road Section</label>
-                  <Input
-                    placeholder="e.g., Section A"
-                    value={roadSection}
-                    onChange={(e) => setRoadSection(e.target.value)}
-                    disabled={videoProcessing.processing}
-                  />
-                </div>
-                <div>
-                  <label className="text-sm font-medium mb-2 block">Surveyor</label>
-                  <Input
-                    placeholder="e.g., John Doe"
-                    value={surveyor}
-                    onChange={(e) => setSurveyor(e.target.value)}
-                    disabled={videoProcessing.processing}
-                  />
-                </div>
-              </div>
-              
-              {videoProcessing.processing && (
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2">
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    <span className="text-sm">{videoProcessing.status}</span>
-                  </div>
-                  <div className="w-full bg-secondary rounded-full h-2">
-                    <div 
-                      className="bg-primary h-2 rounded-full transition-all duration-300"
-                      style={{ width: `${videoProcessing.progress}%` }}
-                    />
-                  </div>
-                </div>
-              )}
-              
-              {videoProcessing.status === 'completed' && (
-                <div className="flex items-center gap-2 text-green-600">
-                  <CheckCircle className="h-4 w-4" />
-                  <span className="text-sm">Processing completed!</span>
-                </div>
-              )}
-              
-              {videoProcessing.status === 'error' && (
-                <div className="flex items-center gap-2 text-destructive">
-                  <AlertCircle className="h-4 w-4" />
-                  <span className="text-sm">{videoProcessing.error}</span>
-                </div>
-              )}
-
-              <Button 
-                onClick={handleVideoUpload} 
-                disabled={!videoFile || videoProcessing.processing}
-                className="w-full"
-              >
-                {videoProcessing.processing ? (
-                  <>
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    Processing...
-                  </>
-                ) : (
-                  <>
-                    <Upload className="h-4 w-4 mr-2" />
-                    Process Video with RAG
-                  </>
-                )}
-              </Button>
-            </div>
-          </Card>
-        )}
-
         {/* Messages */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-4">
-          {loadingMessages ? (
-            <div className="text-center text-muted-foreground">Loading messages...</div>
-          ) : (
-            messages.map((message, idx) => (
+        <ScrollArea className="flex-1 p-6">
+          <div className="space-y-4">
+            {messages.map((message, idx) => (
               <div key={idx} className={cn("flex gap-3", message.role === "user" ? "justify-end" : "justify-start")}>
                 {message.role === "assistant" && (
                   <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
                     <MessageSquare className="h-4 w-4 text-foreground" />
                   </div>
                 )}
-                <Card className={cn("p-4 max-w-[80%]", message.role === "user" ? "bg-primary text-primary-foreground" : "bg-card")}>
-                  {message.role === "assistant" ? (
-                    <MarkdownMessage content={message.content} />
-                  ) : (
+                <div className="max-w-[80%] space-y-2">
+                  <Card className={cn("p-4", message.role === "user" ? "bg-primary text-primary-foreground" : "bg-card")}>
                     <p className="text-sm whitespace-pre-wrap">{message.content}</p>
+                  </Card>
+
+                  {/* Show relevant frames if available */}
+                  {message.frames && message.frames.length > 0 && (
+                    <Collapsible>
+                      <CollapsibleTrigger asChild>
+                        <Button variant="ghost" size="sm" className="gap-1 text-xs">
+                          <ImageIcon className="h-3 w-3" />
+                          View {message.frames.length} related frame{message.frames.length > 1 ? "s" : ""}
+                          <ChevronDown className="h-3 w-3" />
+                        </Button>
+                      </CollapsibleTrigger>
+                      <CollapsibleContent>
+                        <div className="grid grid-cols-3 gap-2 mt-2">
+                          {message.frames.map((frame, fidx) => (
+                            <Card key={fidx} className="p-2 text-xs">
+                              <div className="font-semibold mb-1">
+                                Frame {frame.frame_number} • {formatTimestamp(frame.timestamp)}
+                              </div>
+                              <div className="text-muted-foreground">
+                                {frame.detections.length > 0
+                                  ? frame.detections.slice(0, 3).map(d => d.class_name).join(", ")
+                                  : "No detections"}
+                                {frame.detections.length > 3 && ` +${frame.detections.length - 3} more`}
+                              </div>
+                            </Card>
+                          ))}
+                        </div>
+                      </CollapsibleContent>
+                    </Collapsible>
                   )}
-                </Card>
+                </div>
                 {message.role === "user" && (
                   <div className="w-8 h-8 rounded-full bg-accent/10 flex items-center justify-center flex-shrink-0">
                     <span className="text-accent font-semibold text-sm">U</span>
                   </div>
                 )}
               </div>
-            ))
-          )}
-        </div>
+            ))}
+            <div ref={messagesEndRef} />
+          </div>
+        </ScrollArea>
 
         {/* Sample Prompts */}
-        {messages.length === 1 && !currentChatId && (
-          <div className="p-6 border-t border-border">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        {samplePrompts.length > 0 && messages.length <= 2 && (
+          <div className="px-6 pb-4">
+            <p className="text-sm font-medium mb-2 text-muted-foreground">Try these:</p>
+            <div className="flex flex-wrap gap-2">
               {samplePrompts.map((prompt, idx) => (
-                <Button key={idx} variant="outline" size="sm" className="justify-start text-left h-auto py-3" onClick={() => setInput(prompt)}>
+                <Button
+                  key={idx}
+                  variant="outline"
+                  size="sm"
+                  className="text-xs h-7"
+                  onClick={() => setInput(prompt)}
+                >
                   {prompt}
                 </Button>
               ))}
@@ -540,14 +550,19 @@ export default function AskAI() {
         <div className="p-6 border-t border-border">
           <div className="flex gap-2">
             <Input
-              placeholder="Ask me anything about your road assets..."
+              placeholder={selectedVideoId ? "Ask about assets, timestamps, conditions..." : "Select a video first..."}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handleSend()}
               className="flex-1"
+              disabled={!selectedVideoId || busy}
             />
-            <Button onClick={handleSend} size="icon" disabled={busy}>
-              <Send className="h-4 w-4" />
+            <Button
+              onClick={handleSend}
+              size="icon"
+              disabled={busy || !GEMINI_API_KEY || !selectedVideoId}
+            >
+              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
             </Button>
           </div>
         </div>

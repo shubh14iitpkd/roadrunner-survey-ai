@@ -2,12 +2,13 @@ import { useState, useEffect } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Upload, Play, CheckCircle, Clock, AlertCircle, Video, Cloud, FileVideo, Database, TrendingUp, Calendar, MapPin, Loader2 } from "lucide-react";
+import { Upload, Play, CheckCircle, Clock, AlertCircle, Video, Cloud, FileVideo, Database, TrendingUp, Calendar, MapPin, Loader2, Trash2, X, Map } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
+import GpxMiniMap from "@/components/GpxMiniMap";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -16,15 +17,28 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
+  DialogFooter,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api, API_BASE } from "@/lib/api";
-import { useUpload, VideoStatus } from "@/contexts/UploadContext";
+import { useUpload, VideoStatus, VideoFile, demoDataCache } from "@/contexts/UploadContext";
 import VideoLibraryUpload from "@/components/VideoLibraryUpload";
 import { set } from "date-fns";
 import { LibraryVideoItem } from "@/contexts/UploadContext";
 
+
 export default function SurveyUpload() {
+  const navigate = useNavigate();
   const { videos, isUploading, uploadFiles, uploadFromLibrary, uploadGpxForVideo, processWithAI, resetVideoStatus } = useUpload();
   const [roads, setRoads] = useState<any[]>([]);
   const [selectedRoute, setSelectedRoute] = useState<string>("");
@@ -39,7 +53,66 @@ export default function SurveyUpload() {
   // It used it in handleGpxFileSelect to update state.
   // We can probably remove it and rely on video.gpxFile string.
   const [selectedGpxFile, setSelectedGpxFile] = useState<File | null>(null);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [videoToDelete, setVideoToDelete] = useState<{ id: string; surveyId: string; name: string } | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  // Video player dialog state
+  const [showVideoPlayer, setShowVideoPlayer] = useState(false);
+  const [selectedVideo, setSelectedVideo] = useState<VideoFile | null>(null);
+  const [playerOriginalSrc, setPlayerOriginalSrc] = useState<string>("");
+  const [playerAnnotatedSrc, setPlayerAnnotatedSrc] = useState<string>("");
+  const [playerCategoryVideos, setPlayerCategoryVideos] = useState<Record<string, string>>({});
+  const [activeCategory, setActiveCategory] = useState<string>("");
   // isUploading state removed (using context)
+
+  // Function to open video player with category data
+  const openVideoPlayer = async (video: VideoFile) => {
+    setSelectedVideo(video);
+    setPlayerOriginalSrc(video.backendId ? `${API_BASE}/api/videos/${video.backendId}/stream` : "");
+    setPlayerAnnotatedSrc("");
+    setPlayerCategoryVideos({});
+    setActiveCategory("");
+    setShowVideoPlayer(true);
+
+    // Fetch video data to get category_videos if completed
+    if (video.backendId && video.status === "completed") {
+      try {
+        const videoData = await api.videos.get(video.backendId);
+        if (videoData.category_videos) {
+          const catVideos: Record<string, string> = {};
+          Object.entries(videoData.category_videos).forEach(([k, val]) => {
+            const path = val as string;
+            catVideos[k] = path.startsWith('http') ? path : `${API_BASE}${path}`;
+          });
+          setPlayerCategoryVideos(catVideos);
+          // Set first category as active by default
+          const firstCat = Object.keys(catVideos).sort()[0];
+          if (firstCat) {
+            setActiveCategory(firstCat);
+            setPlayerAnnotatedSrc(catVideos[firstCat]);
+          }
+        } else if (videoData.annotated_video_url) {
+          const url = videoData.annotated_video_url.startsWith('http')
+            ? videoData.annotated_video_url
+            : `${API_BASE}${videoData.annotated_video_url}`;
+          setPlayerAnnotatedSrc(url);
+        }
+      } catch (err) {
+        console.error("Failed to fetch video category data:", err);
+      }
+    }
+  };
+
+  const CATEGORY_LABELS: Record<string, string> = {
+    "corridor_fence": "Corridor Fence",
+    "corridor_pavement": "Pavement",
+    "corridor_structure": "Structures",
+    "directional_signage": "Signage",
+    "its": "ITS",
+    "roadway_lighting": "Lighting",
+    "oia": "OIA",
+    "default": "Default"
+  };
 
   // Load roads from API
   useEffect(() => {
@@ -63,12 +136,15 @@ export default function SurveyUpload() {
   const inQueue = videos.filter(v => v.status === "queue").length;
   const processing = videos.filter(v => v.status === "uploading" || v.status === "processing").length;
 
+  // Track uploads in progress for showing status
+  const [uploadingItems, setUploadingItems] = useState<string[]>([]);
+
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!selectedRoute) {
       toast.error("Please select a route first");
       return;
     }
-    if (!surveyorName) {
+    if (!surveyorName?.trim()) {
       toast.error("Please enter surveyor name");
       return;
     }
@@ -76,28 +152,61 @@ export default function SurveyUpload() {
     const files = Array.from(e.target.files || []);
     if (files.length === 0) return;
 
-    await uploadFiles(files, selectedRoute, surveyDate, surveyorName, selectedGpxFile);
+    // Add file names to uploading list
+    const fileNames = files.map(f => f.name);
+    setUploadingItems(prev => [...prev, ...fileNames]);
 
-    setIsUploadDialogOpen(false);
+    toast.success(`Started uploading ${files.length} video(s) in background`);
+
+    // Don't close dialog - let user add more if needed
+    // Upload runs in background
+    uploadFiles(files, selectedRoute, surveyDate, surveyorName, selectedGpxFile)
+      .then(() => {
+        setUploadingItems(prev => prev.filter(name => !fileNames.includes(name)));
+        toast.success(`Completed uploading ${files.length} video(s)`);
+      })
+      .catch(() => {
+        setUploadingItems(prev => prev.filter(name => !fileNames.includes(name)));
+      });
+
+    // Reset file input
+    e.target.value = '';
     setSelectedGpxFile(null);
   };
 
   const handleLibraryFileSelect = async (item: LibraryVideoItem) => {
-    const func = async () => {
-      const id = await uploadFromLibrary(
-        item.video_path,
-        item.size_bytes,
-        selectedRoute,
-        surveyDate,
-        surveyorName,
-        item.thumb_url
-      );
-
-      // processWithAI(id);
+    // Validate required fields
+    if (!selectedRoute) {
+      toast.error("Please select a Route ID before selecting a video");
+      return;
     }
-    func();
-    setIsUploadDialogOpen(false);
-    setSelectedGpxFile(null);
+    if (!surveyorName?.trim()) {
+      toast.error("Please enter Surveyor Name before selecting a video");
+      return;
+    }
+    if (!surveyDate) {
+      toast.error("Please enter Survey Date before selecting a video");
+      return;
+    }
+
+    // Add to uploading list
+    setUploadingItems(prev => [...prev, item.name]);
+    toast.success(`Started processing "${item.name}" in background`);
+
+    // Upload runs in background - don't close dialog
+    uploadFromLibrary(
+      item.video_path,
+      item.size_bytes || 0,
+      selectedRoute,
+      surveyDate,
+      surveyorName,
+      item.thumb_url
+    ).then(() => {
+      setUploadingItems(prev => prev.filter(name => name !== item.name));
+      toast.success(`Added "${item.name}" to processing queue`);
+    }).catch(() => {
+      setUploadingItems(prev => prev.filter(name => name !== item.name));
+    });
   }
 
   const handleGpxFileSelect = async (e: React.ChangeEvent<HTMLInputElement>, videoId: string) => {
@@ -114,6 +223,24 @@ export default function SurveyUpload() {
     }
     toast.info("Cloud upload will be implemented in backend integration phase");
     setIsUploadDialogOpen(false);
+  };
+
+  const handleDeleteSurvey = async () => {
+    if (!videoToDelete) return;
+
+    setIsDeleting(true);
+    try {
+      await api.Surveys.delete(videoToDelete.surveyId);
+      toast.success(`Successfully deleted survey and associated video: ${videoToDelete.name}`);
+      // Refresh the page to reload videos
+      window.location.reload();
+    } catch (err: any) {
+      toast.error(`Failed to delete: ${err?.message || "Unknown error"}`);
+    } finally {
+      setIsDeleting(false);
+      setDeleteDialogOpen(false);
+      setVideoToDelete(null);
+    }
   };
 
   // simulateUpload removed
@@ -174,20 +301,51 @@ export default function SurveyUpload() {
                 Video Library
               </Button>
             </Link>
-            <Dialog open={isUploadDialogOpen} onOpenChange={(open) => !isUploading && setIsUploadDialogOpen(open)}>
+            <Dialog open={isUploadDialogOpen} onOpenChange={setIsUploadDialogOpen}>
               <DialogTrigger asChild>
                 <Button className="gap-2 bg-white text-primary hover:bg-white/90 shadow-lg">
                   <Upload className="h-4 w-4" />
                   Upload Survey Data
+                  {uploadingItems.length > 0 && (
+                    <Badge variant="secondary" className="ml-1 bg-primary/20">
+                      {uploadingItems.length}
+                    </Badge>
+                  )}
                 </Button>
               </DialogTrigger>
               <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
                 <DialogHeader>
-                  <DialogTitle>Upload Survey Data</DialogTitle>
+                  <DialogTitle className="flex items-center gap-2">
+                    Upload Survey Data
+                    {uploadingItems.length > 0 && (
+                      <Badge variant="outline" className="text-xs font-normal">
+                        <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                        {uploadingItems.length} uploading
+                      </Badge>
+                    )}
+                  </DialogTitle>
                   <DialogDescription>
-                    Upload video and GPX files for road survey processing
+                    Upload video and GPX files for road survey processing. You can add multiple videos - they will upload in parallel.
                   </DialogDescription>
                 </DialogHeader>
+
+                {/* Upload Queue Status */}
+                {uploadingItems.length > 0 && (
+                  <div className="p-3 rounded-lg bg-primary/5 border border-primary/20">
+                    <div className="flex items-center gap-2 text-sm font-medium text-primary mb-2">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Uploading in progress...
+                    </div>
+                    <div className="space-y-1">
+                      {uploadingItems.map((name, i) => (
+                        <div key={i} className="text-xs text-muted-foreground flex items-center gap-2">
+                          <div className="w-2 h-2 rounded-full bg-primary animate-pulse" />
+                          {name}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
                 <Tabs defaultValue="cloud" className="w-full">
                   <TabsList className="grid w-full grid-cols-2">
@@ -358,10 +516,23 @@ export default function SurveyUpload() {
                       </div>
                     </div>
                     <div>
-                      <VideoLibraryUpload selectedRoute={selectedRoute} handleFileSelect={handleLibraryFileSelect} />
+                      <VideoLibraryUpload
+                        selectedRoute={selectedRoute}
+                        surveyorName={surveyorName}
+                        surveyDate={surveyDate}
+                        handleFileSelect={handleLibraryFileSelect}
+                        uploadingItems={uploadingItems}
+                      />
                     </div>
                   </TabsContent>
                 </Tabs>
+
+                {/* Footer with close button */}
+                <div className="flex justify-end pt-4 border-t">
+                  <Button variant="outline" onClick={() => setIsUploadDialogOpen(false)}>
+                    {uploadingItems.length > 0 ? "Close (uploads continue in background)" : "Close"}
+                  </Button>
+                </div>
               </DialogContent>
             </Dialog>
           </div>
@@ -456,26 +627,22 @@ export default function SurveyUpload() {
                 </Button>
               </div>
             ) : (
-              <div className="overflow-x-auto rounded-xl border border-border">
+              <div className="rounded-xl border border-border overflow-hidden">
                 <table className="w-full">
                   <thead>
                     <tr className="bg-gradient-to-r from-blue-50 via-indigo-50 to-purple-50 dark:from-blue-950/30 dark:via-indigo-950/30 dark:to-purple-950/30 border-b border-border">
-                      <th className="text-left p-4 font-semibold text-sm">Thumbnail</th>
-                      <th className="text-left p-4 font-semibold text-sm">Route ID</th>
-                      <th className="text-left p-4 font-semibold text-sm">Road Name</th>
-                      <th className="text-left p-4 font-semibold text-sm">Video File</th>
-                      <th className="text-left p-4 font-semibold text-sm">Survey Date</th>
-                      <th className="text-left p-4 font-semibold text-sm">Surveyor</th>
-                      <th className="text-left p-4 font-semibold text-sm">Size</th>
-                      <th className="text-left p-4 font-semibold text-sm">GPX File</th>
-                      <th className="text-left p-4 font-semibold text-sm">Progress / Action</th>
-                      <th className="text-left p-4 font-semibold text-sm">Status</th>
+                      <th className="text-left p-3 font-semibold text-sm w-24">Preview</th>
+                      <th className="text-left p-3 font-semibold text-sm min-w-[140px] max-w-[200px]">Route</th>
+                      <th className="text-left p-3 font-semibold text-sm w-24">Date</th>
+                      <th className="text-left p-3 font-semibold text-sm w-20">Surveyor</th>
+                      <th className="text-left p-3 font-semibold text-sm w-20">GPS</th>
+                      <th className="text-left p-3 font-semibold text-sm w-32">Status</th>
+                      <th className="text-left p-3 font-semibold text-sm">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
                     {videos.map((video, index) => {
                       const road = roads.find(r => r.route_id === video.routeId);
-                      // Use backendId first (from DB), then id, then fallback to index
                       const uniqueKey = video.backendId || video.id || `video-temp-${index}`;
 
                       return (
@@ -483,178 +650,219 @@ export default function SurveyUpload() {
                           key={uniqueKey}
                           className="border-b border-border hover:bg-blue-50/70 dark:hover:bg-blue-950/30 transition-colors duration-200"
                         >
-                          <td className="p-4">
-                            {video.thumbnailUrl ? (
-                              <div className="w-24 h-16 rounded-lg overflow-hidden shadow-md border border-border bg-muted">
-                                <img
-                                  src={`${API_BASE}${video.thumbnailUrl}`}
-                                  alt={`Thumbnail for ${video.name}`}
-                                  className="w-full h-full object-cover"
-                                  onError={(e) => {
-                                    e.currentTarget.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="100" height="60" viewBox="0 0 100 60"%3E%3Crect fill="%23ddd" width="100" height="60"/%3E%3Ctext x="50%25" y="50%25" fill="%23999" font-family="Arial" font-size="12" text-anchor="middle" dominant-baseline="middle"%3ENo Image%3C/text%3E%3C/svg%3E';
-                                  }}
-                                />
+                          {/* Preview with video name tooltip */}
+                          <td className="p-3">
+                            <div className="relative group">
+                              {video.thumbnailUrl ? (
+                                <div
+                                  className="w-20 h-14 rounded-lg overflow-hidden shadow-sm border border-border bg-muted cursor-pointer hover:ring-2 hover:ring-primary transition-all"
+                                  onClick={() => openVideoPlayer(video)}
+                                >
+                                  <img
+                                    src={`${API_BASE}${video.thumbnailUrl}`}
+                                    alt={video.name}
+                                    className="w-full h-full object-cover"
+                                    onError={(e) => {
+                                      e.currentTarget.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="100" height="60" viewBox="0 0 100 60"%3E%3Crect fill="%23ddd" width="100" height="60"/%3E%3Ctext x="50%25" y="50%25" fill="%23999" font-family="Arial" font-size="10" text-anchor="middle" dominant-baseline="middle"%3ENo Thumb%3C/text%3E%3C/svg%3E';
+                                    }}
+                                  />
+                                </div>
+                              ) : (
+                                <div
+                                  className="w-20 h-14 rounded-lg overflow-hidden shadow-sm border border-border bg-gradient-to-br from-gray-100 to-gray-200 dark:from-gray-800 dark:to-gray-900 flex items-center justify-center cursor-pointer hover:ring-2 hover:ring-primary transition-all"
+                                  onClick={() => openVideoPlayer(video)}
+                                >
+                                  <Video className="h-6 w-6 text-gray-400" />
+                                </div>
+                              )}
+                              {/* Video name tooltip on hover */}
+                              <div className="absolute left-0 bottom-full mb-1 hidden group-hover:block z-10">
+                                <div className="bg-foreground text-background text-xs px-2 py-1 rounded shadow-lg whitespace-nowrap max-w-[200px] truncate">
+                                  {video.name}
+                                </div>
                               </div>
-                            ) : (
-                              <div className="w-24 h-16 rounded-lg overflow-hidden shadow-md border border-border bg-gradient-to-br from-gray-100 to-gray-200 dark:from-gray-800 dark:to-gray-900 flex items-center justify-center">
-                                <Video className="h-8 w-8 text-gray-400 dark:text-gray-600" />
-                              </div>
-                            )}
-                          </td>
-                          <td className="p-4">
-                            <Badge variant="outline" className="font-mono font-semibold border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-400 bg-blue-50/50 dark:bg-blue-950/30">
-                              #{video.routeId}
-                            </Badge>
-                          </td>
-                          <td className="p-4">
-                            <div className="font-medium">{road?.road_name || `Road ${video.routeId}`}</div>
-                          </td>
-                          <td className="p-4">
-                            <div className="flex items-center gap-2 w-40">
-                              <Video className="h-4 w-4 text-purple-500 dark:text-purple-400" />
-                              <span className="font-medium truncate">{video.name}</span>
                             </div>
                           </td>
-                          <td className="p-4">
-                            <div className="flex items-center gap-2 text-sm">
-                              <Calendar className="h-4 w-4 text-muted-foreground" />
-                              <span className="text-foreground">{video.surveyDate}</span>
+
+                          {/* Route (stacked layout with truncation) */}
+                          <td className="p-3 max-w-[200px]">
+                            <div className="flex flex-col gap-0.5">
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-[10px] font-mono text-blue-600 dark:text-blue-400 uppercase tracking-wide">
+                                  Route #{video.routeId}
+                                </span>
+                              </div>
+                              <span
+                                className="text-sm font-medium text-foreground leading-snug line-clamp-2"
+                                title={road?.road_name || `Road ${video.routeId}`}
+                              >
+                                {road?.road_name || `Road ${video.routeId}`}
+                              </span>
                             </div>
                           </td>
-                          <td className="p-4 text-sm">{video.surveyorName}</td>
-                          <td className="p-4 text-sm font-mono">
-                            {(video.size / 1024 / 1024).toFixed(1)} MB
+
+                          {/* Date */}
+                          <td className="p-3">
+                            <span className="text-sm text-muted-foreground">{video.surveyDate}</span>
                           </td>
-                          <td className="p-4">
+
+                          {/* Surveyor */}
+                          <td className="p-3">
+                            <span className="text-sm truncate max-w-[80px] block" title={video.surveyorName}>
+                              {video.surveyorName}
+                            </span>
+                          </td>
+
+                          {/* GPS Mini Map */}
+                          <td className="p-3">
                             {video.gpxFile ? (
-                              <Badge variant="secondary" className="gap-1.5 text-xs font-medium bg-green-50 dark:bg-green-950/30 text-green-700 dark:text-green-400 border-green-200 dark:border-green-800">
-                                <MapPin className="h-3 w-3" />
-                                Yes
-                              </Badge>
+                              <Link to={`/gis?id=${video.routeId}`} className="h-3 w-3">
+                                <Badge variant="secondary" className="gap-1.5 text-xs font-medium bg-green-50 dark:bg-green-950/30 text-green-700 dark:text-green-400 border-green-200 dark:border-green-800">
+                                  <MapPin className="h-3 w-3" />
+                                  Yes
+                                </Badge>
+                              </Link>
                             ) : (
                               <Badge variant="secondary" className="gap-1.5 text-xs font-medium bg-red-50 dark:bg-red-950/30 text-red-700 dark:text-red-400 border-red-200 dark:border-red-800">
                                 No
                               </Badge>
                             )}
                           </td>
-                          <td className="p-4">
-                            {/* Show progress when uploading/processing */}
-                            {(video.status === "uploading" || video.status === "processing") && (
-                              <div className="space-y-1.5 min-w-[160px]">
-                                <Progress value={video.progress} className="h-2" />
-                                <div className="flex items-center justify-between text-xs">
-                                  <span className="font-semibold text-blue-600 dark:text-blue-400">{video.progress}%</span>
-                                  {video.eta && <span className="text-muted-foreground">ETA: {video.eta}</span>}
-                                </div>
-                              </div>
-                            )}
 
-                            {/* Show action buttons when ready for next step */}
-                            {video.status === "queue" && (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                disabled
-                                className="h-8 shadow-sm"
-                              >
-                                <Clock className="h-3 w-3 mr-1.5" />
-                                Queued
-                              </Button>
-                            )}
-
-                            {/* Show uploading status button (disabled) */}
-                            {video.status === "uploading" && (
-                              <Button
-                                size="sm"
-                                disabled
-                                className="h-8 bg-gradient-to-r from-purple-500 to-purple-600 text-white shadow-sm opacity-70 cursor-not-allowed"
-                              >
-                                <Loader2 className="h-3 w-3 mr-1.5 animate-spin" />
-                                Uploading...
-                              </Button>
-                            )}
-
-                            {video.status === "uploaded" && (
-                              <Button
-                                size="sm"
-                                onClick={() => processWithAI(video.id)}
-                                className="h-8 bg-gradient-to-r from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700 text-white shadow-sm"
-                              >
-                                <Play className="h-3 w-3 mr-1.5" />
-                                Process with AI
-                              </Button>
-                            )}
-
-                            {/* Show processing status button (disabled) with cancel option */}
-                            {video.status === "processing" && (
-                              <div className="flex gap-2">
-                                <Button
-                                  size="sm"
-                                  disabled
-                                  className="h-8 bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-sm opacity-70 cursor-not-allowed"
+                          {/* Status column */}
+                          <td className="p-3">
+                            <div className="flex flex-col gap-1">
+                              <div className="flex items-center gap-1.5">
+                                {getStatusIcon(video.status)}
+                                <Badge
+                                  variant="secondary"
+                                  className={cn(
+                                    "text-[10px] font-medium px-1.5 py-0.5",
+                                    video.status === "completed" && "bg-green-100 dark:bg-green-950/30 text-green-700 dark:text-green-400",
+                                    video.status === "processing" && "bg-blue-100 dark:bg-blue-950/30 text-blue-700 dark:text-blue-400",
+                                    video.status === "uploading" && "bg-purple-100 dark:bg-purple-950/30 text-purple-700 dark:text-purple-400",
+                                    video.status === "uploaded" && "bg-amber-100 dark:bg-amber-950/30 text-amber-700 dark:text-amber-400",
+                                    video.status === "queue" && "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400",
+                                    video.status === "error" && "bg-red-100 dark:bg-red-950/30 text-red-700 dark:text-red-400"
+                                  )}
                                 >
-                                  <Loader2 className="h-3 w-3 mr-1.5 animate-spin" />
-                                  Processing...
-                                </Button>
+                                  {getStatusLabel(video.status)}
+                                </Badge>
+                              </div>
+                              {/* Progress bar for uploading/processing */}
+                              {(video.status === "uploading" || video.status === "processing") && (
+                                <div className="flex items-center gap-2">
+                                  <Progress value={video.progress} className="h-1.5 flex-1 max-w-[80px]" />
+                                  <span className="text-[10px] font-medium text-primary">{video.progress}%</span>
+                                </div>
+                              )}
+                              {/* Show detection count for completed demo videos */}
+                              {video.status === "completed" && video.backendId && demoDataCache.has(video.backendId) && (
+                                <span className="text-[10px] text-green-600 dark:text-green-400">
+                                  {demoDataCache.get(video.backendId)?.totalDetections.toLocaleString()} detections
+                                </span>
+                              )}
+                            </div>
+                          </td>
+
+                          {/* Actions column */}
+                          <td className="p-3">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              {video.status === "uploaded" && (
                                 <Button
                                   size="sm"
-                                  variant="outline"
+                                  onClick={() => processWithAI(video.id)}
+                                  className="h-7 text-xs bg-gradient-to-r from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700 text-white"
+                                >
+                                  <Play className="h-3 w-3 mr-1" />
+                                  Process
+                                </Button>
+                              )}
+
+                              {video.status === "processing" && (
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
                                   onClick={() => {
                                     resetVideoStatus(video.id);
-                                    toast.info(`Reset ${video.name} to uploaded state`);
+                                    toast.info(`Reset ${video.name}`);
                                   }}
-                                  className="h-8 border-red-300 text-red-600 hover:bg-red-50"
+                                  className="h-7 text-xs text-red-600 hover:bg-red-50"
                                 >
                                   Cancel
                                 </Button>
-                              </div>
-                            )}
+                              )}
 
-                            {/* Show retry button for errors */}
-                            {video.status === "error" && (
+                              {video.status === "error" && (
+                                <Button
+                                  size="sm"
+                                  onClick={() => processWithAI(video.id)}
+                                  className="h-7 text-xs bg-orange-500 hover:bg-orange-600 text-white"
+                                >
+                                  <Play className="h-3 w-3 mr-1" />
+                                  Retry
+                                </Button>
+                              )}
+
+                              {video.status === "completed" && (
+                                <>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    asChild
+                                    className="h-7 text-xs border-green-300 text-green-700 hover:bg-green-50"
+                                  >
+                                    <Link to={`/assets?route_id=${video.routeId}`}>
+                                      <Database className="h-3 w-3 mr-1" />
+                                      Reports
+                                    </Link>
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    asChild
+                                    className="h-7 text-xs border-blue-300 text-blue-700 hover:bg-blue-50"
+                                  >
+                                    <Link to={`/gis?id=${video.routeId}`}>
+                                      <Map className="h-3 w-3 mr-1" />
+                                      Map
+                                    </Link>
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    onClick={() => openVideoPlayer(video)}
+                                    className="h-7 w-7 p-0 text-purple-600 hover:bg-purple-50"
+                                  >
+                                    <Video className="h-3 w-3" />
+                                  </Button>
+                                </>
+                              )}
+
+                              {video.status === "queue" && (
+                                <span className="text-xs text-muted-foreground">Waiting...</span>
+                              )}
+
+                              {/* Delete button */}
                               <Button
                                 size="sm"
-                                onClick={() => processWithAI(video.id)}
-                                className="h-8 bg-gradient-to-r from-orange-500 to-red-600 hover:from-orange-600 hover:to-red-700 text-white shadow-sm"
+                                variant="ghost"
+                                onClick={() => {
+                                  const surveyIdStr = typeof video.surveyId === 'object' && video.surveyId !== null
+                                    ? ((video.surveyId as any).$oid || String(video.surveyId))
+                                    : (video.surveyId || '');
+                                  setVideoToDelete({
+                                    id: video.id,
+                                    surveyId: surveyIdStr,
+                                    name: video.name
+                                  });
+                                  setDeleteDialogOpen(true);
+                                }}
+                                className="h-7 w-7 p-0 text-red-400 hover:text-red-600 hover:bg-red-50"
+                                disabled={video.status === "uploading" || video.status === "processing" || isDeleting || !video.surveyId}
                               >
-                                <Play className="h-3 w-3 mr-1.5" />
-                                Retry Processing
+                                <Trash2 className="h-3.5 w-3.5" />
                               </Button>
-                            )}
-
-                            {video.status === "completed" && (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                asChild
-                                className="h-8 border-green-300 dark:border-green-800 text-green-700 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-950/30"
-                              >
-                                <Link to="/videos">
-                                  <Video className="h-3 w-3 mr-1.5" />
-                                  View Report
-                                </Link>
-                              </Button>
-                            )}
-                          </td>
-                          <td className="p-4">
-                            <div className="flex items-center gap-2">
-                              <div className="flex-shrink-0">
-                                {getStatusIcon(video.status)}
-                              </div>
-                              <Badge
-                                variant="secondary"
-                                className={cn(
-                                  "text-xs font-medium px-2.5 py-1",
-                                  video.status === "completed" && "bg-green-100 dark:bg-green-950/30 text-green-700 dark:text-green-400 border-green-200 dark:border-green-800",
-                                  video.status === "processing" && "bg-blue-100 dark:bg-blue-950/30 text-blue-700 dark:text-blue-400 border-blue-200 dark:border-blue-800",
-                                  video.status === "uploading" && "bg-purple-100 dark:bg-purple-950/30 text-purple-700 dark:text-purple-400 border-purple-200 dark:border-purple-800",
-                                  video.status === "uploaded" && "bg-amber-100 dark:bg-amber-950/30 text-amber-700 dark:text-amber-400 border-amber-200 dark:border-amber-800",
-                                  video.status === "queue" && "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700",
-                                  video.status === "error" && "bg-red-100 dark:bg-red-950/30 text-red-700 dark:text-red-400 border-red-200 dark:border-red-800"
-                                )}
-                              >
-                                {getStatusLabel(video.status)}
-                              </Badge>
                             </div>
                           </td>
                         </tr>
@@ -667,6 +875,150 @@ export default function SurveyUpload() {
           </Card>
         )}
       </div>
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Survey</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete this survey? This will permanently delete:
+              <ul className="list-disc list-inside mt-2 space-y-1">
+                <li>The survey record</li>
+                <li>Associated video: <strong>{videoToDelete?.name}</strong></li>
+                <li>All AI detection frames and data</li>
+              </ul>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeleteSurvey}
+              disabled={isDeleting}
+              className="bg-red-600 hover:bg-red-700 text-white"
+            >
+              {isDeleting ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Deleting...
+                </>
+              ) : (
+                <>
+                  <Trash2 className="h-4 w-4 mr-2" />
+                  Delete Survey
+                </>
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Video Player Dialog - Side by Side View with Category Switching */}
+      <Dialog open={showVideoPlayer} onOpenChange={setShowVideoPlayer}>
+        <DialogContent className="max-w-[95vw] h-[90vh] p-0">
+          <DialogHeader className="p-6 pb-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <DialogTitle className="text-xl font-bold">
+                  {selectedVideo?.name || "Video Player"}
+                </DialogTitle>
+                {selectedVideo && (
+                  <p className="text-sm text-muted-foreground mt-1">
+                    Route #{selectedVideo.routeId} • {roads.find(r => r.route_id === selectedVideo.routeId)?.road_name || `Road ${selectedVideo.routeId}`}
+                  </p>
+                )}
+              </div>
+              {/* <Button variant="ghost" size="icon" onClick={() => setShowVideoPlayer(false)}>
+                <X className="h-5 w-5" />
+              </Button> */}
+            </div>
+          </DialogHeader>
+
+          {/* Side-by-side Video Display */}
+          <div className={playerAnnotatedSrc || Object.keys(playerCategoryVideos).length > 0 ? "grid grid-cols-1 gap-4 p-6 pt-0 h-[calc(90vh-120px)]" : "p-6 pt-0 h-[calc(90vh-120px)]"}>
+            {/* Right: AI Annotated Video */}
+            {(playerAnnotatedSrc || Object.keys(playerCategoryVideos).length > 0) && (
+              <div className="space-y-3 flex flex-col h-full">
+                <Card className="p-4 gradient-card border-0">
+                  {/* <div className="flex items-center justify-between">
+                    <h3 className="font-semibold text-lg">AI Annotated Video</h3>
+                    <Badge className="bg-gradient-to-r from-blue-500 to-purple-500">AI Processed</Badge>
+                  </div> */}
+                  <p className="text-sm text-muted-foreground mt-1">Object detection with bounding boxes</p>
+
+                  {/* Category Buttons */}
+                  {Object.keys(playerCategoryVideos).length > 0 && (
+                    <div className="flex flex-wrap gap-2 mt-3 min-h-[32px]">
+                      {Object.keys(playerCategoryVideos).sort().map(cat => (
+                        <Button
+                          key={cat}
+                          size="sm"
+                          variant={activeCategory === cat ? "default" : "outline"}
+                          className={`text-xs h-7 ${activeCategory === cat ? "bg-blue-600 text-white" : ""}`}
+                          onClick={() => {
+                            const videoEl = document.getElementById('survey-annotated-video-player') as HTMLVideoElement;
+                            const currentTime = videoEl ? videoEl.currentTime : 0;
+                            const isPlaying = videoEl ? !videoEl.paused : false;
+
+                            setActiveCategory(cat);
+                            setPlayerAnnotatedSrc(playerCategoryVideos[cat]);
+
+                            // Restore state after render
+                            requestAnimationFrame(() => {
+                              const newVideoEl = document.getElementById('survey-annotated-video-player') as HTMLVideoElement;
+                              if (newVideoEl) {
+                                newVideoEl.onloadedmetadata = () => {
+                                  newVideoEl.currentTime = currentTime;
+                                  if (isPlaying) newVideoEl.play().catch(() => { });
+                                };
+                              }
+                            });
+                          }}
+                        >
+                          {CATEGORY_LABELS[cat] || cat}
+                        </Button>
+                      ))}
+                    </div>
+                  )}
+                </Card>
+
+                <Card className="flex-1 overflow-hidden gradient-card border-0 flex items-center justify-center min-h-0">
+                  <div className="relative w-full h-full">
+                    <video
+                      id="survey-annotated-video-player"
+                      key={playerAnnotatedSrc}
+                      src={playerAnnotatedSrc}
+                      controls
+                      className="absolute inset-0 w-full h-full object-contain rounded-lg"
+                      onError={(e) => {
+                        console.error('[SurveyUpload] Error loading annotated video:', playerAnnotatedSrc);
+                      }}
+                    />
+                  </div>
+                </Card>
+              </div>
+            )}
+
+            {/* Fallback if no annotated video and original not already shown*/}
+            {!playerAnnotatedSrc && Object.keys(playerCategoryVideos).length === 0 && playerOriginalSrc && (
+              <div className="text-center p-8 flex flex-col items-center justify-center">
+                <p className="text-muted-foreground">No AI processed video available yet</p>
+                <p className="text-sm text-muted-foreground mt-1">Process this video with AI to see annotated results</p>
+              </div>
+            )}
+          </div>
+
+          {/* Video Info Footer */}
+          {selectedVideo && (
+            <div className="px-6 pb-4 pt-2 border-t flex flex-wrap gap-4 text-sm text-muted-foreground">
+              <span><strong>Surveyor:</strong> {selectedVideo.surveyorName}</span>
+              <span><strong>Date:</strong> {selectedVideo.surveyDate}</span>
+              <span><strong>Size:</strong> {(selectedVideo.size / 1024 / 1024).toFixed(1)} MB</span>
+              <span><strong>Status:</strong> {selectedVideo.status}</span>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -56,120 +56,8 @@ export const api = {
 		createChat: (title: string) => apiFetch("/api/ai/chats", { method: "POST", body: JSON.stringify({ title }) }),
 		listChats: () => apiFetch("/api/ai/chats"),
 		listMessages: (chatId: string) => apiFetch(`/api/ai/chats/${chatId}/messages`),
-		addMessage: (chatId: string, content: string) =>
-			apiFetch(`/api/ai/chats/${chatId}/messages`, { method: "POST", body: JSON.stringify({ content }) }),
-		deleteChat: (chatId: string) => apiFetch(`/api/ai/chats/${chatId}`, { method: "DELETE" }),
-		processVideo: async (videoFile: File, metadata: { road_name?: string; road_section?: string; surveyor?: string; chat_id?: string }, onProgress?: (progress: number) => void) => {
-			// New flow: Upload to S3 first, then trigger processing
-			try {
-				// Step 1: Get presigned URL
-				if (onProgress) onProgress(5);
-				const uploadData = await apiFetch("/api/ai/generate-upload-url", { 
-					method: "POST", 
-					body: JSON.stringify({ filename: videoFile.name }) 
-				});
-				
-				// Step 2: Upload directly to S3
-				if (onProgress) onProgress(10);
-				
-				const formData = new FormData();
-				
-				// Add all S3 fields first (order matters!)
-				Object.entries(uploadData.upload_fields).forEach(([key, value]) => {
-					formData.append(key, value as string);
-				});
-				
-				// Add file last with explicit content type
-				const videoBlob = new Blob([videoFile], { type: 'video/mp4' });
-				formData.append('file', videoBlob, videoFile.name);
-				
-				// Upload to S3 with progress tracking
-				await new Promise<void>((resolve, reject) => {
-					const xhr = new XMLHttpRequest();
-					
-					xhr.upload.addEventListener('progress', (e) => {
-						if (e.lengthComputable && onProgress) {
-							const percentComplete = (e.loaded / e.total) * 100;
-							// Map 0-100% upload to 10-80% overall progress
-							onProgress(10 + (percentComplete * 0.7));
-						}
-					});
-					
-					xhr.addEventListener('load', () => {
-						if (xhr.status >= 200 && xhr.status < 300) {
-							resolve();
-						} else {
-							console.error('S3 upload error:', xhr.responseText);
-							reject(new Error(`S3 upload failed: ${xhr.status} - ${xhr.responseText}`));
-						}
-					});
-					
-					xhr.addEventListener('error', (e) => {
-						console.error('S3 upload network error:', e);
-						reject(new Error('S3 upload network error'));
-					});
-					
-					xhr.addEventListener('abort', () => {
-						reject(new Error('S3 upload aborted'));
-					});
-					
-					xhr.open('POST', uploadData.upload_url);
-					// Don't set Content-Type header - let browser set it with boundary for multipart/form-data
-					xhr.send(formData);
-				});
-				
-				// Step 3: Trigger processing with S3 key
-				if (onProgress) onProgress(85);
-				const result = await apiFetch("/api/ai/process-video", {
-					method: "POST",
-					body: JSON.stringify({
-						s3_key: uploadData.s3_key,
-						video_id: uploadData.video_id,
-						...metadata
-					})
-				});
-				
-				if (onProgress) onProgress(100);
-				return result;
-				
-			} catch (error: any) {
-				// Fallback to old direct upload if S3 fails
-				console.warn('S3 upload failed, falling back to direct upload:', error);
-				
-				const formData = new FormData();
-				formData.append('video', videoFile);
-				if (metadata.road_name) formData.append('road_name', metadata.road_name);
-				if (metadata.road_section) formData.append('road_section', metadata.road_section);
-				if (metadata.surveyor) formData.append('surveyor', metadata.surveyor);
-				if (metadata.chat_id) formData.append('chat_id', metadata.chat_id);
-				
-				const token = getAccessToken();
-				const headers: HeadersInit = {};
-				if (token) headers['Authorization'] = `Bearer ${token}`;
-				
-				const res = await fetch(`${API_BASE}/api/ai/process-video`, {
-					method: 'POST',
-					headers,
-					body: formData,
-				});
-				
-				if (!res.ok) {
-					let message = `HTTP ${res.status}`;
-					try {
-						const data = await res.json();
-						message = data.error || data.message || message;
-					} catch { }
-					throw new Error(message);
-				}
-				return await res.json();
-			}
-		},
-		queryVideoDefects: (query: string, chatId?: string) => 
-			apiFetch("/api/ai/query-video-defects", { method: "POST", body: JSON.stringify({ query, chat_id: chatId }) }),
-		getVideoProcessingStatus: (videoId: string) => 
-			apiFetch(`/api/ai/video-processing-status/${videoId}`),
-		getChatVideos: (chatId: string) => 
-			apiFetch(`/api/ai/chats/${chatId}/videos`),
+		addMessage: (chatId: string, role: "user" | "assistant", content: string) =>
+			apiFetch(`/api/ai/chats/${chatId}/messages`, { method: "POST", body: JSON.stringify({ role, content }) }),
 	},
 	Surveys: {
 		list: (params?: { route_id?: number; status?: string; latest_only?: boolean }) => {
@@ -186,6 +74,7 @@ export const api = {
 		attachGpx: (survey_id: string, gpx_file_url: string) =>
 			apiFetch(`/api/surveys/${survey_id}/attach-gpx`, { method: "POST", body: JSON.stringify({ gpx_file_url }) }),
 		getHistory: (route_id: number) => apiFetch(`/api/surveys/route/${route_id}/history`),
+		delete: (survey_id: string) => apiFetch(`/api/surveys/${survey_id}`, { method: "DELETE" }),
 	},
 	videos: {
 		list: (params?: { route_id?: number; survey_id?: string; status?: string }) => {
@@ -209,6 +98,12 @@ export const api = {
 			apiFetch("/api/videos/library", { method: "POST", body: JSON.stringify({ video_key, video_id, survey_id, route_id, thumb_path }) }),
 		getFrameWithDetections: (video_id: string, timestamp?: number | string, frame_number?: number, width?: number) =>
 			apiFetch(`/api/videos/${video_id}/frame_annotated?${timestamp != null ? `timestamp=${timestamp}` : ""}${frame_number != null ? `&frame_number=${frame_number}` : ""}${width != null ? `&width=${width}` : ""}`),
+		getAllFrames: (video_id: string, has_detections?: boolean) => {
+			const qs = new URLSearchParams();
+			if (has_detections) qs.set("has_detections", "true");
+			const q = qs.toString();
+			return apiFetch(`/api/videos/${video_id}/frames${q ? `?${q}` : ""}`);
+		},
 	},
 	assets: {
 		list: (params?: { survey_id?: string; route_id?: number; category?: string; condition?: string }) => {

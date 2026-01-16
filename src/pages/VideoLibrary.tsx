@@ -83,7 +83,7 @@ export default function VideoLibrary() {
               catVideos[k] = buildUrl(val as string)!;
             });
           }
-
+          console.log(v)
           return {
             id: videoIdStr,
             title: v.title || `Video ${videoIdStr}`,
@@ -172,6 +172,7 @@ export default function VideoLibrary() {
     "directional_signage": "Signage",
     "its": "ITS",
     "roadway_lighting": "Lighting",
+    "oia": "OIA",
     "default": "Default"
   };
 
@@ -353,7 +354,13 @@ export default function VideoLibrary() {
                             setPlayerSrc(video.storageUrl);
                             setPlayerAnnotatedSrc(video.annotatedVideoUrl || "");
                             setPlayerCategoryVideos(video.categoryVideos || {});
-                            setActiveCategory(""); // reset default
+                            if (video.categoryVideos) {
+                              const firstCat = Object.keys(video.categoryVideos).sort()[0];
+                              if (firstCat) {
+                                setActiveCategory(firstCat);
+                                setPlayerAnnotatedSrc(video.categoryVideos[firstCat]);
+                              }
+                            }
                             setShowPlayer(true);
                           }
                         }}

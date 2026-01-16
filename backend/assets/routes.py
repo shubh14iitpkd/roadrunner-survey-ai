@@ -48,11 +48,37 @@ def bulk_insert():
 	assets = body.get("assets", [])
 	if not isinstance(assets, list) or not assets:
 		return jsonify({"error": "assets array required"}), 400
+	
+	from pymongo import UpdateOne
+	
+	operations = []
 	for a in assets:
 		a.setdefault("detected_at", get_now_iso())
+		# Use upsert to handle re-processing - update if exists, insert if not
+		asset_id = a.pop("_id", None)
+		if asset_id:
+			operations.append(UpdateOne(
+				{"_id": asset_id},
+				{"$set": a},
+				upsert=True
+			))
+		else:
+			# No _id provided, generate one via insert
+			operations.append(UpdateOne(
+				{"_id": ObjectId()},
+				{"$set": a},
+				upsert=True
+			))
+	
 	db = get_db()
-	res = db.assets.insert_many(assets)
-	return jsonify({"inserted": len(res.inserted_ids)})
+	if operations:
+		res = db.assets.bulk_write(operations)
+		return jsonify({
+			"inserted": res.upserted_count,
+			"modified": res.modified_count,
+			"total": len(operations)
+		})
+	return jsonify({"inserted": 0, "modified": 0, "total": 0})
 
 
 @assets_bp.put("/<asset_id>")
