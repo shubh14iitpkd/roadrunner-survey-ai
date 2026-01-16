@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { MessageSquare, Send, Sparkles, Video, Clock, MapPin, Loader2, Image as ImageIcon, ChevronDown } from "lucide-react";
+import { MessageSquare, Send, Sparkles, Video, Clock, MapPin, Loader2, Image as ImageIcon, ChevronDown, Upload, X } from "lucide-react";
 import { api } from "@/lib/api";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
@@ -12,8 +12,19 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import { Progress } from "@/components/ui/progress";
 import { MarkdownMessage } from "@/components/MarkdownMessage";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner";
 
 interface Message {
   role: "user" | "assistant";
@@ -97,6 +108,14 @@ export default function AskAI() {
   const [selectedVideo, setSelectedVideo] = useState<VideoInfo | null>(null);
   const [videoFrames, setVideoFrames] = useState<FrameData[]>([]);
   const [loadingFrames, setLoadingFrames] = useState(false);
+
+  // Upload states
+  const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [uploadTitle, setUploadTitle] = useState("");
+  const [uploadRouteId, setUploadRouteId] = useState("");
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploading, setUploading] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -288,6 +307,83 @@ ${sampleFrames}`;
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
+  const handleUpload = async () => {
+    if (!uploadFile || !uploadTitle.trim() || !uploadRouteId) {
+      toast.error("Please fill all fields and select a file");
+      return;
+    }
+
+    // Check if user is authenticated
+    const authTokens = localStorage.getItem("auth_tokens");
+    if (!authTokens) {
+      toast.error("You must be logged in to upload videos");
+      return;
+    }
+    try {
+      const parsed = JSON.parse(authTokens);
+      if (!parsed.access_token) {
+        toast.error("Authentication token invalid. Please login again.");
+        return;
+      }
+    } catch {
+      toast.error("Authentication error. Please login again.");
+      return;
+    }
+
+    setUploading(true);
+    setUploadProgress(0);
+
+    try {
+      // Create video entry first (backend will create temp survey if needed)
+      const videoEntry = await api.videos.create({
+        route_id: parseInt(uploadRouteId),
+        title: uploadTitle,
+        status: "uploading",
+        progress: 0,
+      } as any);
+
+      const videoId = videoEntry.video._id;
+
+      // Upload the file with progress tracking
+      await api.videos.upload(
+        uploadFile,
+        videoId,
+        "", // Let backend create survey
+        parseInt(uploadRouteId),
+        uploadTitle,
+        (progress) => setUploadProgress(progress)
+      );
+
+      toast.success("Video uploaded successfully! Processing will start automatically.");
+      
+      // Reset upload form
+      setUploadFile(null);
+      setUploadTitle("");
+      setUploadRouteId("");
+      setUploadProgress(0);
+      setUploadDialogOpen(false);
+
+      // Refresh video list
+      const resp = await api.videos.list({ status: "completed" });
+      if (resp?.items) {
+        const videoList = resp.items.map((v: any) => ({
+          _id: typeof v._id === 'object' ? v._id.$oid : v._id,
+          title: v.title,
+          route_id: v.route_id,
+          status: v.status,
+          duration_seconds: v.duration_seconds,
+          thumbnail_url: v.thumbnail_url,
+        }));
+        setVideos(videoList);
+      }
+    } catch (error: any) {
+      console.error("Upload failed:", error);
+      toast.error(`Upload failed: ${error.message || "Unknown error"}`);
+    } finally {
+      setUploading(false);
+    }
+  };
+
   const handleSend = async () => {
     if (!input.trim() || busy) return;
 
@@ -368,6 +464,108 @@ ${sampleFrames}`;
                 )}
               </SelectContent>
             </Select>
+            
+            {/* Upload Button */}
+            <Dialog open={uploadDialogOpen} onOpenChange={setUploadDialogOpen}>
+              <DialogTrigger asChild>
+                <Button variant="outline" size="icon">
+                  <Upload className="h-4 w-4" />
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="sm:max-w-md">
+                <DialogHeader>
+                  <DialogTitle>Upload Video</DialogTitle>
+                  <DialogDescription>
+                    Upload a new video for AI analysis
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-4 py-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="video-file">Video File</Label>
+                    <Input
+                      id="video-file"
+                      type="file"
+                      accept="video/*"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                          setUploadFile(file);
+                          if (!uploadTitle) {
+                            setUploadTitle(file.name.replace(/\.[^/.]+$/, ""));
+                          }
+                        }
+                      }}
+                      disabled={uploading}
+                    />
+                    {uploadFile && (
+                      <p className="text-xs text-muted-foreground">
+                        {uploadFile.name} ({(uploadFile.size / 1024 / 1024).toFixed(2)} MB)
+                      </p>
+                    )}
+                  </div>
+                  
+                  <div className="space-y-2">
+                    <Label htmlFor="video-title">Title</Label>
+                    <Input
+                      id="video-title"
+                      value={uploadTitle}
+                      onChange={(e) => setUploadTitle(e.target.value)}
+                      placeholder="Enter video title"
+                      disabled={uploading}
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="route-id">Route ID</Label>
+                    <Input
+                      id="route-id"
+                      type="number"
+                      value={uploadRouteId}
+                      onChange={(e) => setUploadRouteId(e.target.value)}
+                      placeholder="Enter route ID"
+                      disabled={uploading}
+                    />
+                  </div>
+
+                  {uploading && (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-muted-foreground">Uploading...</span>
+                        <span className="font-medium">{uploadProgress.toFixed(0)}%</span>
+                      </div>
+                      <Progress value={uploadProgress} className="h-2" />
+                    </div>
+                  )}
+
+                  <div className="flex gap-2 justify-end">
+                    <Button
+                      variant="outline"
+                      onClick={() => setUploadDialogOpen(false)}
+                      disabled={uploading}
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      onClick={handleUpload}
+                      disabled={uploading || !uploadFile || !uploadTitle || !uploadRouteId}
+                    >
+                      {uploading ? (
+                        <>
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                          Uploading...
+                        </>
+                      ) : (
+                        <>
+                          <Upload className="h-4 w-4 mr-2" />
+                          Upload
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                </div>
+              </DialogContent>
+            </Dialog>
+
             {loadingFrames && <Loader2 className="h-5 w-5 animate-spin text-primary" />}
           </div>
 

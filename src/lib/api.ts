@@ -106,6 +106,55 @@ export const api = {
 			const q = qs.toString();
 			return apiFetch(`/api/videos/${video_id}/frames${q ? `?${q}` : ""}`);
 		},
+		upload: async (file: File, videoId: string, surveyId: string, routeId: number, title: string, onProgress?: (progress: number) => void) => {
+			const formData = new FormData();
+			formData.append("file", file);
+			formData.append("video_id", videoId);
+			if (surveyId) formData.append("survey_id", surveyId);
+			formData.append("route_id", String(routeId));
+			formData.append("title", title);
+
+			const token = getAccessToken();
+			return new Promise((resolve, reject) => {
+				const xhr = new XMLHttpRequest();
+				
+				if (onProgress) {
+					xhr.upload.addEventListener("progress", (e) => {
+						if (e.lengthComputable) {
+							const progress = (e.loaded / e.total) * 100;
+							onProgress(progress);
+						}
+					});
+				}
+
+				xhr.addEventListener("load", () => {
+					if (xhr.status >= 200 && xhr.status < 300) {
+						try {
+							resolve(JSON.parse(xhr.responseText));
+						} catch {
+							resolve(xhr.responseText);
+						}
+					} else {
+						// Parse error response
+						try {
+							const errorData = JSON.parse(xhr.responseText);
+							reject(new Error(errorData.error || errorData.message || xhr.statusText));
+						} catch {
+							reject(new Error(xhr.statusText || `HTTP ${xhr.status}`));
+						}
+					}
+				});
+
+				xhr.addEventListener("error", () => reject(new Error("Network error during upload")));
+				xhr.addEventListener("abort", () => reject(new Error("Upload cancelled")));
+
+				xhr.open("POST", `${API_BASE}/api/videos/upload`);
+				if (token) {
+					xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+				}
+				xhr.send(formData);
+			});
+		},
 	},
 	assets: {
 		list: (params?: { survey_id?: string; route_id?: number; category?: string; condition?: string }) => {

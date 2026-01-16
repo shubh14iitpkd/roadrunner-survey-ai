@@ -13,6 +13,7 @@ from pymongo import DESCENDING
 import cv2
 import io
 from PIL import Image
+from flask_jwt_extended import jwt_required
 
 from db import get_db
 from utils.ids import get_now_iso
@@ -74,18 +75,48 @@ def get_video(video_id: str):
 @role_required(["admin", "surveyor"])
 def create_video():
     body = request.get_json(silent=True) or {}
-    required = ["survey_id", "route_id", "title"]
+    required = ["route_id", "title"]
     missing = [k for k in required if body.get(k) in (None, "")]
     if missing:
         return jsonify({"error": f"missing: {', '.join(missing)}"}), 400
 
     db = get_db()
-    # Accept survey_id as string or dict with $oid
+    
+    # Handle survey_id - create a temporary one if not provided or invalid
     survey_id_value = body.get("survey_id")
-    if isinstance(survey_id_value, dict) and "$oid" in survey_id_value:
-        survey_id_value = survey_id_value["$oid"]
+    if survey_id_value:
+        # Check if it's a valid ObjectId format
+        try:
+            if isinstance(survey_id_value, dict) and "$oid" in survey_id_value:
+                survey_id_value = survey_id_value["$oid"]
+            survey_id = ObjectId(survey_id_value)
+        except:
+            # Invalid ObjectId, create a temporary survey
+            temp_survey = {
+                "name": f"Temp Survey - {body['title']}",
+                "route_id": int(body["route_id"]),
+                "date": get_now_iso(),
+                "status": "draft",
+                "created_at": get_now_iso(),
+                "updated_at": get_now_iso(),
+            }
+            survey_res = db.surveys.insert_one(temp_survey)
+            survey_id = survey_res.inserted_id
+    else:
+        # No survey_id provided, create a temporary one
+        temp_survey = {
+            "name": f"Temp Survey - {body['title']}",
+            "route_id": int(body["route_id"]),
+            "date": get_now_iso(),
+            "status": "draft",
+            "created_at": get_now_iso(),
+            "updated_at": get_now_iso(),
+        }
+        survey_res = db.surveys.insert_one(temp_survey)
+        survey_id = survey_res.inserted_id
+    
     doc = {
-        "survey_id": ObjectId(survey_id_value),
+        "survey_id": survey_id,
         "route_id": int(body["route_id"]),
         "title": body["title"],
         "storage_url": body.get("storage_url"),
@@ -104,7 +135,7 @@ def create_video():
     doc["_id"] = str(res.inserted_id)
     doc["survey_id"] = str(doc["survey_id"])
 
-    return jsonify({"item": doc}), 201
+    return jsonify({"video": doc}), 201
 
 
 @videos_bp.put("/<video_id>/status")
@@ -127,9 +158,13 @@ def update_status(video_id: str):
 
 
 @videos_bp.post("/upload")
-@role_required(["admin", "surveyor"])
+@jwt_required()
 def upload_direct():
     # Expect multipart form with fields: video_id (optional), survey_id, route_id, title, file
+    print(f"[UPLOAD] Upload request received")
+    print(f"[UPLOAD] Files: {list(request.files.keys())}")
+    print(f"[UPLOAD] Form data: {list(request.form.keys())}")
+    
     if "file" not in request.files:
         return jsonify({"error": "file is required", "gpx_created": False}), 400
     file = request.files["file"]
