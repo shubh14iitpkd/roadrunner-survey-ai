@@ -3,6 +3,7 @@ SageMaker Video Processing Service
 Handles video processing with SageMaker endpoint, frame extraction, and storage.
 """
 
+import time
 import os
 import json
 import cv2
@@ -14,9 +15,9 @@ from PIL import Image
 import io
 import numpy as np
 from datetime import datetime
-from datetime import datetime
 from bson import ObjectId
 import subprocess
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
 class SageMakerVideoProcessor:
@@ -53,10 +54,17 @@ class SageMakerVideoProcessor:
 
         # Frame extraction interval (process every Nth frame)
         self.frame_interval = int(os.getenv("FRAME_INTERVAL", "3"))
+        
+        # Max concurrent requests to SageMaker
+        self.max_concurrency = int(os.getenv("SAGEMAKER_MAX_CONCURRENCY", "5"))
+        
+        # Inference image size (YOLO standard)
+        self.inference_size = 640
 
         print(f"[SAGEMAKER] Initialized with endpoint: {self.endpoint_name}")
         print(f"[SAGEMAKER] Region: {self.region}")
         print(f"[SAGEMAKER] Frame interval: {self.frame_interval}")
+        print(f"[SAGEMAKER] Max concurrency: {self.max_concurrency}")
         print(f"[SAGEMAKER] Mode: {'MOCK' if self.endpoint_name.lower() == 'mock' else 'LIVE'}")
 
     def _load_endpoint_config(self) -> Optional[str]:
@@ -91,12 +99,12 @@ class SageMakerVideoProcessor:
                     created_at = config.get('created_at', 'N/A')
 
                     if endpoint_name:
-                        print(f"[SAGEMAKER] ✓ Loaded endpoint config from: {config_path}")
-                        print(f"[SAGEMAKER] Endpoint Name: {endpoint_name}")
-                        print(f"[SAGEMAKER] Region: {region}")
-                        print(f"[SAGEMAKER] Memory: {memory_mb} MB")
-                        print(f"[SAGEMAKER] Max Concurrency: {max_concurrency}")
-                        print(f"[SAGEMAKER] Created: {created_at}")
+                        # print(f"[SAGEMAKER] ✓ Loaded endpoint config from: {config_path}")
+                        # print(f"[SAGEMAKER] Endpoint Name: {endpoint_name}")
+                        # print(f"[SAGEMAKER] Region: {region}")
+                        # print(f"[SAGEMAKER] Memory: {memory_mb} MB")
+                        # print(f"[SAGEMAKER] Max Concurrency: {max_concurrency}")
+                        # print(f"[SAGEMAKER] Created: {created_at}")
 
                         # Store full config for potential future use
                         self.endpoint_config = config
@@ -171,7 +179,12 @@ class SageMakerVideoProcessor:
         progress_callback: callable = None
     ) -> Dict:
         """
-        Process video with SageMaker endpoint.
+        Process video with SageMaker endpoint using chunked two-phase architecture.
+        
+        Processes video in chunks of ~500 frames to minimize memory usage while
+        maximizing inference parallelism. Each chunk:
+        1. Phase 1: Read frames and submit all inference requests in parallel
+        2. Phase 2: Write all frames (annotated + original) to FFmpeg in order
 
         Args:
             video_path: Path to input video
@@ -188,6 +201,9 @@ class SageMakerVideoProcessor:
         print(f"[SAGEMAKER] Processing video: {video_path}")
         print(f"[SAGEMAKER] Route ID: {route_id}, Video ID: {video_id}")
 
+        # Chunk size for processing (configurable via environment)
+        chunk_size = int(os.getenv("CHUNK_SIZE", "500"))
+        
         # Create output directories - organize by route_id if available, otherwise video_id
         frames_identifier = f"route_{route_id}" if route_id is not None else video_id
         frames_dir = output_dir / "frames" / frames_identifier / video_id
@@ -206,6 +222,7 @@ class SageMakerVideoProcessor:
         duration = total_frames / fps if fps > 0 else 0
 
         print(f"[SAGEMAKER] Video properties: {width}x{height}, {fps}fps, {total_frames} frames, {duration:.2f}s")
+        print(f"[SAGEMAKER] Using chunk size: {chunk_size}, max concurrency: {self.max_concurrency}")
 
         # Setup video writer for annotated output - save in annotated_videos folder
         annotated_videos_dir = output_dir / "annotated_videos"
@@ -240,87 +257,104 @@ class SageMakerVideoProcessor:
             print(f"[SAGEMAKER] Error starting FFmpeg: {e}")
             raise
 
-        # Process frames
-        frame_count = 0
+        # Processing state
         processed_count = 0
         detections_list = []
         frame_metadata = []
-
+        
         try:
-            while frame_count < total_frames:
-                ret, frame = cap.read()
-                if not ret:
-                    break
-
-                # Calculate timestamp
-                timestamp = frame_count / fps if fps > 0 else 0
-
-                # Process every Nth frame
-                if frame_count % self.frame_interval == 0:
-                    print(f"[SAGEMAKER] Processing frame {frame_count}/{total_frames} ({timestamp:.2f}s)")
-
-                    # Send frame to SageMaker for inference
-                    detections = self._invoke_sagemaker(frame)
-
-                    # Draw annotations on frame
-                    annotated_frame = self.draw_detections(frame.copy(), detections)
-
-                    # Save annotated frame
-                    frame_filename = f"frame_{frame_count:06d}_{timestamp:.2f}s.jpg"
-                    frame_path = frames_dir / frame_filename
-                    cv2.imwrite(str(frame_path), annotated_frame)
-
-                    # Store frame metadata with updated path
-                    relative_frame_path = f"frames/{frames_identifier}/{video_id}/{frame_filename}"
-                    frame_doc = {
-                        "frame_number": frame_count,
-                        "timestamp": timestamp,
-                        "frame_path": relative_frame_path,
-                        "detections": detections
-                    }
-                    frame_metadata.append(frame_doc)
-
-                    # Store frame in MongoDB if db connection provided
-                    if db is not None:
-                        frame_record = {
-                            "video_id": video_id,
-                            "survey_id": survey_id,
-                            "route_id": route_id,
-                            "frame_number": frame_count,
-                            "timestamp": timestamp,
-                            "frame_path": f"/uploads/{relative_frame_path}",
-                            "detections": detections,
-                            "detections_count": len(detections),
-                            "created_at": datetime.utcnow().isoformat()
-                        }
+            with ThreadPoolExecutor(max_workers=self.max_concurrency) as executor:
+                # Process video in chunks
+                for chunk_start in range(0, total_frames, chunk_size):
+                    chunk_end = min(chunk_start + chunk_size, total_frames)
+                    print(f"[SAGEMAKER] Processing chunk: frames {chunk_start}-{chunk_end-1}")
+                    
+                    # ========== PHASE 1: Read chunk and submit inference ==========
+                    chunk_frames = []  # List of (frame_num, frame, timestamp)
+                    futures = {}  # future -> chunk_index
+                    
+                    for frame_num in range(chunk_start, chunk_end):
+                        ret, frame = cap.read()
+                        if not ret:
+                            print(f"[SAGEMAKER] Warning: Could not read frame {frame_num}")
+                            break
+                        
+                        timestamp = frame_num / fps if fps > 0 else 0
+                        chunk_frames.append((frame_num, frame, timestamp))
+                        
+                        # Submit inference for every Nth frame
+                        if frame_num % self.frame_interval == 0:
+                            future = executor.submit(self._invoke_sagemaker, frame.copy(), width, height)
+                            chunk_idx = len(chunk_frames) - 1  # Index within chunk
+                            futures[future] = chunk_idx
+                    
+                    # Wait for all chunk inference to complete
+                    inference_results = {}  # chunk_index -> detections
+                    for future in as_completed(futures):
+                        chunk_idx = futures[future]
                         try:
-                            db.frames.insert_one(frame_record)
+                            detections = future.result()
                         except Exception as e:
-                            print(f"[SAGEMAKER] Warning: Failed to store frame in MongoDB: {e}")
-
-                    # Write annotated frame to output video
-                    try:
-                        ffmpeg_process.stdin.write(annotated_frame.tobytes())
-                    except Exception as e:
-                        print(f"[SAGEMAKER] Error writing frame to FFmpeg: {e}")
-
-                    # Store detections
-                    detections_list.extend(detections)
-                    processed_count += 1
-
-                    # Progress callback
-                    if progress_callback:
-                        progress = int((frame_count / total_frames) * 100)
-                        progress_callback(progress, f"Processing frame {frame_count}/{total_frames}")
-                else:
-                    # Write original frame to output video
-                    try:
-                        ffmpeg_process.stdin.write(frame.tobytes())
-                    except Exception as e:
-                        print(f"[SAGEMAKER] Error writing frame to FFmpeg: {e}")
-
-                frame_count += 1
-
+                            print(f"[SAGEMAKER] Error in inference: {e}")
+                            detections = []
+                        inference_results[chunk_idx] = detections
+                    
+                    # ========== PHASE 2: Write all chunk frames to FFmpeg ==========
+                    for chunk_idx, (frame_num, frame, timestamp) in enumerate(chunk_frames):
+                        if chunk_idx in inference_results:
+                            # This is an inference frame - draw annotations
+                            detections = inference_results[chunk_idx]
+                            annotated_frame = self.draw_detections(frame.copy(), detections)
+                            
+                            # Store frame metadata
+                            frame_doc = {
+                                "frame_number": frame_num,
+                                "timestamp": timestamp,
+                                "detections": detections
+                            }
+                            frame_metadata.append(frame_doc)
+                            
+                            # Store frame in MongoDB if db connection provided
+                            if db is not None:
+                                frame_record = {
+                                    "video_id": video_id,
+                                    "survey_id": survey_id,
+                                    "route_id": route_id,
+                                    "frame_number": frame_num,
+                                    "timestamp": timestamp,
+                                    "detections": detections,
+                                    "detections_count": len(detections),
+                                    "created_at": datetime.utcnow().isoformat()
+                                }
+                                try:
+                                    db.frames.insert_one(frame_record)
+                                except Exception as e:
+                                    print(f"[SAGEMAKER] Warning: Failed to store frame in MongoDB: {e}")
+                            
+                            # Write annotated frame to output video
+                            try:
+                                ffmpeg_process.stdin.write(annotated_frame.tobytes())
+                            except Exception as e:
+                                print(f"[SAGEMAKER] Error writing frame to FFmpeg: {e}")
+                            
+                            # Store detections
+                            detections_list.extend(detections)
+                            processed_count += 1
+                        else:
+                            # Non-inference frame - write original
+                            try:
+                                ffmpeg_process.stdin.write(frame.tobytes())
+                            except Exception as e:
+                                print(f"[SAGEMAKER] Error writing frame to FFmpeg: {e}")
+                        
+                        # Progress callback
+                        if progress_callback:
+                            progress = int((frame_num / total_frames) * 100)
+                            progress_callback(progress, f"Processing frame {frame_num}/{total_frames}")
+                    
+                    # Free memory for this chunk
+                    del chunk_frames, futures, inference_results
+                    
         finally:
             cap.release()
             if 'ffmpeg_process' in locals():
@@ -328,8 +362,6 @@ class SageMakerVideoProcessor:
                 ffmpeg_process.wait()
                 if ffmpeg_process.returncode != 0:
                     print(f"[SAGEMAKER] FFmpeg exited with error code: {ffmpeg_process.returncode}")
-                    # Optional: print stderr if needed
-                    # print(ffmpeg_process.stderr.read().decode())
 
         # Save frame metadata as JSON in metadata folder
         metadata_dir = output_dir / "metadata"
@@ -339,7 +371,7 @@ class SageMakerVideoProcessor:
             json.dump(frame_metadata, f, indent=2)
 
         print(f"[SAGEMAKER] Processing complete!")
-        print(f"[SAGEMAKER] Processed {processed_count} frames")
+        print(f"[SAGEMAKER] Processed {processed_count} inference frames")
         print(f"[SAGEMAKER] Annotated video: {output_video_path}")
         print(f"[SAGEMAKER] Frames saved to: {frames_dir}")
 
@@ -358,24 +390,71 @@ class SageMakerVideoProcessor:
             "detections_summary": self._summarize_detections(detections_list)
         }
 
-    def _invoke_sagemaker(self, frame: np.ndarray) -> List[Dict]:
+    def _invoke_sagemaker(self, frame: np.ndarray, orig_width: int, orig_height: int) -> List[Dict]:
         """
         Send frame to SageMaker endpoint for inference using YOLO pipeline.
 
         Args:
             frame: Video frame (numpy array)
+            orig_width: Original frame width for box scaling
+            orig_height: Original frame height for box scaling
 
         Returns:
-            List of detections in format:
-            [{"class_name": str, "confidence": float, "bbox": {"x1": int, "y1": int, "x2": int, "y2": int}}]
+            List of detections with box scaled to original frame dimensions.
+            Format: [{"class_name": str, "confidence": float, "box": [x1, y1, x2, y2]}, ...]
         """
+        # Resize frame to 640x640 for faster inference
+        resized_frame = cv2.resize(frame, (self.inference_size, self.inference_size))
+        
+        # Calculate scale factors for bbox scaling back to original
+        scale_x = orig_width / self.inference_size
+        scale_y = orig_height / self.inference_size
+        
         if not self.endpoint_name or self.endpoint_name.lower() == 'mock':
-            # Use mock detections for testing
-            return self._mock_detections()
+            # Convert frame to RGB (OpenCV uses BGR)
+            frame_rgb = cv2.cvtColor(resized_frame, cv2.COLOR_BGR2RGB)
 
+            # Convert to PIL Image
+            pil_image = Image.fromarray(frame_rgb)
+
+            # Encode to base64 JPEG (matching YOLO pipeline format)
+            buffered = io.BytesIO()
+            pil_image.save(buffered, format="JPEG", quality=85)
+            img_base64 = base64.b64encode(buffered.getvalue()).decode()
+
+            # Prepare payload (matching YOLO pipeline format)
+            payload = json.dumps({'image': img_base64})
+            # Use mock detections for testing
+            det = self._mock_detections()
+
+            # Filter by confidence threshold (0.25 default)
+            confidence_threshold = float(os.getenv("CONFIDENCE_THRESHOLD", "0.25"))
+            mock_detections = [d for d in det if d.get('confidence', 0) >= confidence_threshold]
+            
+            # Scale box back to original dimensions (accept both bbox and box, store as box)
+            for d in mock_detections:
+                box = d.get('box') or d.get('bbox')
+                if isinstance(box, list) and len(box) == 4:
+                    d['box'] = [
+                        box[0] * scale_x,
+                        box[1] * scale_y,
+                        box[2] * scale_x,
+                        box[3] * scale_y
+                    ]
+                elif isinstance(box, dict):
+                    # Handle dict format (convert to array and scale)
+                    d['box'] = [
+                        box.get('x1', 0) * scale_x,
+                        box.get('y1', 0) * scale_y,
+                        box.get('x2', 0) * scale_x,
+                        box.get('y2', 0) * scale_y
+                    ]
+                # Remove bbox key if present to ensure consistency
+                d.pop('bbox', None)
+            return mock_detections
         try:
             # Convert frame to RGB (OpenCV uses BGR)
-            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            frame_rgb = cv2.cvtColor(resized_frame, cv2.COLOR_BGR2RGB)
 
             # Convert to PIL Image
             pil_image = Image.fromarray(frame_rgb)
@@ -397,14 +476,26 @@ class SageMakerVideoProcessor:
 
             # Parse response
             result = json.loads(response['Body'].read().decode())
-            print(result)
-            # YOLO pipeline format: {"predictions": [{"class_name": str, "confidence": float, "bbox": {...}}, ...]}
-            detections = result.get('predictions', [])
-            print(detections)
+            # YOLO pipeline format: {"detections": [{"class_name": str, "confidence": float, "box": [x1,y1,x2,y2]}, ...]}
+            detections = result.get('detections', [])
+            
             # Filter by confidence threshold (0.25 default)
             confidence_threshold = float(os.getenv("CONFIDENCE_THRESHOLD", "0.25"))
             detections = [d for d in detections if d.get('confidence', 0) >= confidence_threshold]
-
+            
+            # Scale box back to original dimensions (accept both bbox and box, store as box)
+            for d in detections:
+                box = d.get('box') or d.get('bbox')
+                if isinstance(box, list) and len(box) == 4:
+                    d['box'] = [
+                        box[0] * scale_x,
+                        box[1] * scale_y,
+                        box[2] * scale_x,
+                        box[3] * scale_y
+                    ]
+                    # Remove bbox key if present to ensure consistency
+                    d.pop('bbox', None)
+            print(detections)
             return detections
 
         except Exception as e:
@@ -418,8 +509,27 @@ class SageMakerVideoProcessor:
     def _mock_detections(self) -> List[Dict]:
         """Return mock detections for testing without SageMaker (YOLO format)."""
         import random
+        import time  # <--- Make sure to import time
 
-        # Mock detections for testing - YOLO format with bbox as dict
+        # --- CALIBRATED LATENCY SIMULATION ---
+        # Based on logs: 
+        # ~80% are between 0.6s and 0.9s
+        # ~20% are spikes between 1.1s and 2.5s
+        
+        chance = random.random()
+        if chance < 0.80:
+            # Standard request
+            simulated_time = random.uniform(0.65, 0.95)
+        elif chance < 0.95:
+            # Heavy request / Network jitter
+            simulated_time = random.uniform(1.1, 1.8)
+        else:
+            # Major spike (like your 2.4s logs)
+            simulated_time = random.uniform(2.0, 2.6)
+            
+        time.sleep(simulated_time)
+
+        # Mock detections for testing - format with box as array [x1,y1,x2,y2]
         classes = ['pothole', 'crack', 'manhole', 'sign damage', 'road marking', 'vegetation']
         detections = []
 
@@ -432,14 +542,8 @@ class SageMakerVideoProcessor:
             detections.append({
                 "class_name": random.choice(classes),
                 "confidence": round(random.uniform(0.7, 0.99), 2),
-                "bbox": {
-                    "x1": x1,
-                    "y1": y1,
-                    "x2": x2,
-                    "y2": y2
-                }
+                "box": [x1, y1, x2, y2]
             })
-
         return detections
 
 
@@ -450,7 +554,7 @@ class SageMakerVideoProcessor:
 
         Args:
             frame: Video frame
-            detections: List of detections with YOLO bbox format
+            detections: List of detections with box format (accepts both box and bbox)
 
         Returns:
             Annotated frame
@@ -467,18 +571,21 @@ class SageMakerVideoProcessor:
         ]
 
         for detection in detections:
-            bbox = detection.get('bbox', {})
+            # Accept both box and bbox formats
+            box = detection.get('box') or detection.get('bbox', [])
             class_name = detection.get('class_name', 'unknown')
             confidence = detection.get('confidence', 0.0)
 
-            # Skip if bbox is not in correct format
-            if not isinstance(bbox, dict):
-                continue
-
-            x1 = int(bbox.get('x1', 0))
-            y1 = int(bbox.get('y1', 0))
-            x2 = int(bbox.get('x2', 0))
-            y2 = int(bbox.get('y2', 0))
+            # Handle box as array [x1, y1, x2, y2] or dict {x1, y1, x2, y2}
+            if isinstance(box, list) and len(box) == 4:
+                x1, y1, x2, y2 = int(box[0]), int(box[1]), int(box[2]), int(box[3])
+            elif isinstance(box, dict):
+                x1 = int(box.get('x1', 0))
+                y1 = int(box.get('y1', 0))
+                x2 = int(box.get('x2', 0))
+                y2 = int(box.get('y2', 0))
+            else:
+                continue  # Skip invalid box format
 
             # Assign color to class
             if class_name not in class_colors:
