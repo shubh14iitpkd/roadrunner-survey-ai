@@ -53,10 +53,12 @@ export const api = {
 		delete: (route_id: number) => apiFetch(`/api/roads/${route_id}`, { method: "DELETE" }),
 	},
 	ai: {
-		createChat: (title: string) => apiFetch("/api/ai/chats", { method: "POST", body: JSON.stringify({ title }) }),
+		createChat: (title: string, videoId?: string) => apiFetch("/api/ai/chats", { method: "POST", body: JSON.stringify({ title, video_id: videoId }) }),
 		listChats: () => apiFetch("/api/ai/chats"),
 		listMessages: (chatId: string) => apiFetch(`/api/ai/chats/${chatId}/messages`),
 		addMessage: (chatId: string, role: "user" | "assistant", content: string) =>
+			apiFetch(`/api/ai/chats/${chatId}/messages`, { method: "POST", body: JSON.stringify({ role, content }) }),
+		sendMessage: (chatId: string, role: "user" | "assistant", content: string) =>
 			apiFetch(`/api/ai/chats/${chatId}/messages`, { method: "POST", body: JSON.stringify({ role, content }) }),
 	},
 	Surveys: {

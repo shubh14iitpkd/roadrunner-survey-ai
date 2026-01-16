@@ -44,67 +44,14 @@ interface VideoInfo {
   thumbnail_url?: string;
 }
 
-const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY || "AIzaSyAkJBDspyPQcVWTjc-zgsk4UhnRd-6OZ7k";
-const GEMINI_MODEL = "gemini-2.0-flash";
-
-async function askGeminiWithContext(
-  prompt: string,
-  videoContext: string,
-  framesContext: string,
-  conversationHistory: Message[]
+// Send message to backend API
+async function sendMessageToBackend(
+  chatId: string,
+  question: string
 ): Promise<string> {
-  if (!GEMINI_API_KEY) throw new Error("Missing VITE_GEMINI_API_KEY");
-
-  const systemPrompt = `You are an AI assistant specialized in road asset analysis for RoadSight AI.
-You have access to video survey data with frames extracted at regular intervals.
-Each frame contains AI-detected road assets like traffic signs, street lights, guardrails, etc.
-
-${videoContext}
-
-${framesContext}
-
-Answer questions about:
-- Assets detected at specific timestamps
-- Asset conditions and types
-- Location-based queries
-- Statistics and summaries
-- Anomalies and issues
-
-Be concise and reference specific timestamps/frame numbers when relevant.
-If asked about a specific time, find the closest frame and describe what was detected.`;
-
-  // Build conversation for context
-  const messages = conversationHistory.slice(-6).map(m =>
-    `${m.role === "user" ? "User" : "Assistant"}: ${m.content}`
-  ).join("\n\n");
-
-  const fullPrompt = messages
-    ? `${systemPrompt}\n\nConversation history:\n${messages}\n\nUser: ${prompt}`
-    : `${systemPrompt}\n\nUser: ${prompt}`;
-
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ role: "user", parts: [{ text: fullPrompt }] }],
-        generationConfig: {
-          temperature: 0.4,
-          maxOutputTokens: 1024,
-        },
-      }),
-    }
-  );
-
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(text || `HTTP ${res.status}`);
-  }
-
-  const data = await res.json();
-  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
-  return text.trim() || "(No response)";
+  const response = await api.ai.sendMessage(chatId, "user", question);
+  // Backend returns { user_message: {...}, assistant_message: {...} }
+  return response.assistant_message?.content || response.content || "(No response)";
 }
 
 // Parse timestamp from user query (e.g., "at 2:30", "at 150 seconds", "frame 45")
@@ -262,7 +209,7 @@ export default function AskAI() {
     if (chatId) return chatId;
     try {
       const title = input.trim().slice(0, 60) || "Video Analysis Chat";
-      const resp = await api.ai.createChat(title);
+      const resp = await api.ai.createChat(title, selectedVideoId);
       setChatId(resp.chat._id);
       return resp.chat._id as string;
     } catch {
@@ -351,41 +298,12 @@ ${sampleFrames}`;
     if (cid) persistMessage(cid, userMessage);
 
     try {
-      // Check if user is asking about a specific timestamp
-      const { timestamp, frameNumber } = parseTimestampFromQuery(input);
-      let relevantFrames: FrameData[] = [];
-      let additionalContext = "";
-
-      if (timestamp !== undefined) {
-        relevantFrames = findFramesNearTimestamp(timestamp);
-        if (relevantFrames.length > 0) {
-          additionalContext = `\n\nFrames near timestamp ${formatTimestamp(timestamp)}:\n` +
-            relevantFrames.map(f => {
-              const dets = f.detections.map(d => `${d.class_name} (${(d.confidence * 100).toFixed(1)}%)`).join(", ");
-              return `Frame ${f.frame_number} at ${formatTimestamp(f.timestamp)}: ${dets || "No detections"}`;
-            }).join("\n");
-        }
-      } else if (frameNumber !== undefined) {
-        const frame = findFrameByNumber(frameNumber);
-        if (frame) {
-          relevantFrames = [frame];
-          const dets = frame.detections.map(d => `${d.class_name} (${(d.confidence * 100).toFixed(1)}%)`).join(", ");
-          additionalContext = `\n\nFrame ${frameNumber} at ${formatTimestamp(frame.timestamp)}: ${dets || "No detections"}`;
-        }
-      }
-
-      const reply = await askGeminiWithContext(
-        input,
-        buildVideoContext(),
-        buildFramesContext() + additionalContext,
-        messages
-      );
+      // Send message to backend - backend will handle context and frame detection
+      const reply = await sendMessageToBackend(cid, input);
 
       const aiMessage: Message = {
         role: "assistant",
         content: reply,
-        frames: relevantFrames.length > 0 ? relevantFrames : undefined,
-        timestamp: timestamp !== undefined ? formatTimestamp(timestamp) : undefined,
       };
 
       setMessages(prev => [...prev, aiMessage]);
@@ -560,7 +478,7 @@ ${sampleFrames}`;
             <Button
               onClick={handleSend}
               size="icon"
-              disabled={busy || !GEMINI_API_KEY || !selectedVideoId}
+              disabled={busy || !selectedVideoId}
             >
               {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
             </Button>
