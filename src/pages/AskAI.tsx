@@ -12,6 +12,8 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+import { MarkdownMessage } from "@/components/MarkdownMessage";
+import { cn } from "@/lib/utils";
 
 interface Message {
   role: "user" | "assistant";
@@ -400,7 +402,11 @@ ${sampleFrames}`;
                 )}
                 <div className="max-w-[80%] space-y-2">
                   <Card className={cn("p-4", message.role === "user" ? "bg-primary text-primary-foreground" : "bg-card")}>
-                    <p className="text-sm whitespace-pre-wrap">{message.content}</p>
+                    {message.role === "user" ? (
+                      <p className="text-sm">{message.content}</p>
+                    ) : (
+                      <MarkdownMessage content={message.content} />
+                    )}
                   </Card>
 
                   {/* Show relevant frames if available */}
