@@ -350,9 +350,14 @@ export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                 progress: 0,
             });
 
-            const backendId: string = typeof videoResp.item._id === 'object' && videoResp.item._id.$oid
-                ? videoResp.item._id.$oid
-                : String(videoResp.item._id);
+            // Handle both response formats: { item: doc } or { video: doc }
+            const videoDoc = videoResp.item || videoResp.video;
+            if (!videoDoc) {
+                throw new Error("Invalid video creation response - no video data returned");
+            }
+            const backendId: string = typeof videoDoc._id === 'object' && videoDoc._id.$oid
+                ? videoDoc._id.$oid
+                : String(videoDoc._id);
 
             // Create initial video object in queue
             const videoObj: VideoFile = {
@@ -428,9 +433,14 @@ export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                     progress: 0,
                 });
 
-                const backendId: string = typeof videoResp.item._id === 'object' && videoResp.item._id.$oid
-                    ? videoResp.item._id.$oid
-                    : String(videoResp.item._id);
+                // Handle both response formats: { item: doc } or { video: doc }
+                const videoDoc = videoResp.item || videoResp.video;
+                if (!videoDoc) {
+                    throw new Error("Invalid video creation response - no video data returned");
+                }
+                const backendId: string = typeof videoDoc._id === 'object' && videoDoc._id.$oid
+                    ? videoDoc._id.$oid
+                    : String(videoDoc._id);
 
                 // Create initial video object in queue
                 const videoObj: VideoFile = {
