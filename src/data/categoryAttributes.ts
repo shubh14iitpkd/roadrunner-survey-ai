@@ -123,8 +123,7 @@ export const CATEGORY_ATTRIBUTES: Record<string, Record<string, Record<string, R
         { "No": "Traffic_Sign_TrafficSignIllumination_No" }
       ],
       "ASSET CONDITION": [
-        // { "Good": "Traffic_Sign_AssetCondition_Good" },
-        { "Good": "Traffic lights" },
+        { "Good": "Traffic_Sign_AssetCondition_Good" },
         { "Damaged": "Traffic_Sign_AssetCondition_Damaged" },
         { "Dirty": "Traffic_Sign_AssetCondition_Dirty" },
         { "Overgrown": "Traffic_Sign_AssetCondition_Overgrown" }
@@ -152,8 +151,8 @@ export const CATEGORY_ATTRIBUTES: Record<string, Record<string, Record<string, R
   "ITS": {
     "AIR QUALITY MONITORING SYSTEM (AQMS)": {
       "ASSET CONDITION": [
-        { "Good": "Air_Quality_Monitoring_System_AQMS_AssetCondition_Good" },
-        { "Damaged": "Air_Quality_Monitoring_System_AQMS_AssetCondition_Damaged" }
+        { "Good": "AIR_QUALITY_MONITORING_SYSTEM_AQMS_AssetCondition_Good" },
+        { "Damaged": "AIR_QUALITY_MONITORING_SYSTEM_AQMS_AssetCondition_Damaged" }
       ]
     },
     "CLOSED CIRCUIT TELEVISION (CCTV)": {
@@ -166,26 +165,26 @@ export const CATEGORY_ATTRIBUTES: Record<string, Record<string, Record<string, R
     },
     "DYNAMIC MESSAGE SIGN (DMS) / ELECTRONIC SIGNBOARDS": {
       "ASSET CONDITION": [
-        { "Good": "Dynamic_Message_Sign_DMS_AssetCondition_Good" },
-        { "Damaged": "Dynamic_Message_Sign_DMS_AssetCondition_Damaged" },
-        { "No Display": "Dynamic_Message_Sign_DMS_AssetCondition_No_Display" }
+        { "Good": "DYNAMIC_MESSAGE_SIGN_DMS_AssetCondition_Good" },
+        { "Damaged": "DYNAMIC_MESSAGE_SIGN_DMS_AssetCondition_Damaged" },
+        { "No Display": "DYNAMIC_MESSAGE_SIGN_DMS_AssetCondition_NoDisplay" }
       ]
     },
     "EMERGENCY PHONE": {
       "ASSET CONDITION": [
-        { "Good": "Emergency_Phone_AssetCondition_Good" },
-        { "Damaged": "Emergency_Phone_AssetCondition_Damaged" }
+        { "Good": "EMERGENCY_PHONE_AssetCondition_Good" },
+        { "Damaged": "EMERGENCY_PHONE_AssetCondition_Damaged" }
       ]
     },
     "FIRE EXTINGUISHER": {
       "ASSET CONDITION": [
-        { "Fine": "Fire_Extinguisher_AssetCondition_Fine" },
-        { "Missing": "Fire_Extinguisher_AssetCondition_Missing" }
+        { "Fine": "FIRE_EXTINGUISHER_AssetCondition_Fine" },
+        { "Missing": "FIRE_EXTINGUISHER_AssetCondition_Missing" }
       ]
     },
     "ITS ENCLOSURE": {
       "ASSET CONDITION": [
-        { "Visible": "ITS_Enclosure_AssetCondition_Visible" }
+        { "Visible": "ITS_ENCLOSURE_AssetCondition_Visible" }
       ],
       "CABINET TYPE": [
         { "Single Cabinet": "ITS_Enclosure_CabinetType_Single_Cabinet" },
@@ -194,14 +193,14 @@ export const CATEGORY_ATTRIBUTES: Record<string, Record<string, Record<string, R
     },
     "ITS FEEDER PILLAR": {
       "ASSET CONDITION": [
-        { "Good": "ITS_Feeder_Pillar_AssetCondition_Good" },
-        { "Damaged": "ITS_Feeder_Pillar_AssetCondition_Damaged" }
+        { "Good": "ITS_FEEDER_PILLAR_AssetCondition_Good" },
+        { "Damaged": "ITS_FEEDER_PILLAR_AssetCondition_Damaged" }
       ]
     },
     "ITS STRUCTURE": {
       "ASSET CONDITION": [
-        { "Good": "ITS_Structure_AssetCondition_Good" },
-        { "Damaged": "ITS_Structure_AssetCondition_Damaged" }
+        { "Good": "ITS_STRUCTURE_AssetCondition_Good" },
+        { "Damaged": "ITS_STRUCTURE_AssetCondition_Damaged" }
       ],
       "DESCRIPTION": [
         { "Monopole": "ITS_Structure_Description_Monopole" },
@@ -226,13 +225,9 @@ export const CATEGORY_ATTRIBUTES: Record<string, Record<string, Record<string, R
         { "No": "Lane_Control_Signs_LCS_NumberPoles_No" }
       ],
       "ASSET CONDITION": [
-        { "Good": "Lane_Control_Signs_LCS_AssetCondition_Good" },
-        { "Damaged": "Lane_Control_Signs_LCS_AssetCondition_Damaged" },
-        { "No Display": "Lane_Control_Signs_LCS_AssetCondition_No_Display" }
-      ],
-      "DESCRIPTION": [
-        { "Displaying": "Lane_Control_Signs_LCS_Description_Displaying" },
-        { "No Displaying": "Lane_Control_Signs_LCS_Description_No_Displaying" }
+        { "Good": "LANE_CONTROL_SIGNS_LCS_AssetCondition_Good" },
+        { "Damaged": "LANE_CONTROL_SIGNS_LCS_AssetCondition_Damaged" },
+        { "No Display": "LANE_CONTROL_SIGNS_LCS_AssetCondition_NoDisplay" }
       ],
       "TYPE": [
         { "Central Matrix": "Lane_Control_Signs_LCS_Type_Central_Matrix" },
@@ -249,14 +244,14 @@ export const CATEGORY_ATTRIBUTES: Record<string, Record<string, Record<string, R
       "NUMBER OF LANES COVERAGE": [],
       "OVDS SIGN": [],
       "ASSET CONDITION": [
-        { "Good": "Over_Height_Vehicle_Detection_System_OVDS_AssetCondition_Good" },
-        { "Damaged": "Over_Height_Vehicle_Detection_System_OVDS_AssetCondition_Damaged" }
+        { "Good": "OVER_HEIGHT_VEHICLE_DETECTION_SYSTEM_OVDS_AssetCondition_Good" },
+        { "Damaged": "OVER_HEIGHT_VEHICLE_DETECTION_SYSTEM_OVDS_AssetCondition_Damaged" }
       ]
     },
     "OVDS SPEAKER": {
       "ASSET CONDITION": [
-        { "Good": "OVDS_Speaker_AssetCondition_Good" },
-        { "Damaged": "OVDS_Speaker_AssetCondition_Damaged" }
+        { "Good": "OVDS_SPEAKER_AssetCondition_Good" },
+        { "Damaged": "OVDS_SPEAKER_AssetCondition_Damaged" }
       ]
     },
     "ROAD WEATHER INFORMATION SYSTEM (RWIS)": {
@@ -266,9 +261,9 @@ export const CATEGORY_ATTRIBUTES: Record<string, Record<string, Record<string, R
     },
     "SMALL DYNAMIC MESSAGING SIGN": {
       "ASSET CONDITION": [
-        { "Good": "Small_Dynamic_Messaging_Sign_AssetCondition_Good" },
-        { "Damaged": "Small_Dynamic_Messaging_Sign_AssetCondition_Damaged" },
-        { "Display": "Small_Dynamic_Messaging_Sign_AssetCondition_Display" }
+        { "Good": "SMALL_DYNAMIC_MESSAGING_SIGN_AssetCondition_Good" },
+        { "Damaged": "SMALL_DYNAMIC_MESSAGING_SIGN_AssetCondition_Damaged" },
+        { "Display": "SMALL_DYNAMIC_MESSAGING_SIGN_AssetCondition_Display" }
       ],
       "DESCRIPTION": [
         { "Gantry Mounted": "Small_Dynamic_Messaging_Sign_Description_Gantry_Mounted" },
@@ -299,8 +294,8 @@ export const CATEGORY_ATTRIBUTES: Record<string, Record<string, Record<string, R
         { "No": "Traffic_Signal_TopEndCap_No" }
       ],
       "ASSET CONDITION": [
-        { "Good": "Traffic_Signal_AssetCondition_Good" },
-        { "Damaged": "Traffic_Signal_AssetCondition_Damaged" }
+        { "Good": "TRAFFIC_SIGNAL_AssetCondition_Good" },
+        { "Damaged": "TRAFFIC_SIGNAL_AssetCondition_Damaged" }
       ],
       "GANTRY TYPE": [
         { "Single-Arm Gantry": "Traffic_Signal_GantryType_Single_Arm_Gantry" },
@@ -319,14 +314,14 @@ export const CATEGORY_ATTRIBUTES: Record<string, Record<string, Record<string, R
     },
     "TRAFFIC SIGNAL FEEDER PILLAR": {
       "ASSET CONDITION": [
-        { "Good": "Traffic_Signal_Feeder_Pillar_AssetCondition_Good" },
-        { "Damaged": "Traffic_Signal_Feeder_Pillar_AssetCondition_Damaged" }
+        { "Good": "TRAFFIC_SIGNAL_FEEDER_PILLAR_AssetCondition_Good" },
+        { "Damaged": "TRAFFIC_SIGNAL_FEEDER_PILLAR_AssetCondition_Damaged" }
       ]
     },
     "TRAFFIC SIGNAL HEAD": {
       "ASSET CONDITION": [
-        { "Good": "Traffic_Signal_Head_AssetCondition_Good" },
-        { "Damaged": "Traffic_Signal_Head_AssetCondition_Damaged" }
+        { "Good": "TRAFFIC_SIGNAL_HEAD_AssetCondition_Good" },
+        { "Damaged": "TRAFFIC_SIGNAL_HEAD_AssetCondition_Damaged" }
       ],
       "SIGNAL HEAD ASPECT TYPE": [
         { "1": "Traffic_Signal_Head_SignalHeadAspectType_1" },
@@ -390,7 +385,7 @@ export const CATEGORY_ATTRIBUTES: Record<string, Record<string, Record<string, R
         { "No": "Traffic_Signal_Junction_Controller_No" }
       ],
       "ASSET CONDITION": [
-        { "Good": "Traffic_Signal_Junction_AssetCondition_Good" },
+        { "Good": "TRAFFIC_SIGNAL_JUNCTION_AssetCondition_Good" },
         { "Damaged": "Traffic_Signal_Junction_AssetCondition_Damaged" }
       ],
       "INTERSECTION TYPE": [
@@ -413,7 +408,7 @@ export const CATEGORY_ATTRIBUTES: Record<string, Record<string, Record<string, R
       "ASSET CONDITION": [
         { "Good": "Animal_Fence_AssetCondition_Good" },
         { "Damaged": "Animal_Fence_AssetCondition_Damaged" },
-        { "Missing Panel": "Animal_Fence_AssetCondition_Missing_Panel" }
+        { "Missing Panel": "Animal_Fence_AssetCondition_MissingPanel" }
       ],
       "LENGTH": [
         { "Calculate from start to finish": "Animal_Fence_Length_Calculate" }
@@ -545,8 +540,7 @@ export const CATEGORY_ATTRIBUTES: Record<string, Record<string, Record<string, R
         { "No": "Road_Marking_Point_RoadMarkingColour_No" }
       ],
       "ASSET CONDITION": [
-        { "Good": "Road markings" },
-        // { "Good": "Road_Marking_Point_AssetCondition_Good" },
+        { "Good": "Road_Marking_Point_AssetCondition_Good" },
         { "Damaged": "Road_Marking_Point_AssetCondition_Damaged" }
       ]
     },
@@ -558,7 +552,7 @@ export const CATEGORY_ATTRIBUTES: Record<string, Record<string, Record<string, R
       "ASSET CONDITION": [
         { "Good": "Road_Marking_Polygon_AssetCondition_Good" },
         { "Damaged": "Road_Marking_Polygon_AssetCondition_Damaged" },
-        { "Faded Paint": "Road_Marking_Polygon_AssetCondition_Faded_Paint" }
+        { "Faded Paint": "Road_Marking_Polygon_AssetCondition_FadedPaint" }
       ],
       "CHAINAGE END": [],
       "CHAINAGE START": [],
@@ -604,7 +598,7 @@ export const CATEGORY_ATTRIBUTES: Record<string, Record<string, Record<string, R
       "ASSET CONDITION": [
         { "Good": "Rumble_Strip_AssetCondition_Good" },
         { "Damaged": "Rumble_Strip_AssetCondition_Damaged" },
-        { "Paint Faded": "Rumble_Strip_AssetCondition_Paint_Faded" }
+        { "Paint Faded": "Rumble_Strip_AssetCondition_PaintFaded" }
       ],
       "CHAINAGE END": [],
       "CHAINAGE START": []
@@ -620,7 +614,7 @@ export const CATEGORY_ATTRIBUTES: Record<string, Record<string, Record<string, R
       // "SPEED HUMP TYPE": ["One Way", "Two Way"],
       // "TYPE": ["One Way", "Two Way"]
     },
-    "ACCESSWAY": {
+    "Accessway": {
       "ASSET CONDITION": [
         { "Good": "Accessway_AssetCondition_Good" },
         { "Damaged": "Accessway_AssetCondition_Damaged" }
@@ -687,20 +681,20 @@ export const CATEGORY_ATTRIBUTES: Record<string, Record<string, Record<string, R
   "ROADWAY LIGHTING": {
     "STREET LIGHT FEEDER PILLAR": {
       "ASSET CONDITION": [
-        { "Good": "Street_Light_Feeder_Pillar_AssetCondition_Good" },
-        { "Damaged": "Street_Light_Feeder_Pillar_AssetCondition_Damaged" }
+        { "Good": "STREET_LIGHT_FEEDER_PILLAR_AssetCondition_Good" },
+        { "Damaged": "STREET_LIGHT_FEEDER_PILLAR_AssetCondition_Damaged" }
       ]
     },
     "STREET LIGHT": {
       "ASSET CONDITION": [
-        // { "Good": "Street_Light_AssetCondition_Good" },
-        { "Good": "Street lights" },
-        { "Damaged": "Street_Light_AssetCondition_Damaged" }
+        { "Good": "STREET_LIGHT_AssetCondition_Good" },
+        { "Damaged": "STREET_LIGHT_AssetCondition_Damaged" }
       ]
     },
     "STREET LIGHT POLE": {
       "ASSET CONDITION": [
-        { "Damaged": "Street_Light_Pole_AssetCondition_Damaged" }
+        { "Good": "STREET_LIGHT_POLE_AssetCondition_Good" },
+        { "Damaged": "STREET_LIGHT_POLE_AssetCondition_Damaged" }
       ],
       "DISTRIBUTION BOX": [],
       "LUMINAIRE COUNT": [],
@@ -711,8 +705,8 @@ export const CATEGORY_ATTRIBUTES: Record<string, Record<string, Record<string, R
     },
     "UNDERPASS LUMINAIRE": {
       "ASSET CONDITION": [
-        { "Good": "Underpass_Luminaire_AssetCondition_Good" },
-        { "Damaged": "Underpass_Luminaire_AssetCondition_Damaged" }
+        { "Good": "UNDERPASS_LUMINAIRE_AssetCondition_Good" },
+        { "Damaged": "UNDERPASS_LUMINAIRE_AssetCondition_Damaged" }
       ]
     }
   },
