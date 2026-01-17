@@ -66,3 +66,4 @@ ENV/
 **/backend/uploads
 cleanup.sh
 **/endpoint_config*
+**/test_sagemaker_local.py
