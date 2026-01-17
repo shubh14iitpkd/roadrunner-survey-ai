@@ -1,6 +1,13 @@
 import { useState, useEffect, useRef } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 interface Detection {
   class_name: string;
@@ -160,19 +167,19 @@ export default function FramePopupContent({
   );
 
   return (
-    <div style={{ width: '100%', fontSize: '13px' }}>
+    <div className="w-full text-[13px]">
       {/* Header */}
-      <div style={{ marginBottom: '12px' }}>
-        <div style={{ fontWeight: 600, fontSize: '14px', marginBottom: '4px' }}>
+      <div className="mb-3">
+        <div className="font-semibold text-sm mb-1 text-foreground">
           {trackTitle}
         </div>
-        <div style={{ fontSize: '11px', color: '#666' }}>
+        <div className="text-[11px] text-muted-foreground">
           Point {pointIndex + 1} of {totalPoints} | {frameData.timestamp}s
         </div>
       </div>
 
       {/* Controls */}
-      <div style={{ display: 'flex', gap: '8px', marginBottom: '10px', flexWrap: 'wrap' }}>
+      <div className="flex gap-2 mb-2.5 items-center">
         <Button
           size="sm"
           className='rounded-full'
@@ -181,40 +188,53 @@ export default function FramePopupContent({
         >
           {showLabels ? 'Hide' : 'Show'} Labels
         </Button>
-        <Button
-          size="sm"
-          className='rounded-full ghost:text-white'
-          variant={selectedClass === null ? 'default' : 'secondary'}
-          onClick={() => setSelectedClass(null)}
+
+        <Select
+          value={selectedClass || "all"}
+          onValueChange={(value) => setSelectedClass(value === "all" ? null : value)}
         >
-          Show All ({frameData.detections?.length || 0})
-        </Button>
+          <SelectTrigger className="w-[200px] h-9 rounded-full outline-none focus:outline-none focus:ring-0 focus:ring-offset-0 bg-background [&>span]:flex [&>span]:items-center [&>span]:justify-center [&>span]:text-center [&>span_div]:w-full [&>span_div]:justify-center [&>span_div_span]:truncate [&>span_div_span]:block [&>span_div_span]:max-w-[130px]">
+            <SelectValue placeholder="Filter by class" />
+          </SelectTrigger>
+          <SelectContent className="z-[10000]">
+            <SelectItem value="all">
+              <div className="flex items-center gap-2">
+                <div
+                  style={{
+                    width: '8px',
+                    height: '8px',
+                    borderRadius: '50%',
+                    flexShrink: 0,
+                  }}
+                  className="bg-gray-400"
+                />
+                All ({frameData.detections?.length || 0})
+              </div>
+            </SelectItem>
+            {uniqueClasses.map((className) => (
+              <SelectItem key={className} value={className}>
+                <div className="flex items-center gap-2">
+                  <div
+                    style={{
+                      width: '8px',
+                      height: '8px',
+                      borderRadius: '50%',
+                      backgroundColor: colorMap[className],
+                      flexShrink: 0,
+                    }}
+                  />
+                  <span>
+                    {normalizeClassName(className)} ({classCount?.[className] || 0})
+                  </span>
+                </div>
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
 
-      {/* Class Filter Buttons */}
-      {uniqueClasses.length > 0 && (
-        <div style={{ display: 'flex', gap: '6px', marginBottom: '12px', flexWrap: 'wrap' }}>
-          {uniqueClasses.map((detectedClassName) => (
-            <Button
-              key={detectedClassName}
-              size="sm"
-              className='rounded-full'
-              variant={selectedClass === detectedClassName ? 'default' : 'outline'}
-              onClick={() => setSelectedClass(selectedClass === detectedClassName ? null : detectedClassName)}
-              style={{
-                borderColor: colorMap[detectedClassName],
-                backgroundColor: selectedClass === detectedClassName ? colorMap[detectedClassName] : 'transparent',
-                color: selectedClass === detectedClassName ? '#ffffff' : colorMap[detectedClassName],
-              }}
-            >
-              {normalizeClassName(detectedClassName)} ({classCount?.[detectedClassName] || 0})
-            </Button>
-          ))}
-        </div>
-      )}
-
       {/* Image Container */}
-      <div style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
+      <div className="flex gap-2.5 justify-center">
         <div>
           <img
             //   ref={imgRef}
@@ -223,7 +243,7 @@ export default function FramePopupContent({
             className='w-[380px] h-auto block rounded-sm'
           />
         </div>
-        <div style={{ position: 'relative', width: '380px', marginBottom: '10px' }}>
+        <div className="relative w-[380px] mb-2.5">
           <img
             ref={imgRef}
             src={frameData.image_data}
@@ -232,30 +252,9 @@ export default function FramePopupContent({
           />
           <canvas
             ref={canvasRef}
-            style={{
-              position: 'absolute',
-              top: 0,
-              left: 0,
-              width: '100%',
-              height: '100%',
-              borderRadius: '4px',
-              cursor: 'pointer',
-            }}
+            className="absolute top-0 left-0 w-full h-full rounded cursor-pointer"
           />
-          <div
-            style={{
-              position: 'absolute',
-              top: '4px',
-              zIndex: 999,
-              right: '4px',
-              background: 'rgba(59, 130, 246, 0.9)',
-              color: 'white',
-              padding: '4px 8px',
-              borderRadius: '3px',
-              fontSize: '10px',
-              fontWeight: 600,
-            }}
-          >
+          <div className="absolute top-1 right-1 z-[999] bg-blue-500/90 text-white px-2 py-1 rounded text-[10px] font-semibold">
             AI Detected
           </div>
         </div>
