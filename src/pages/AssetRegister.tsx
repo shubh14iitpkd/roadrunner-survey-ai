@@ -54,8 +54,7 @@ interface Survey {
   totals?: {
     total_assets: number;
     good: number;
-    fair: number;
-    poor: number;
+    bad: number;
   };
 }
 
@@ -256,7 +255,7 @@ export default function AssetRegister() {
                   survey_id: surveyId,
                   category: detection.class_name || 'Unknown',
                   type: detection.class_name || 'Unknown',
-                  condition: detection.confidence > 0.8 ? 'good' : detection.confidence > 0.5 ? 'fair' : 'poor',
+                  condition: detection.confidence > 0.8 ? 'good' : 'bad',
                   confidence: detection.confidence,
                   lat: frame.lat,
                   lng: frame.lon,
@@ -329,8 +328,7 @@ export default function AssetRegister() {
   // Asset counts from pre-loaded demo data
   const totalAssets = assets.length;
   const totalGood = assets.filter(a => a.condition?.toLowerCase() === 'good').length;
-  const totalFair = assets.filter(a => a.condition?.toLowerCase() === 'fair').length;
-  const totalPoor = assets.filter(a => a.condition?.toLowerCase() === 'poor').length;
+  const totalBad = assets.filter(a => a.condition?.toLowerCase() === 'bad').length;
 
   const selectedSurvey = surveys.find(s => s._id === selectedSurveyId);
   const selectedRoad = roads.find(r => r.route_id === selectedSurvey?.route_id);
@@ -340,9 +338,7 @@ export default function AssetRegister() {
     switch (cond) {
       case "good":
         return "bg-gradient-to-r from-green-500/10 to-green-600/10 text-green-700 dark:text-green-400 border-green-500/30";
-      case "fair":
-        return "bg-gradient-to-r from-amber-500/10 to-amber-600/10 text-amber-700 dark:text-amber-400 border-amber-500/30";
-      case "poor":
+      case "bad":
         return "bg-gradient-to-r from-red-500/10 to-red-600/10 text-red-700 dark:text-red-400 border-red-500/30";
       default:
         return "bg-muted text-muted-foreground";
@@ -411,8 +407,8 @@ export default function AssetRegister() {
           <Card className="p-6 shadow-elevated border-0 bg-gradient-to-br from-red-50 to-white dark:from-red-950/20 dark:to-card animate-fade-in hover:shadow-glow transition-all duration-300">
             <div className="flex items-start justify-between">
               <div className="space-y-2">
-                <p className="text-sm font-semibold text-red-600 dark:text-red-400 uppercase tracking-wide">Needs Attention</p>
-                <p className="text-5xl font-bold bg-gradient-to-br from-red-600 to-red-400 bg-clip-text text-transparent">{Number(totalPoor).toLocaleString("en-US")}</p>
+                <p className="text-sm font-semibold text-red-600 dark:text-red-400 uppercase tracking-wide">Bad Condition</p>
+                <p className="text-5xl font-bold bg-gradient-to-br from-red-600 to-red-400 bg-clip-text text-transparent">{Number(totalBad).toLocaleString("en-US")}</p>
                 {/* <p className="text-xs font-medium text-muted-foreground">Poor condition</p> */}
               </div>
               <div className="p-4 rounded-2xl bg-gradient-to-br from-red-500 to-red-600 shadow-lg">
@@ -664,7 +660,7 @@ export default function AssetRegister() {
                     <SelectContent>
                       <SelectItem value="all">All Conditions</SelectItem>
                       <SelectItem value="good">Good</SelectItem>
-                      <SelectItem value="fair">Fair</SelectItem>
+                      <SelectItem value="bad">Bad</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -690,14 +686,13 @@ export default function AssetRegister() {
                       type,
                       total: typeAssets.length,
                       good: typeAssets.filter(a => a.condition?.toLowerCase() === 'good').length,
-                      fair: typeAssets.filter(a => a.condition?.toLowerCase() === 'fair').length,
-                      poor: typeAssets.filter(a => a.condition?.toLowerCase() === 'poor').length,
+                      bad: typeAssets.filter(a => a.condition?.toLowerCase() === 'bad').length,
                       avgConfidence: typeAssets.reduce((sum, a) => sum + (a.confidence || 0), 0) / (typeAssets.length || 1),
                     };
                   }).sort((a, b) => b.total - a.total);
 
                   const totalGood = filteredAssets.filter(a => a.condition?.toLowerCase() === 'good').length;
-                  const totalFair = filteredAssets.filter(a => a.condition?.toLowerCase() === 'fair').length;
+                  const totalBad = filteredAssets.filter(a => a.condition?.toLowerCase() === 'bad').length;
 
                   return (
                     <div className="space-y-6">
@@ -721,13 +716,13 @@ export default function AssetRegister() {
                           </p>
                         </Card>
 
-                        <Card className="p-4 bg-gradient-to-br from-amber-50 to-white dark:from-amber-950/20 dark:to-card border-amber-200">
-                          <p className="text-xs font-semibold text-amber-600 dark:text-amber-400 uppercase tracking-wide">Fair</p>
-                          <p className="text-3xl font-bold bg-gradient-to-br from-amber-600 to-amber-400 bg-clip-text text-transparent">
-                            {totalFair}
+                        <Card className="p-4 bg-gradient-to-br from-red-50 to-white dark:from-red-950/20 dark:to-card border-red-200">
+                          <p className="text-xs font-semibold text-red-600 dark:text-red-400 uppercase tracking-wide">Bad</p>
+                          <p className="text-3xl font-bold bg-gradient-to-br from-red-600 to-red-400 bg-clip-text text-transparent">
+                            {totalBad}
                           </p>
                           <p className="text-xs text-muted-foreground">
-                            {filteredAssets.length > 0 ? ((totalFair / filteredAssets.length) * 100).toFixed(0) : 0}%
+                            {filteredAssets.length > 0 ? ((totalBad / filteredAssets.length) * 100).toFixed(0) : 0}%
                           </p>
                         </Card>
 
@@ -765,11 +760,11 @@ export default function AssetRegister() {
                                       title={`Good: ${stat.good}`}
                                     />
                                   )}
-                                  {stat.fair > 0 && (
+                                  {stat.bad > 0 && (
                                     <div
-                                      className="bg-amber-500 transition-all"
-                                      style={{ width: `${(stat.fair / stat.total) * 100}%` }}
-                                      title={`Fair: ${stat.fair}`}
+                                      className="bg-red-500 transition-all"
+                                      style={{ width: `${(stat.bad / stat.total) * 100}%` }}
+                                      title={`Bad: ${stat.bad}`}
                                     />
                                   )}
                                 </div>
@@ -781,8 +776,8 @@ export default function AssetRegister() {
                                     {stat.good}
                                   </span>
                                   <span className="flex items-center gap-1">
-                                    <span className="w-2 h-2 rounded-full bg-amber-500"></span>
-                                    {stat.fair}
+                                    <span className="w-2 h-2 rounded-full bg-red-500"></span>
+                                    {stat.bad}
                                   </span>
                                   <span className="text-primary dark:text-foreground font-medium">
                                     {(stat.avgConfidence * 100).toFixed(0)}% conf

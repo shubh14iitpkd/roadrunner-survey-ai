@@ -48,10 +48,10 @@ const ANNOTATION_FILES = [
 // Asset condition mapping from annotation choices
 const CONDITION_MAPPING: Record<string, string> = {
   'Good': 'good',
-  'Fair': 'fair',
-  'Poor': 'poor',
-  'Damaged': 'poor',
-  'Missing': 'poor',
+  'Fair': 'bad',
+  'Poor': 'bad',
+  'Damaged': 'bad',
+  'Missing': 'bad',
 };
 
 export interface GpxPoint {
@@ -82,7 +82,7 @@ export interface ProcessedVideoData {
   summary: {
     byCategory: Record<string, number>;
     byCondition: Record<string, number>;
-    byClass: Record<string, { count: number; good: number; fair: number; poor: number }>;
+    byClass: Record<string, { count: number; good: number; bad: number }>;
   };
 }
 
@@ -91,26 +91,26 @@ async function parseGpxFile(gpxUrl: string): Promise<GpxPoint[]> {
   try {
     const response = await fetch(gpxUrl);
     if (!response.ok) return [];
-    
+
     const text = await response.text();
     const parser = new DOMParser();
     const doc = parser.parseFromString(text, 'application/xml');
-    
+
     const trackPoints = doc.getElementsByTagName('trkpt');
     const points: GpxPoint[] = [];
-    
+
     for (let i = 0; i < trackPoints.length; i++) {
       const pt = trackPoints[i];
       const lat = parseFloat(pt.getAttribute('lat') || '0');
       const lon = parseFloat(pt.getAttribute('lon') || '0');
       const timestamp = pt.getAttribute('timestamp') || '';
       const speed = parseFloat(pt.getAttribute('speed') || '0');
-      
+
       if (!isNaN(lat) && !isNaN(lon)) {
         points.push({ lat, lon, timestamp, speed });
       }
     }
-    
+
     return points;
   } catch (err) {
     console.error('Error parsing GPX:', err);
@@ -149,44 +149,44 @@ function extractVideoKeyFromPath(path: string): string | null {
 // Parse Label Studio annotation format, filtering by video key
 function parseAnnotations(data: any[], category: string, videoKey: string): Detection[] {
   const detections: Detection[] = [];
-  
+
   for (const task of data) {
     // Check if this task belongs to the specified video
     const taskVideoPath = task.data?.video || '';
     const taskVideoKey = extractVideoKeyFromPath(taskVideoPath);
-    
+
     // Skip if this annotation doesn't belong to the requested video
     if (taskVideoKey !== videoKey) {
       continue;
     }
-    
+
     for (const annotation of task.annotations || []) {
       const results = annotation.result || [];
-      
+
       // Group results by ID (bbox and choices share same ID)
       const resultGroups: Record<string, any[]> = {};
       for (const r of results) {
         if (!resultGroups[r.id]) resultGroups[r.id] = [];
         resultGroups[r.id].push(r);
       }
-      
+
       for (const [id, group] of Object.entries(resultGroups)) {
         // Find the bbox result
         const bboxResult = group.find(r => r.type === 'videorectangle');
         if (!bboxResult || !bboxResult.value?.sequence || !bboxResult.value?.labels) continue;
-        
+
         const labels = bboxResult.value.labels;
         const sequence = bboxResult.value.sequence;
         const condition = extractCondition(group);
         const fps = 30; // Assuming 30fps
-        
+
         // Extract key frames from sequence
         for (const seq of sequence) {
           if (!seq.enabled && sequence.length > 1) continue; // Skip disabled frames unless it's the only one
-          
+
           const frame = seq.frame || 0;
           const timestamp = seq.time || (frame / fps);
-          
+
           for (const label of labels) {
             detections.push({
               id: `${id}_${frame}`,
@@ -208,26 +208,26 @@ function parseAnnotations(data: any[], category: string, videoKey: string): Dete
       }
     }
   }
-  
+
   return detections;
 }
 
 // Link detections to GPS coordinates based on timestamp
 function linkDetectionsToGps(detections: Detection[], gpxPoints: GpxPoint[], videoDuration: number): Detection[] {
   if (gpxPoints.length === 0) return detections;
-  
+
   return detections.map(detection => {
     // Calculate progress through video
     const progress = videoDuration > 0 ? detection.timestamp / videoDuration : 0;
-    
+
     // Find corresponding GPS point
     const gpxIndex = Math.min(
       Math.floor(progress * gpxPoints.length),
       gpxPoints.length - 1
     );
-    
+
     const gpsPoint = gpxPoints[gpxIndex];
-    
+
     return {
       ...detection,
       lat: gpsPoint?.lat,
@@ -239,37 +239,37 @@ function linkDetectionsToGps(detections: Detection[], gpxPoints: GpxPoint[], vid
 // Generate summary statistics
 function generateSummary(detections: Detection[]) {
   const byCategory: Record<string, number> = {};
-  const byCondition: Record<string, number> = { good: 0, fair: 0, poor: 0 };
-  const byClass: Record<string, { count: number; good: number; fair: number; poor: number }> = {};
-  
+  const byCondition: Record<string, number> = { good: 0, bad: 0 };
+  const byClass: Record<string, { count: number; good: number; bad: number }> = {};
+
   for (const d of detections) {
     // By category
     byCategory[d.category] = (byCategory[d.category] || 0) + 1;
-    
+
     // By condition
     byCondition[d.condition] = (byCondition[d.condition] || 0) + 1;
-    
+
     // By class
     if (!byClass[d.className]) {
-      byClass[d.className] = { count: 0, good: 0, fair: 0, poor: 0 };
+      byClass[d.className] = { count: 0, good: 0, bad: 0 };
     }
     byClass[d.className].count++;
-    byClass[d.className][d.condition as 'good' | 'fair' | 'poor']++;
+    byClass[d.className][d.condition as 'good' | 'bad']++;
   }
-  
+
   return { byCategory, byCondition, byClass };
 }
 
 // Check if a video name matches a demo video
 export function isDemoVideo(videoName: string): string | null {
   const normalizedName = videoName.replace(/\.[^/.]+$/, ''); // Remove extension
-  
+
   for (const key of Object.keys(DEMO_VIDEOS)) {
     if (normalizedName.includes(key) || videoName.includes(key)) {
       return key;
     }
   }
-  
+
   return null;
 }
 
@@ -277,16 +277,16 @@ export function isDemoVideo(videoName: string): string | null {
 export async function loadDemoData(videoKey: string): Promise<ProcessedVideoData | null> {
   const videoConfig = DEMO_VIDEOS[videoKey as keyof typeof DEMO_VIDEOS];
   if (!videoConfig) return null;
-  
+
   console.log(`Loading demo data for ${videoKey}...`);
-  
+
   // Load GPX points
   const gpxPoints = await parseGpxFile(videoConfig.gpxFile);
   console.log(`Loaded ${gpxPoints.length} GPX points`);
-  
+
   // Load all annotation files and parse
   const allDetections: Detection[] = [];
-  
+
   for (const annotationFile of ANNOTATION_FILES) {
     try {
       const response = await fetch(annotationFile.file);
@@ -294,7 +294,7 @@ export async function loadDemoData(videoKey: string): Promise<ProcessedVideoData
         console.warn(`Failed to load ${annotationFile.file}`);
         continue;
       }
-      
+
       const data = await response.json();
       // Pass videoKey to filter annotations for this specific video
       const detections = parseAnnotations(data, annotationFile.category, videoKey);
@@ -304,16 +304,16 @@ export async function loadDemoData(videoKey: string): Promise<ProcessedVideoData
       console.error(`Error loading ${annotationFile.file}:`, err);
     }
   }
-  
+
   // Link detections to GPS coordinates
   const linkedDetections = linkDetectionsToGps(allDetections, gpxPoints, videoConfig.duration);
-  
+
   // Generate summary
   const summary = generateSummary(linkedDetections);
-  
+
   console.log(`Total detections for ${videoKey}: ${linkedDetections.length}`);
   console.log('Summary:', summary);
-  
+
   return {
     videoName: videoConfig.videoName,
     totalDetections: linkedDetections.length,
@@ -326,14 +326,14 @@ export async function loadDemoData(videoKey: string): Promise<ProcessedVideoData
 // Get all demo data for reports
 export async function getAllDemoData(): Promise<Map<string, ProcessedVideoData>> {
   const allData = new Map<string, ProcessedVideoData>();
-  
+
   for (const key of Object.keys(DEMO_VIDEOS)) {
     const data = await loadDemoData(key);
     if (data) {
       allData.set(key, data);
     }
   }
-  
+
   return allData;
 }
 
