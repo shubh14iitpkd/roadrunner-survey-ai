@@ -404,11 +404,12 @@ def process_video_with_ai(video_id: str):
     # Example: corridor_fence_000_2025_0817_115147_F_annotated_compressed.mp4
     # where 2025_0817_115147_F is the filename_no_ext
     
-    # demo_matches = []
+    demo_matches = []
     if annotated_lib_path.exists():
         search_pattern = f"*_{filename_no_ext}_annotated_compressed.mp4"
         demo_matches = list(annotated_lib_path.glob(search_pattern))
-    
+
+    demo_matches = []
     if demo_matches:
         print(f"[PROCESS] DEMO MODE DETECTED for {video_id}. Found {len(demo_matches)} annotated files.")
         
@@ -507,14 +508,17 @@ def process_video_with_ai(video_id: str):
 
     # Initialize processor and check health FIRST (Synchronous check)
     from services.sagemaker_processor import SageMakerVideoProcessor
-    # processor = SageMakerVideoProcessor()
-    processor = MultiEndpointSageMaker()
-    processor.check_endpoints_health()
     
-    # if not is_healthy:
-    #     return jsonify({
-    #         "error": f"SageMaker Error: {error_msg}. Processing aborted to prevent local overload."
-    #     }), 400
+    processor = SageMakerVideoProcessor()
+    is_healthy, error_msg = processor.check_endpoint_health()
+    
+    # processor = MultiEndpointSageMaker()
+    # processor.check_endpoints_health()
+
+    if not is_healthy:
+        return jsonify({
+            "error": f"SageMaker Error: {error_msg}. Processing aborted to prevent local overload."
+        }), 400
 
     # Update status to processing
     db.videos.update_one(
@@ -567,7 +571,7 @@ def process_video_with_ai(video_id: str):
                 print(f"[PROCESS] Starting SageMaker processing for video {video_id}")
 
                 # Initialize SageMaker processor
-                processor = MultiEndpointSageMaker() #SageMakerVideoProcessor()
+                processor = SageMakerVideoProcessor() # MultiEndpointSageMaker()
 
                 # Get MongoDB client directly (not using get_db() to avoid Flask context issues in callback)
                 from pymongo import MongoClient
