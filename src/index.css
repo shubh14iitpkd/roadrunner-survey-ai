@@ -274,10 +274,14 @@ All colors MUST be HSL.
 /* Customize the close button for dark mode */
 .leaflet-popup-close-button {
   color: hsl(var(--muted-foreground)) !important;
-  font-size: 1.25rem !important;
+  font-size: 1.5rem !important;
   font-weight: bold !important;
-  padding: 0.5rem 1.2rem !important;
+  padding-top: 0.2rem !important;
+  padding-right: 0.8rem !important;
+  /* margin: 1rem !important; */
   transition: color 0.2s ease !important;
+  /* border: 1px solid hsl(var(--muted-foreground)) !important;
+  border-radius: 9999px !important; */
 }
 
 .leaflet-popup-close-button:hover {
