@@ -266,8 +266,9 @@ All colors MUST be HSL.
   line-height: 1.5 !important;
 }
 
-.leaflet-popup-tip-container {
-  display: none !important;
+.leaflet-popup-tip {
+  background-color: hsl(var(--card)) !important;
+  border: 1px solid hsl(var(--border)) !important;
 }
 
 /* Customize the close button for dark mode */

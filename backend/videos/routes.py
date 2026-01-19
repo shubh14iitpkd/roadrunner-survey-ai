@@ -409,7 +409,7 @@ def process_video_with_ai(video_id: str):
         search_pattern = f"*_{filename_no_ext}_annotated_compressed.mp4"
         demo_matches = list(annotated_lib_path.glob(search_pattern))
 
-    demo_matches = []
+    # demo_matches = []
     if demo_matches:
         print(f"[PROCESS] DEMO MODE DETECTED for {video_id}. Found {len(demo_matches)} annotated files.")
         
@@ -763,19 +763,12 @@ def get_video_frame_annotated(video_id: str):
         if not ret or frame is None:
             return jsonify({"error": "Failed to read frame from video"}), 500
 
-        print(frame.shape)
+        # Scale to reduce the payload size
         frame_height = frame.shape[0]
         frame_width = frame.shape[1]
-        # # Optional resize
-        # width = request.args.get("width", type=int)
-        # height = request.args.get("height", type=int)
-        # if width or height:
-        #     h, w = frame.shape[:2]
-        #     if width and not height:
-        #         height = int(h * (width / w))
-        #     elif height and not width:
-        #         width = int(w * (height / h))
-        #     frame = cv2.resize(frame, (width, height))
+        resize_width = 640 # request.args.get("width", type=int)
+        new_height = int(frame_height * (resize_width / frame_width))
+        frame = cv2.resize(frame, (resize_width, new_height))
 
         # sgm = SageMakerVideoProcessor()
         # Check if this is a demo video by matching storage_url basename with frame 'key'
@@ -822,6 +815,10 @@ def get_video_frame_annotated(video_id: str):
         img_bytes = img_io.read()
         base64_image = base64.b64encode(img_bytes).decode('utf-8')
 
+        # Note from Neelansh:
+        # It is important to return the original frame dimensions on the frontend
+        # because the bounding boxes are with respect to the original frame dimensions
+        # and therefore the canvas will need original dimensions to scale boxes properly
         return jsonify({
             "frame_number": frame_number,
             "width": frame_width,
