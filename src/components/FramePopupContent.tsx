@@ -50,6 +50,10 @@ interface FramePopupContentProps {
     videoId: string;
     timestamp: string;
     baseUrl: string;
+    // GPX point data
+    gpxLatitude?: number;
+    gpxLongitude?: number;
+    gpxTimestamp?: string;
   };
   trackTitle: string;
   pointIndex: number;
@@ -105,10 +109,10 @@ export default function FramePopupContent({
 
     canvas.width = img.clientWidth;
     canvas.height = img.clientHeight;
-    console.log(frameData.detections)
+    // console.log(frameData.detections)
     // Draw all detections
     frameData.detections.forEach((d) => {
-      console.log(frameData.frame_number)
+      // console.log(frameData.frame_number)
       const isSelected = selectedClass === null || selectedClass === d.class_name;
       const alpha = isSelected ? 1 : 0;
 
@@ -176,6 +180,39 @@ export default function FramePopupContent({
         <div className="text-[11px] text-muted-foreground">
           Point {pointIndex + 1} of {totalPoints} | {frameData.timestamp}s
         </div>
+        {/* GPX Location Info */}
+        {(frameData.gpxLatitude || frameData.gpxLongitude || frameData.gpxTimestamp) && (
+          <div className="mt-1 text-[11px] text-muted-foreground space-y-0.5">
+            {frameData.gpxLatitude !== undefined && frameData.gpxLongitude !== undefined && (
+              <div>
+                <span className="text-foreground/70 font-medium">Location:</span>{' '}
+                {frameData.gpxLatitude.toFixed(6)}, {frameData.gpxLongitude.toFixed(6)}
+              </div>
+            )}
+            {frameData.gpxTimestamp && (() => {
+              // Parse GPX timestamp format: "2025:08:17 09:01:48Z" -> standard ISO format
+              const gpxTs = frameData.gpxTimestamp;
+              const isoString = gpxTs.replace(/^(\d{4}):(\d{2}):(\d{2})/, '$1-$2-$3');
+              const date = new Date(isoString);
+              const localTime = !isNaN(date.getTime())
+                ? date.toLocaleString(undefined, {
+                  year: 'numeric',
+                  month: 'short',
+                  day: 'numeric',
+                  hour: '2-digit',
+                  minute: '2-digit',
+                  second: '2-digit'
+                })
+                : gpxTs;
+              return (
+                <div>
+                  <span className="text-foreground/70 font-medium">Captured:</span>{' '}
+                  {localTime}
+                </div>
+              );
+            })()}
+          </div>
+        )}
       </div>
 
       {/* Controls */}

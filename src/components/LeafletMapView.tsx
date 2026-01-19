@@ -16,8 +16,16 @@ L.Icon.Default.mergeOptions({
   shadowUrl: markerShadow,
 });
 
+// GPX point with coordinates and optional timestamp
+interface GpxPoint {
+  lat: number;
+  lng: number;
+  timestamp?: string; // Raw timestamp from GPX file
+}
+
 type GpxTrack = {
   path: L.LatLngExpression[];
+  points: GpxPoint[]; // Full point data with timestamps
   title: string;
   color: string;
   routeId: number;
@@ -51,7 +59,12 @@ interface LeafletMapViewProps {
   selectedAssetTypes?: string[];
 }
 
-async function fetchAndParseGpx(url: string): Promise<L.LatLngExpression[] | null> {
+interface ParsedGpxData {
+  path: L.LatLngExpression[];
+  points: GpxPoint[];
+}
+
+async function fetchAndParseGpx(url: string): Promise<ParsedGpxData | null> {
   try {
     const res = await fetch(url);
     if (!res.ok) {
@@ -59,8 +72,6 @@ async function fetchAndParseGpx(url: string): Promise<L.LatLngExpression[] | nul
       return null;
     }
     const text = await res.text();
-
-    // console.log(`GPX response preview (${url}):`, text.substring(0, 200));
 
     const dom = new DOMParser().parseFromString(text, "application/xml");
 
@@ -76,15 +87,15 @@ async function fetchAndParseGpx(url: string): Promise<L.LatLngExpression[] | nul
       return null;
     }
 
-    const path = pts.map((pt) => [
-      parseFloat(pt.getAttribute("lat") || "0"),
-      parseFloat(pt.getAttribute("lon") || "0"),
-    ] as L.LatLngExpression);
+    const points: GpxPoint[] = pts.map((pt) => ({
+      lat: parseFloat(pt.getAttribute("lat") || "0"),
+      lng: parseFloat(pt.getAttribute("lon") || "0"),
+      timestamp: pt.getAttribute("timestamp") || undefined,
+    })).filter((p) => !Number.isNaN(p.lat) && !Number.isNaN(p.lng));
 
-    return path.filter((p) => {
-      const [lat, lng] = p as [number, number];
-      return !Number.isNaN(lat) && !Number.isNaN(lng);
-    });
+    const path = points.map((p) => [p.lat, p.lng] as L.LatLngExpression);
+
+    return { path, points };
   } catch (err) {
     console.error("Error fetching/parsing GPX:", err);
     return null;
@@ -136,13 +147,13 @@ export default function LeafletMapView({ selectedRoadNames = [], roads = [], sel
       try {
         // Option 1: Esri World Imagery (Satellite)
         L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-          attribution: 'Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community',
+          attribution: 'Tiles &copy; Esri &mdash | NOTE: The markers have been sampled to avoid overcrowding. Click on a marker to view the image.',
           maxZoom: 19,
           minZoom: 1,
           crossOrigin: true,
         }).addTo(map);
 
-        console.log('Using online tiles from Esri World Imagery (Satellite)');
+        // console.log('Using online tiles from Esri World Imagery (Satellite)');
       } catch (error) {
         console.error('Failed to load tiles:', error);
 
@@ -178,7 +189,7 @@ export default function LeafletMapView({ selectedRoadNames = [], roads = [], sel
         const colors = ["#e11d48", "#0ea5e9", "#22c55e", "#f59e0b", "#8b5cf6", "#ef4444", "#ec4899", "#06b6d4"];
         const loadedTracks: GpxTrack[] = [];
 
-        console.log(`Loading GPX tracks from videos for ${roads.length} roads from ${baseUrl}`);
+        // console.log(`Loading GPX tracks from videos for ${roads.length} roads from ${baseUrl}`);
 
         // Load GPX from videos only
         try {
@@ -194,15 +205,16 @@ export default function LeafletMapView({ selectedRoadNames = [], roads = [], sel
             const roadName = road?.road_name || video.title || `Video ${video._id?.$oid || video._id}`;
 
             const url = `${baseUrl}${video.gpx_file_url}`;
-            const path = await fetchAndParseGpx(url);
-            if (!path || path.length < 2) {
+            const parsedGpx = await fetchAndParseGpx(url);
+            if (!parsedGpx || parsedGpx.path.length < 2) {
               console.warn(`Failed to load or parse GPX for video ${video.title || video._id}`);
               continue;
             }
 
-            console.log(`Successfully loaded ${path.length} points from video GPX: ${roadName}`);
+            // console.log(`Successfully loaded ${parsedGpx.path.length} points from video GPX: ${roadName}`);
             loadedTracks.push({
-              path,
+              path: parsedGpx.path,
+              points: parsedGpx.points,
               title: roadName,
               color: colors[i % colors.length],
               routeId: video.route_id,
@@ -246,7 +258,7 @@ export default function LeafletMapView({ selectedRoadNames = [], roads = [], sel
       results.forEach(({ videoId, framesResp }) => {
         if (framesResp) {
           framesMap.set(videoId, framesResp as VideoFramesData);
-          console.log(`Loaded ${framesResp.total} frames for video ${videoId} (demo: ${framesResp.is_demo})`);
+          // console.log(`Loaded ${framesResp.total} frames for video ${videoId} (demo: ${framesResp.is_demo})`);
         }
       });
 
@@ -373,7 +385,7 @@ export default function LeafletMapView({ selectedRoadNames = [], roads = [], sel
 
                 // Cache for future use
                 frameDataCacheRef.current.set(cacheKey, frameData);
-                // console.log(`Cached frame data for ${cacheKey}`);
+                console.log(`Cached frame data for ${cacheKey}`);
                 // console.log(`Frame data for ${cacheKey}:`, frameData);
               } else {
                 console.log(`Using cached frame data for ${cacheKey}`);
@@ -389,6 +401,9 @@ export default function LeafletMapView({ selectedRoadNames = [], roads = [], sel
                 }
               }
 
+              // Get the GPX point data for this index
+              const gpxPoint = t.points[index];
+
               // Open custom React popup
               setPopupState({
                 isOpen: true,
@@ -397,6 +412,10 @@ export default function LeafletMapView({ selectedRoadNames = [], roads = [], sel
                   videoId: t.videoId,
                   timestamp: frameToShow.timestamp.toFixed(1),
                   baseUrl,
+                  // GPX point data
+                  gpxLatitude: gpxPoint?.lat,
+                  gpxLongitude: gpxPoint?.lng,
+                  gpxTimestamp: gpxPoint?.timestamp,
                 },
                 trackTitle: t.title,
                 pointIndex: index,
@@ -429,6 +448,10 @@ export default function LeafletMapView({ selectedRoadNames = [], roads = [], sel
                         videoId: t.videoId,
                         timestamp: frameToShow.timestamp.toFixed(1),
                         baseUrl,
+                        // GPX point data
+                        gpxLatitude: gpxPoint?.lat,
+                        gpxLongitude: gpxPoint?.lng,
+                        gpxTimestamp: gpxPoint?.timestamp,
                       }}
                       trackTitle={t.title}
                       pointIndex={index}
