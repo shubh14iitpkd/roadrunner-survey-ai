@@ -435,8 +435,7 @@ export default function LeafletMapView({ selectedRoadNames = [], roads = [], sel
                 .setContent(`<div id="${popupId}"></div>`)
                 .openOn(mapRef.current!);
 
-              // Render React component into popup
-              setTimeout(() => {
+              const renderPopupContent = (retries = 20, delay = 30) => {
                 const popupElement = document.getElementById(popupId);
                 if (popupElement) {
                   const root = createRoot(popupElement);
@@ -467,8 +466,15 @@ export default function LeafletMapView({ selectedRoadNames = [], roads = [], sel
                       }}
                     />
                   );
+                } else if (retries > 0) {
+                  console.log("Retrying popup render...", retries);
+                  setTimeout(() => renderPopupContent(retries - 1, delay), delay);
+                } else {
+                  console.warn(`Popup element #${popupId} not found after retries`);
                 }
-              }, 50);
+              };
+
+              renderPopupContent();
             } // end if (frameToShow)
           } catch (err) {
             console.error('Error loading video frame:', err);

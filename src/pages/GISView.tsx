@@ -491,9 +491,9 @@ export default function GISView() {
                                       </Badge>
                                       <span className="text-sm">{road.name}</span>
                                     </div>
-                                    <Badge variant="secondary" className="text-xs">
+                                    {/* <Badge variant="secondary" className="text-xs">
                                       {assetCount}
-                                    </Badge>
+                                    </Badge> */}
                                   </div>
                                   <div className="flex items-center gap-1 text-xs text-muted-foreground">
                                     <span>GPX:</span>
