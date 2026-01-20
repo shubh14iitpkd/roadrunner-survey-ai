@@ -328,7 +328,7 @@ export default function AssetRegister() {
   // Asset counts from pre-loaded demo data
   const totalAssets = assets.length;
   const totalGood = assets.filter(a => a.condition?.toLowerCase() === 'good').length;
-  const totalBad = assets.filter(a => a.condition?.toLowerCase() === 'bad').length;
+  const totalDamaged = assets.filter(a => a.condition?.toLowerCase() === 'damaged').length;
 
   const selectedSurvey = surveys.find(s => s._id === selectedSurveyId);
   const selectedRoad = roads.find(r => r.route_id === selectedSurvey?.route_id);
@@ -338,7 +338,7 @@ export default function AssetRegister() {
     switch (cond) {
       case "good":
         return "bg-gradient-to-r from-green-500/10 to-green-600/10 text-green-700 dark:text-green-400 border-green-500/30";
-      case "bad":
+      case "damaged":
         return "bg-gradient-to-r from-red-500/10 to-red-600/10 text-red-700 dark:text-red-400 border-red-500/30";
       default:
         return "bg-muted text-muted-foreground";
@@ -407,8 +407,8 @@ export default function AssetRegister() {
           <Card className="p-6 shadow-elevated border-0 bg-gradient-to-br from-red-50 to-white dark:from-red-950/20 dark:to-card animate-fade-in hover:shadow-glow transition-all duration-300">
             <div className="flex items-start justify-between">
               <div className="space-y-2">
-                <p className="text-sm font-semibold text-red-600 dark:text-red-400 uppercase tracking-wide">Bad Condition</p>
-                <p className="text-5xl font-bold bg-gradient-to-br from-red-600 to-red-400 bg-clip-text text-transparent">{Number(totalBad).toLocaleString("en-US")}</p>
+                <p className="text-sm font-semibold text-red-600 dark:text-red-400 uppercase tracking-wide">Damaged Condition</p>
+                <p className="text-5xl font-bold bg-gradient-to-br from-red-600 to-red-400 bg-clip-text text-transparent">{Number(totalDamaged).toLocaleString("en-US")}</p>
                 {/* <p className="text-xs font-medium text-muted-foreground">Poor condition</p> */}
               </div>
               <div className="p-4 rounded-2xl bg-gradient-to-br from-red-500 to-red-600 shadow-lg">
@@ -652,17 +652,6 @@ export default function AssetRegister() {
                       })
                     }
                   </TabsList>
-
-                  <Select value={filterCondition} onValueChange={setFilterCondition}>
-                    <SelectTrigger className="w-[160px]">
-                      <SelectValue placeholder="All Conditions" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Conditions</SelectItem>
-                      <SelectItem value="good">Good</SelectItem>
-                      <SelectItem value="bad">Bad</SelectItem>
-                    </SelectContent>
-                  </Select>
                 </div>
 
                 {/* Dynamic Content Based on Selected Category */}
@@ -686,13 +675,13 @@ export default function AssetRegister() {
                       type,
                       total: typeAssets.length,
                       good: typeAssets.filter(a => a.condition?.toLowerCase() === 'good').length,
-                      bad: typeAssets.filter(a => a.condition?.toLowerCase() === 'bad').length,
+                      damaged: typeAssets.filter(a => a.condition?.toLowerCase() === 'damaged').length,
                       avgConfidence: typeAssets.reduce((sum, a) => sum + (a.confidence || 0), 0) / (typeAssets.length || 1),
                     };
                   }).sort((a, b) => b.total - a.total);
 
                   const totalGood = filteredAssets.filter(a => a.condition?.toLowerCase() === 'good').length;
-                  const totalBad = filteredAssets.filter(a => a.condition?.toLowerCase() === 'bad').length;
+                  const totalDamaged = filteredAssets.filter(a => a.condition?.toLowerCase() === 'damaged').length;
 
                   return (
                     <div className="space-y-6">
@@ -717,12 +706,12 @@ export default function AssetRegister() {
                         </Card>
 
                         <Card className="p-4 bg-gradient-to-br from-red-50 to-white dark:from-red-950/20 dark:to-card border-red-200">
-                          <p className="text-xs font-semibold text-red-600 dark:text-red-400 uppercase tracking-wide">Bad</p>
+                          <p className="text-xs font-semibold text-red-600 dark:text-red-400 uppercase tracking-wide">Damaged</p>
                           <p className="text-3xl font-bold bg-gradient-to-br from-red-600 to-red-400 bg-clip-text text-transparent">
-                            {totalBad}
+                            {totalDamaged}
                           </p>
                           <p className="text-xs text-muted-foreground">
-                            {filteredAssets.length > 0 ? ((totalBad / filteredAssets.length) * 100).toFixed(0) : 0}%
+                            {filteredAssets.length > 0 ? ((totalDamaged / filteredAssets.length) * 100).toFixed(0) : 0}%
                           </p>
                         </Card>
 
@@ -760,11 +749,11 @@ export default function AssetRegister() {
                                       title={`Good: ${stat.good}`}
                                     />
                                   )}
-                                  {stat.bad > 0 && (
+                                  {stat.damaged > 0 && (
                                     <div
                                       className="bg-red-500 transition-all"
-                                      style={{ width: `${(stat.bad / stat.total) * 100}%` }}
-                                      title={`Bad: ${stat.bad}`}
+                                      style={{ width: `${(stat.damaged / stat.total) * 100}%` }}
+                                      title={`Damaged: ${stat.damaged}`}
                                     />
                                   )}
                                 </div>
@@ -777,7 +766,7 @@ export default function AssetRegister() {
                                   </span>
                                   <span className="flex items-center gap-1">
                                     <span className="w-2 h-2 rounded-full bg-red-500"></span>
-                                    {stat.bad}
+                                    {stat.damaged}
                                   </span>
                                   <span className="text-primary dark:text-foreground font-medium">
                                     {(stat.avgConfidence * 100).toFixed(0)}% conf
@@ -793,12 +782,22 @@ export default function AssetRegister() {
 
                       {/* Detailed Assets Table */}
                       <Card className="overflow-hidden">
-                        <div className="p-4 border-b bg-muted/30">
+                        <div className="p-4 border-b bg-muted/30 flex items-center justify-between">
                           <h3 className="font-bold flex items-center gap-2">
                             <FileText className="h-5 w-5" />
                             Detailed Asset List
                             <Badge variant="outline" className="ml-2">{filteredAssets.length} items</Badge>
                           </h3>
+                          <Select value={filterCondition} onValueChange={setFilterCondition}>
+                            <SelectTrigger className="w-[160px]">
+                              <SelectValue placeholder="All Conditions" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="all">All Conditions</SelectItem>
+                              <SelectItem value="good">Good</SelectItem>
+                              <SelectItem value="bad">Bad</SelectItem>
+                            </SelectContent>
+                          </Select>
                         </div>
 
                         <div className="overflow-x-auto">

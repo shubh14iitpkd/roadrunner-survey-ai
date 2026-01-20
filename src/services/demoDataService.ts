@@ -48,10 +48,11 @@ const ANNOTATION_FILES = [
 // Asset condition mapping from annotation choices
 const CONDITION_MAPPING: Record<string, string> = {
   'Good': 'good',
-  'Fair': 'bad',
-  'Poor': 'bad',
-  'Damaged': 'bad',
-  'Missing': 'bad',
+  'Fair': 'damaged',
+  'Poor': 'damaged',
+  'Bad': 'damaged',
+  'Damaged': 'damaged',
+  'Missing': 'damaged',
 };
 
 export interface GpxPoint {
@@ -82,7 +83,7 @@ export interface ProcessedVideoData {
   summary: {
     byCategory: Record<string, number>;
     byCondition: Record<string, number>;
-    byClass: Record<string, { count: number; good: number; bad: number }>;
+    byClass: Record<string, { count: number; good: number; damaged: number }>;
   };
 }
 
@@ -239,8 +240,8 @@ function linkDetectionsToGps(detections: Detection[], gpxPoints: GpxPoint[], vid
 // Generate summary statistics
 function generateSummary(detections: Detection[]) {
   const byCategory: Record<string, number> = {};
-  const byCondition: Record<string, number> = { good: 0, bad: 0 };
-  const byClass: Record<string, { count: number; good: number; bad: number }> = {};
+  const byCondition: Record<string, number> = { good: 0, damaged: 0 };
+  const byClass: Record<string, { count: number; good: number; damaged: number }> = {};
 
   for (const d of detections) {
     // By category
@@ -251,10 +252,10 @@ function generateSummary(detections: Detection[]) {
 
     // By class
     if (!byClass[d.className]) {
-      byClass[d.className] = { count: 0, good: 0, bad: 0 };
+      byClass[d.className] = { count: 0, good: 0, damaged: 0 };
     }
     byClass[d.className].count++;
-    byClass[d.className][d.condition as 'good' | 'bad']++;
+    byClass[d.className][d.condition as 'good' | 'damaged']++;
   }
 
   return { byCategory, byCondition, byClass };
