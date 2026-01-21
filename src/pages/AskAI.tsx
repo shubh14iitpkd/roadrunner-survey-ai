@@ -60,9 +60,10 @@ interface VideoInfo {
 // Send message to backend API
 async function sendMessageToBackend(
   chatId: string,
-  question: string
+  question: string,
+  videoId?: string
 ): Promise<string> {
-  const response = await api.ai.sendMessage(chatId, "user", question);
+  const response = await api.ai.sendMessage(chatId, "user", question, videoId);
   // Backend returns { user_message: {...}, assistant_message: {...} }
   return response.assistant_message?.content || response.content || "(No response)";
 }
@@ -238,14 +239,6 @@ export default function AskAI() {
     }
   };
 
-  const persistMessage = async (cid: string, msg: Message) => {
-    try {
-      await api.ai.addMessage(cid, msg.role, msg.content);
-    } catch {
-      // ignore persistence errors
-    }
-  };
-
   // Find frames near a timestamp
   const findFramesNearTimestamp = (targetTimestamp: number, count: number = 3): FrameData[] => {
     if (videoFrames.length === 0) return [];
@@ -355,7 +348,7 @@ ${sampleFrames}`;
       );
 
       toast.success("Video uploaded successfully! Processing will start automatically.");
-      
+
       // Reset upload form
       setUploadFile(null);
       setUploadTitle("");
@@ -393,11 +386,12 @@ ${sampleFrames}`;
     setBusy(true);
 
     const cid = await ensureChat();
-    if (cid) persistMessage(cid, userMessage);
+    // No need to persist manually - backend does it in sendMessageToBackend
 
     try {
-      // Send message to backend - backend will handle context and frame detection
-      const reply = await sendMessageToBackend(cid, input);
+      // Send message to backend - pass video_id for demo chatbot detection
+      // This persists both the user message and the generated response
+      const reply = await sendMessageToBackend(cid, input, selectedVideoId || undefined);
 
       const aiMessage: Message = {
         role: "assistant",
@@ -405,14 +399,17 @@ ${sampleFrames}`;
       };
 
       setMessages(prev => [...prev, aiMessage]);
-      if (cid) persistMessage(cid, aiMessage);
+      // No need to persist manually - backend already saved it
     } catch (e: any) {
       const aiMessage: Message = {
         role: "assistant",
         content: `Error: ${e?.message || e}`,
       };
       setMessages(prev => [...prev, aiMessage]);
-      if (cid) persistMessage(cid, aiMessage);
+      // Only persist error messages if backend didn't save them? 
+      // Actually, if the backend errored, it might not have saved properly.
+      // But typically we don't save client-side error generation in DB unless we have a specific endpoint.
+      // For now, removing persistence to match standard behavior.
     } finally {
       setBusy(false);
     }
@@ -464,9 +461,9 @@ ${sampleFrames}`;
                 )}
               </SelectContent>
             </Select>
-            
-            {/* Upload Button */}
-            <Dialog open={uploadDialogOpen} onOpenChange={setUploadDialogOpen}>
+
+            {/* Uploa/d Button */}
+            {/* <Dialog open={uploadDialogOpen} onOpenChange={setUploadDialogOpen}>
               <DialogTrigger asChild>
                 <Button variant="outline" size="icon">
                   <Upload className="h-4 w-4" />
@@ -503,7 +500,7 @@ ${sampleFrames}`;
                       </p>
                     )}
                   </div>
-                  
+
                   <div className="space-y-2">
                     <Label htmlFor="video-title">Title</Label>
                     <Input
@@ -564,7 +561,7 @@ ${sampleFrames}`;
                   </div>
                 </div>
               </DialogContent>
-            </Dialog>
+            </Dialog> */}
 
             {loadingFrames && <Loader2 className="h-5 w-5 animate-spin text-primary" />}
           </div>
@@ -572,14 +569,14 @@ ${sampleFrames}`;
           {/* Video Info Badge */}
           {selectedVideo && videoFrames.length > 0 && (
             <div className="flex gap-2 flex-wrap">
-              <Badge variant="secondary" className="gap-1">
+              {/* <Badge variant="secondary" className="gap-1">
                 <ImageIcon className="h-3 w-3" />
                 {videoFrames.length} frames
-              </Badge>
-              <Badge variant="secondary" className="gap-1">
+              </Badge> */}
+              {/* <Badge variant="secondary" className="gap-1">
                 <Clock className="h-3 w-3" />
                 {selectedVideo.duration_seconds ? formatTimestamp(selectedVideo.duration_seconds) : "Unknown duration"}
-              </Badge>
+              </Badge> */}
               <Badge variant="secondary" className="gap-1">
                 <MapPin className="h-3 w-3" />
                 Route {selectedVideo.route_id}

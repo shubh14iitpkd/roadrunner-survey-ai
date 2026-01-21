@@ -15,7 +15,6 @@ RoadRunner Chatbot - COMPLETE REDESIGN WITH FULL FEATURES PRESERVED
    - All keywords from database configuration
    - Zero static keyword lists
 
-Uses google.genai (NEW API) - Fixed for 2026
 """
 
 import json
@@ -608,26 +607,45 @@ RESPOND WITH ONLY VALID JSON (no markdown):
   "intent": "brief explanation"
 }}
 
-GEOSPATIAL QUERY EXAMPLES:
+CRITICAL - MIXED DETECTIONS SCHEMA:
+The 'detections' field in frames can be EITHER:
+  - A flat Array (legacy): detections[].class_name
+  - A nested Object (new): detections.lighting_endpoint_name[].class_name, detections.oia_endpoint_name[].class_name, etc.
 
-1. "How many street lights on Al Jamiaa st?" (with location detected):
-   {{"collection": "frames", "type": "aggregate", "query": [
-     {{"$match": {{
-       "location.coordinates.0": {{"$gte": LNG-0.005, "$lte": LNG+0.005}},
-       "location.coordinates.1": {{"$gte": LAT-0.005, "$lte": LAT+0.005}}
-     }}}},
-     {{"$unwind": "$detections"}},
-     {{"$match": {{"detections.class_name": "Street lights"}}}},
-     {{"$group": {{"_id": null, "count": {{"$sum": 1}}}}}}
-   ], "intent": "Count street lights near location"}}
+When querying detections by class_name, you MUST use $or to check ALL possible paths:
 
-2. "How many street lights on route 108?" (no location):
+FRAMES QUERY EXAMPLES:
+
+1. "How many street lights on route 108?" (CORRECT - checks both schemas):
    {{"collection": "frames", "type": "aggregate", "query": [
      {{"$match": {{"route_id": 108}}}},
-     {{"$unwind": "$detections"}},
-     {{"$match": {{"detections.class_name": "Street lights"}}}},
+     {{"$project": {{
+       "all_detections": {{
+         "$cond": {{
+           "if": {{"$isArray": "$detections"}},
+           "then": "$detections",
+           "else": {{
+             "$concatArrays": [
+               {{"$ifNull": ["$detections.lighting_endpoint_name", []]}},
+               {{"$ifNull": ["$detections.pavement_endpoint_name", []]}},
+               {{"$ifNull": ["$detections.structures_endpoint_name", []]}},
+               {{"$ifNull": ["$detections.oia_endpoint_name", []]}},
+               {{"$ifNull": ["$detections.its_endpoint_name", []]}}
+             ]
+           }}
+         }}
+       }}
+     }}}},
+     {{"$unwind": "$all_detections"}},
+     {{"$match": {{"all_detections.class_name": {{"$regex": "STREET_LIGHT", "$options": "i"}}}}}},
      {{"$group": {{"_id": null, "count": {{"$sum": 1}}}}}}
-   ], "intent": "Count street lights on route"}}
+   ], "intent": "Count street lights on route (handles both schemas)"}}
+
+2. "How many defects on route 258?" (count ALL detections):
+   {{"collection": "frames", "type": "aggregate", "query": [
+     {{"$match": {{"route_id": 258}}}},
+     {{"$group": {{"_id": null, "total": {{"$sum": "$detections_count"}}}}}}
+   ], "intent": "Count all detections using detections_count field"}}
 
 3. "How many countdown timers on route 1?" → ASSETS:
    {{"collection": "assets", "type": "aggregate", "query": [
@@ -942,69 +960,130 @@ class AnswerFormatter:
     def format(answer: str, results: list = None, question: str = None) -> str:
         """
         Apply formatting rules to make answers look polished
+        - Escape underscores in identifiers
         - Format numbers with commas
         - Clean up markdown
         - Add proper structure
         - Fix common issues
         """
         
-        # Step 1: Clean up raw LLM output
+        # Step 1: Humanize asset names FIRST (e.g. STREET_LIGHT_AssetCondition_Good -> Street Light (Good))
+        # This handles known patterns before we assume everything else is an identifier
+        answer = AnswerFormatter._humanize_asset_names(answer)
+        
+        # Step 2: Escape markdown-safe identifiers
+        # Wraps things like `video_name_test` in backticks so they don't italicize
+        answer = AnswerFormatter._escape_markdown_underscores(answer)
+        
+        # Step 3: Clean up raw LLM output (whitespace, standard markdown fixes)
         answer = AnswerFormatter._clean_raw_output(answer)
         
-        # Step 2: Format numbers with commas
+        # Step 4: Format numbers with commas (SAFE version)
         answer = AnswerFormatter._format_numbers(answer)
         
-        # Step 3: Enhance markdown formatting
-        answer = AnswerFormatter._enhance_markdown(answer)
+        # Step 5: Enhance markdown formatting (bolding key stats)
+        # answer = AnswerFormatter._enhance_markdown(answer) # Disabled to prevent interference with list items
         
-        # Step 4: Add structure if needed
+        # Step 6: Add structure if needed
         answer = AnswerFormatter._add_structure(answer, results, question)
         
         return answer.strip()
     
     @staticmethod
+    def _escape_markdown_underscores(text: str) -> str:
+        """
+        Escape underscores that could be interpreted as markdown italic markers.
+        Wraps identifiers (snake_case) in backticks.
+        """
+        # Pattern: alphanumeric words connected by underscores
+        # Examples: video_name, 2025_08_17, STREET_LIGHT
+        # Lookbehind/ahead ensures we don't double-wrap existing code blocks
+        
+        def replace_func(match):
+            # If already inside backticks, don't touch
+            full_match = match.group(0)
+            if '`' in full_match:
+                return full_match
+            
+            # Wrap in backticks
+            return f'`{full_match}`'
+            
+        # Detect word characters connected by underscores, ensure strict boundaries
+        # This regex mimics identifiers: start with word char, contains underscores, ends with word char
+        pattern = r'(?<!`)\b[a-zA-Z0-9]+(?:_[a-zA-Z0-9]+)+\b(?!`)'
+        
+        return re.sub(pattern, replace_func, text)
+    
+    @staticmethod
+    def _humanize_asset_names(text: str) -> str:
+        """
+        Transform raw asset class names into human-readable format.
+        
+        Examples:
+        - STREET_LIGHT_AssetCondition_Good → Street Light (Good)
+        - Traffic_Bollard_AssetCondition_Missing → Traffic Bollard (Missing)
+        - STREET_LIGHT_POLE → Street Light Pole
+        - Kerb_AssetCondition_Good → Kerb (Good)
+        """
+        import re
+        
+        def humanize_match(match):
+            raw_name = match.group(0)
+            
+            # Pattern 1: ASSET_NAME_AssetCondition_CONDITION
+            condition_match = re.match(
+                r'^(.+?)_?AssetCondition_?(.+)$', 
+                raw_name, 
+                re.IGNORECASE
+            )
+            
+            if condition_match:
+                asset_part = condition_match.group(1)
+                condition = condition_match.group(2)
+                
+                # Convert asset name: STREET_LIGHT → Street Light
+                asset_name = asset_part.replace('_', ' ')
+                asset_name = asset_name.title()
+                
+                # Clean up condition
+                condition = condition.replace('_', ' ').title()
+                
+                return f"{asset_name} ({condition})"
+            
+            # Pattern 2: Just SCREAMING_SNAKE_CASE asset name (no condition)
+            # Convert to Title Case
+            humanized = raw_name.replace('_', ' ')
+            
+            # Handle all-caps words smartly
+            words = humanized.split()
+            result_words = []
+            for word in words:
+                if word.isupper() and len(word) > 1:
+                    # All caps - convert to Title Case
+                    result_words.append(word.title())
+                else:
+                    result_words.append(word)
+            
+            return ' '.join(result_words)
+        
+        # Match patterns that look like asset class names:
+        # - All caps with underscores: STREET_LIGHT_POLE
+        # - Mixed case with AssetCondition: Traffic_Bollard_AssetCondition_Good
+        # - Starts with caps and has underscores
+        pattern = r'\b[A-Z][A-Za-z0-9]*(?:_[A-Za-z0-9]+)+\b'
+        
+        text = re.sub(pattern, humanize_match, text)
+        
+        return text
+    
+    @staticmethod
     def _clean_raw_output(text: str) -> str:
         """Remove unwanted characters and clean up text"""
-        # Option 1: Convert lists to inline prose (cleaner for non-markdown renderers)
-        lines = text.split('\n')
-        cleaned_lines = []
-        list_items = []
-        in_list = False
         
-        for line in lines:
-            # Check if this is a markdown list item
-            if re.match(r'^\s*[\*\-]\s+', line):
-                # Extract the content after the bullet
-                content = re.sub(r'^\s*[\*\-]\s+', '', line).strip()
-                list_items.append(content)
-                in_list = True
-            else:
-                # If we were in a list and now we're not, join the list items
-                if in_list and list_items:
-                    joined = ', '.join(list_items[:-1])
-                    if joined:
-                        joined += ', and ' + list_items[-1]
-                    else:
-                        joined = list_items[-1]
-                    cleaned_lines.append(joined + '.')
-                    list_items = []
-                    in_list = False
-                
-                if line.strip():  # Only add non-empty lines
-                    cleaned_lines.append(line)
+        # Fix LaTeX-style escaped underscores (\_ -> _)
+        text = text.replace('\\_', '_')
         
-        # Handle case where list is at the end
-        if list_items:
-            joined = ', '.join(list_items[:-1])
-            if joined:
-                joined += ', and ' + list_items[-1]
-            else:
-                joined = list_items[-1]
-            cleaned_lines.append(joined + '.')
-        
-        text = '\n'.join(cleaned_lines)
-        
-        # Remove multiple spaces (but preserve single spaces)
+        # Remove multiple spaces
         text = re.sub(r'  +', ' ', text)
         
         # Remove multiple newlines (keep max 2)
@@ -1014,64 +1093,40 @@ class AnswerFormatter:
         text = text.replace('**bold**', '**')
         text = text.replace('****', '')
         
-        # Clean up excessive whitespace around colons
-        text = re.sub(r'\s*:\s*\n', ': ', text)
-        
-        # Fix underscores in asset names (Road_Marking_Line → Road Marking Line)
-        text = re.sub(r'(\w)_(\w)', r'\1 \2', text)
-        
         return text
     
     @staticmethod
     def _format_numbers(text: str) -> str:
-        """Format numbers with commas for readability"""
+        """Format numbers with commas for readability, avoiding identifiers"""
+        
         def add_commas(match):
-            number = match.group(0)
-            # Only format if it's a standalone number (not part of route IDs, etc.)
+            number = match.group(1)
             try:
                 num = int(number)
-                if num >= 1000:  # Only format numbers >= 1000
+                if num >= 1000:
                     return f"{num:,}"
                 return number
             except:
                 return number
         
-        # Match numbers that are likely counts (preceded by space or start, followed by space or end)
-        # Avoid route numbers by checking context
-        pattern = r'(?<!\d)(?<!route\s)(\d{4,})(?!\d)'
-        text = re.sub(pattern, add_commas, text)
+        # Safe pattern:
+        # - Capture 4+ digits
+        # - Lookbehind: Not preceded by digit, dot, underscore, or letter (prevents formatting identifiers or coordinates)
+        # - Lookahead: Not followed by digit, dot, underscore, or letter
+        # - Not part of "route X" (case insensitive match for Route/route)
+        pattern = r'(?<![\d._a-zA-Z])(?<![Rr]oute\s)(\d{4,})(?![\d._a-zA-Z])'
         
-        return text
+        return re.sub(pattern, add_commas, text)
     
     @staticmethod
     def _enhance_markdown(text: str) -> str:
-        """Enhance markdown formatting for better visual presentation"""
+        """Enhance markdown - currently limited to avoid breaking lists"""
+        # Bolding Routes
+        text = re.sub(r'Route\s+(\d+)', r'**Route \1**', text, flags=re.IGNORECASE)
         
-        # Ensure key numbers are bold if they're not already
-        # Pattern: "X items" or "X detections" or "X street lights"
-        patterns = [
-            (r'(\d+,?\d*)\s+(detections?|items?|assets?|street\s+lights?|signs?|markings?)', 
-             r'**\1 \2**'),
-            (r'Route\s+(\d+)', r'**Route \1**'),
-        ]
-        
-        for pattern, replacement in patterns:
-            text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
-        
-        # Clean up timestamps - make them more readable
-        # Pattern: "at 00:26" or "at 00:13"
-        text = re.sub(r'at\s+(\d{2}:\d{2})', r'at **\1**', text)
-        
-        # Clean up severity mentions
+        # Clean up severity mentions if present
         text = re.sub(r'\((moderate|high|low|severe)\s+severity\)', 
-                     r'(**\1 severity**)', text, flags=re.IGNORECASE)
-        
-        # Fix double bolding
-        text = re.sub(r'\*\*+', '**', text)
-        text = re.sub(r'\*\*\s*\*\*', '', text)
-        
-        # Ensure proper spacing after list items
-        text = re.sub(r'(• .+)\n([A-Z])', r'\1\n\n\2', text)
+                      r'(**\1 severity**)', text, flags=re.IGNORECASE)
         
         return text
     
@@ -1314,10 +1369,12 @@ Provide your answer:
                 model=self.answer_gen.model,
                 contents=prompt
             )
-            return response.text.strip()
+            raw_answer = response.text.strip()
+            # Apply formatting to ensure consistent output
+            return AnswerFormatter.format(raw_answer, None, question)
         except Exception as e:
             print(f"Error generating video metadata answer: {e}")
-            return video_context
+            return AnswerFormatter.format(video_context, None, question)
 
 
 # =============================================================================

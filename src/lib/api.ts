@@ -58,8 +58,8 @@ export const api = {
 		listMessages: (chatId: string) => apiFetch(`/api/ai/chats/${chatId}/messages`),
 		addMessage: (chatId: string, role: "user" | "assistant", content: string) =>
 			apiFetch(`/api/ai/chats/${chatId}/messages`, { method: "POST", body: JSON.stringify({ role, content }) }),
-		sendMessage: (chatId: string, role: "user" | "assistant", content: string) =>
-			apiFetch(`/api/ai/chats/${chatId}/messages`, { method: "POST", body: JSON.stringify({ role, content }) }),
+		sendMessage: (chatId: string, role: "user" | "assistant", content: string, videoId?: string) =>
+			apiFetch(`/api/ai/chats/${chatId}/messages`, { method: "POST", body: JSON.stringify({ role, content, video_id: videoId }) }),
 	},
 	Surveys: {
 		list: (params?: { route_id?: number; status?: string; latest_only?: boolean }) => {
@@ -117,7 +117,7 @@ export const api = {
 			const token = getAccessToken();
 			return new Promise((resolve, reject) => {
 				const xhr = new XMLHttpRequest();
-				
+
 				if (onProgress) {
 					xhr.upload.addEventListener("progress", (e) => {
 						if (e.lengthComputable) {

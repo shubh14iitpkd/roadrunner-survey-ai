@@ -20,6 +20,7 @@ from bson import ObjectId
 from db import get_db
 from utils.ids import get_now_iso
 from ai.chatbot import get_chatbot
+from ai.demo_chatbot import get_demo_chatbot, DemoChatbot  # Demo chatbot for library videos
 from ai.video_handler import VideoRAGHandler
 from werkzeug.utils import secure_filename
 import boto3
@@ -28,6 +29,9 @@ import uuid
 import os
 
 ai_bp = Blueprint("ai", __name__)
+
+# Demo video IDs (library videos with preprocessed JSON data)
+DEMO_VIDEO_IDS = ['2025_0817_115147_F', '2025_0817_115647_F', '2025_0817_120147_F']
 
 # Initialize video RAG handler
 video_rag_handler = VideoRAGHandler()
@@ -97,6 +101,7 @@ def list_messages(chat_id: str):
 def add_message(chat_id: str):
     body = request.get_json(silent=True) or {}
     content = body.get("content")
+    video_id = body.get("video_id")  # Optional: current video being discussed
     
     if not content:
         return jsonify({"error": "content is required"}), 400
@@ -134,12 +139,55 @@ def add_message(chat_id: str):
         for msg in history[:-1]  # Exclude the message we just added
     ]
     
-    # 3. Generate AI response with conversation context and chat_id
+    # 3. Generate AI response - use demo chatbot for library videos (asset queries only)
     try:
-        chatbot = get_chatbot()
-        ai_response_text = chatbot.ask(content, conversation_history=conversation_history, chat_id=chat_id)
+        import re
+        import os
+        
+        # Detect if this is a timestamp/frame query (should go to regular chatbot for DB lookup)
+        content_lower = content.lower()
+        is_timestamp_query = bool(
+            re.search(r'\d+:\d+', content) or  # "at 2:30", "1:45"
+            re.search(r'\d+\s*(seconds?|sec|s)\b', content_lower) or  # "at 30 seconds"
+            'frame' in content_lower or  # "frame 45", "what frame"
+            'timestamp' in content_lower or  # "at timestamp"
+            'at time' in content_lower or  # "at time"
+            "what's at" in content_lower or  # "what's at 2:30"
+            "whats at" in content_lower  # typo variant
+        )
+        
+        # Check if video_id is provided and lookup in database to get filename
+        normalized_video_id = None
+        if video_id:
+            try:
+                # video_id is a MongoDB ObjectId - lookup the video to get title
+                video_doc = db.videos.find_one({"_id": ObjectId(video_id)})
+                if video_doc and video_doc.get('title'):
+                    # Extract basename from title (e.g., "2025_0817_120147_F.mp4" -> "2025_0817_120147_F")
+                    title = video_doc['title']
+                    normalized_video_id = os.path.splitext(title)[0]
+                    print(f"Video lookup: {video_id} -> title: {title} -> basename: {normalized_video_id}")
+            except Exception as e:
+                print(f"Could not lookup video {video_id}: {e}")
+        
+        # Route decision:
+        # - Timestamp/frame queries -> regular chatbot (needs DB lookup)
+        # - Asset queries on demo videos -> demo chatbot (uses preprocessed JSON)
+        # - Everything else -> regular chatbot
+        if normalized_video_id and normalized_video_id in DEMO_VIDEO_IDS and not is_timestamp_query:
+            print(f"Demo video detected: {normalized_video_id} - using demo chatbot for asset query")
+            demo_chatbot = get_demo_chatbot()
+            ai_response_text = demo_chatbot.ask(content, video_id=normalized_video_id)
+        else:
+            if is_timestamp_query:
+                print(f"Timestamp/frame query detected - using regular chatbot for DB lookup")
+            # Use regular chatbot for uploaded videos, timestamp queries, and general queries
+            chatbot = get_chatbot()
+            ai_response_text = chatbot.ask(content, conversation_history=conversation_history, chat_id=chat_id)
     except Exception as e:
         print(f"Chatbot error: {e}")
+        import traceback
+        traceback.print_exc()
         ai_response_text = f"Error processing query: {str(e)}"
     
     # 4. Save AI response
