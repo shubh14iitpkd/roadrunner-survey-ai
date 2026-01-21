@@ -288,3 +288,13 @@ All colors MUST be HSL.
   color: hsl(var(--foreground)) !important;
   background: transparent !important;
 }
+
+.ask-ai-markdown-container ul {
+  list-style-type: disc;
+  margin-left: 20px;
+  margin-bottom: 10px;
+}
+
+.ask-ai-markdown-container li {
+  margin-bottom: 5px;
+}

@@ -25,6 +25,8 @@ import { Progress } from "@/components/ui/progress";
 import { MarkdownMessage } from "@/components/MarkdownMessage";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 interface Message {
   role: "user" | "assistant";
@@ -424,6 +426,44 @@ ${sampleFrames}`;
     "What's at frame 60?",
   ] : [];
 
+  const roadReportMarkdown = `
+To improve the road shown in \`2025_0817_115147_F\`
+
+Found **183** damaged assets requiring attention.
+
+**Recommended Actions:**
+
+* **Carriageway** (70 items)
+  * Recommendation: Fill potholes, repair cracks, resurface if needed
+
+* **Road Marking Line** (68 items)
+  * Recommendation: Repaint faded or damaged road markings
+
+* **Road Marking Point** (17 items)
+  * Recommendation: Replace damaged road studs or markings
+
+* **Kerb** (6 items)
+  * Recommendation: Repair cracked or damaged kerb sections
+
+* **Fence** (5 items)
+  * Recommendation: Repair or replace damaged fence panels for safety
+
+* **STREET LIGHT** (5 items)
+  * Recommendation: Replace bulbs, check electrical connections, or replace fixtures
+
+* **Traffic Sign** (5 items)
+  * Recommendation: Clean, repaint, or replace damaged signs for visibility
+
+* **Road Marking Polygon** (3 items)
+  * Recommendation: Inspect and repair damaged road marking polygon
+
+* **Traffic Bollard** (2 items)
+  * Recommendation: Replace missing or broken bollards
+
+* **STREET LIGHT FEEDER PILLAR** (2 items)
+  * Recommendation: Check electrical components, repair enclosure damage
+`;
+
   return (
     <div className="h-screen flex w-full overflow-hidden">
       <div className="flex-1 flex flex-col max-w-4xl mx-auto w-full">
@@ -596,11 +636,13 @@ ${sampleFrames}`;
                   </div>
                 )}
                 <div className="max-w-[80%] space-y-2">
-                  <Card className={cn("p-4", message.role === "user" ? "bg-primary text-primary-foreground" : "bg-card")}>
+                  <Card className={cn("ask-ai-markdown-container", "p-4", message.role === "user" ? "bg-primary text-primary-foreground" : "bg-card")}>
                     {message.role === "user" ? (
                       <p className="text-sm">{message.content}</p>
                     ) : (
-                      <MarkdownMessage content={message.content} />
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                        {message.content}
+                      </ReactMarkdown>
                     )}
                   </Card>
 
