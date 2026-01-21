@@ -208,7 +208,7 @@ class MongoDBClient:
         try:
             print(f"\n🔎 EXECUTING FIND: db.{collection}.find({json.dumps(query, default=str)})")
             results = list(self.db[collection].find(query).limit(limit))
-            print(f"✅ RESULTS: {len(results)} documents found")
+            print(f"[MongoDB] RESULTS: {len(results)} documents found")
             for doc in results:
                 if '_id' in doc:
                     doc['_id'] = str(doc['_id'])
@@ -222,7 +222,7 @@ class MongoDBClient:
         try:
             print(f"\n🔎 EXECUTING AGGREGATE: db.{collection}.aggregate({json.dumps(pipeline, default=str, indent=2)})")
             results = list(self.db[collection].aggregate(pipeline))
-            print(f"✅ RESULTS: {len(results)} documents found")
+            print(f"[MongoDB] RESULTS: {len(results)} documents found")
             for doc in results:
                 if '_id' in doc:
                     doc['_id'] = str(doc['_id'])
@@ -803,6 +803,47 @@ class DynamicAnswerGenerator:
         self.client = genai.Client(api_key=api_key)
         self.model = "gemini-2.0-flash-exp"
     
+    def _humanize_results(self, results: list) -> list:
+        """
+        Pre-humanize class names in database results before sending to Gemini.
+        This ensures Gemini sees clean names like 'Street Light (Good)' 
+        instead of 'STREET_LIGHT_AssetCondition_Good'.
+        """
+        import copy
+        import re
+        
+        def humanize_class_name(class_name: str) -> str:
+            """Convert STREET_LIGHT_AssetCondition_Good -> Street Light (Good)"""
+            if not isinstance(class_name, str):
+                return class_name
+                
+            # Check for AssetCondition pattern
+            match = re.match(r'^(.+?)_?AssetCondition_?(.+)$', class_name, re.IGNORECASE)
+            if match:
+                asset_part = match.group(1).replace('_', ' ').title()
+                condition = match.group(2).replace('_', ' ').title()
+                return f"{asset_part} ({condition})"
+            
+            # Check if it looks like a class name (has underscores, starts with caps)
+            if '_' in class_name and class_name[0].isupper():
+                return class_name.replace('_', ' ').title()
+            
+            return class_name
+        
+        def process_value(value):
+            """Recursively process values to humanize class names"""
+            if isinstance(value, str):
+                return humanize_class_name(value)
+            elif isinstance(value, dict):
+                return {k: process_value(v) for k, v in value.items()}
+            elif isinstance(value, list):
+                return [process_value(item) for item in value]
+            return value
+        
+        # Deep copy to avoid modifying original results
+        humanized = copy.deepcopy(results)
+        return [process_value(item) for item in humanized]
+    
     def generate(self, question: str, results: list, location_info: Optional[Dict] = None,
                  conversation_history: list = None, query_spec: Optional[Dict] = None) -> str:
         """Generate natural language answer from results"""
@@ -810,7 +851,10 @@ class DynamicAnswerGenerator:
         if not results:
             return self._generate_no_results_message(question, location_info, query_spec)
         
-        results_preview = json.dumps(results[:5], indent=2, default=str)
+        # Pre-humanize class names in results BEFORE sending to Gemini
+        # This ensures Gemini sees "Street Light (Good)" not "STREET_LIGHT_AssetCondition_Good"
+        humanized_results = self._humanize_results(results[:5])
+        results_preview = json.dumps(humanized_results, indent=2, default=str)
         
         # Build context
         context = ""
@@ -959,33 +1003,30 @@ class AnswerFormatter:
     @staticmethod
     def format(answer: str, results: list = None, question: str = None) -> str:
         """
-        Apply formatting rules to make answers look polished
-        - Escape underscores in identifiers
-        - Format numbers with commas
-        - Clean up markdown
-        - Add proper structure
-        - Fix common issues
+        Apply minimal formatting rules.
+        With ReactMarkdown on frontend, we only need to:
+        1. Humanize asset names (Road_Marking_Line -> Road Marking Line)
+        2. Basic whitespace cleanup
+        
+        We explicitly DO NOT:
+        - Add commas to numbers (breaks markdown rendering)
+        - Wrap underscored identifiers in backticks (ReactMarkdown handles this)
+        - Aggressively restructure content
         """
         
-        # Step 1: Humanize asset names FIRST (e.g. STREET_LIGHT_AssetCondition_Good -> Street Light (Good))
-        # This handles known patterns before we assume everything else is an identifier
+        print("[AnswerFormatter] format() called")
+        
+        # Step 0: CRITICAL - Unescape backslash-underscores FIRST
+        # Gemini outputs \_ to prevent markdown italics, but this breaks our regex
+        answer = answer.replace('\\_', '_')
+        
+        # Step 1: Humanize asset names (convert Road_Marking_Line -> Road Marking Line)
         answer = AnswerFormatter._humanize_asset_names(answer)
         
-        # Step 2: Escape markdown-safe identifiers
-        # Wraps things like `video_name_test` in backticks so they don't italicize
-        answer = AnswerFormatter._escape_markdown_underscores(answer)
+        print(f"[AnswerFormatter] After humanization (first 300 chars): {answer[:300]}")
         
-        # Step 3: Clean up raw LLM output (whitespace, standard markdown fixes)
+        # Step 2: Basic cleanup only
         answer = AnswerFormatter._clean_raw_output(answer)
-        
-        # Step 4: Format numbers with commas (SAFE version)
-        answer = AnswerFormatter._format_numbers(answer)
-        
-        # Step 5: Enhance markdown formatting (bolding key stats)
-        # answer = AnswerFormatter._enhance_markdown(answer) # Disabled to prevent interference with list items
-        
-        # Step 6: Add structure if needed
-        answer = AnswerFormatter._add_structure(answer, results, question)
         
         return answer.strip()
     
@@ -1489,8 +1530,8 @@ class RoadRunnerChatbot:
         """Process user question with all features"""
         
         try:
-            print(f"\n📝 Question: {question}")
-            print(f"💬 Chat ID: {chat_id}")
+            print(f"\n[CHATBOT] Question: {question}")
+            print(f"[CHATBOT] Chat ID: {chat_id}")
             
             # Use provided history or internal history
             if conversation_history is not None:
@@ -1506,14 +1547,14 @@ class RoadRunnerChatbot:
                             'what did i ask', 'what was the', 'remind me']
             
             if any(keyword in question.lower() for keyword in meta_keywords):
-                print("💭 Meta-question detected")
+                print("[CHATBOT] Meta-question detected")
                 return self.memory._answer_meta_question(question)
             
             # Extract road-route mappings from conversation
             road_route_map = self.memory._extract_road_route_mapping()
             
             if road_route_map:
-                print(f"🗺️ Remembered mappings: {road_route_map}")
+                print(f"[CHATBOT] Remembered mappings: {road_route_map}")
                 
                 for road_name, route_id in road_route_map.items():
                     if road_name.lower() in question.lower():
@@ -1525,23 +1566,23 @@ class RoadRunnerChatbot:
             if chat_id:
                 chat_has_videos = self.video_handler._chat_has_videos(chat_id)
                 if chat_has_videos:
-                    print("📹 Chat has uploaded videos - will query video_processing_results ONLY")
+                    print("[CHATBOT] Chat has uploaded videos - will query video_processing_results ONLY")
             
             # STEP 1: Analyze intent (uses schema.py, respects video context)
-            print("🧠 Analyzing intent...")
+            print("[CHATBOT] Analyzing intent...")
             intent = self.intent_analyzer.analyze(question, chat_id, chat_has_videos=chat_has_videos)
             collection = intent.get("collection", "frames")
             query_type = intent.get("query_type", "generic")
-            print(f"✓ Intent: {query_type} → {collection}")
+            print(f"[CHATBOT] Intent: {query_type} → {collection}")
             
             # If chat has videos, handle ALL queries through video metadata (no RAG, no other collections)
             if chat_has_videos:
-                print("📹 Querying video metadata (chat has videos)...")
+                print("[CHATBOT] Querying video metadata (chat has videos)...")
                 return self.video_handler.handle_video_metadata_query(question, history_to_use, chat_id)
             
             # CHECK: Video defect query?
             if query_type == 'video_defect_query':
-                print("🎥 Video defect query detected")
+                print("[CHATBOT] Video defect query detected")
                 
                 if chat_id and self.video_handler._chat_has_videos(chat_id):
                     return self.video_handler.handle_video_defect_query(question, history_to_use, chat_id)
@@ -1550,7 +1591,7 @@ class RoadRunnerChatbot:
             
             # CHECK: Video metadata query?
             if query_type == 'video_metadata_query':
-                print("📹 Video metadata query detected")
+                print("[CHATBOT] Video metadata query detected")
                 
                 if chat_id and self.video_handler._chat_has_videos(chat_id):
                     return self.video_handler.handle_video_metadata_query(question, history_to_use, chat_id)
@@ -1560,20 +1601,20 @@ class RoadRunnerChatbot:
             # STEP 2: Process location
             location_info = None
             if intent.get("needs_geocoding"):
-                print("🌍 Processing location...")
+                print("[CHATBOT] Processing location...")
                 location_info = self.location_handler.process(intent)
                 if location_info:
-                    print(f"✓ Location: {location_info['query']}")
+                    print(f"[CHATBOT] Location: {location_info['query']}")
             
             # STEP 3: For NON-VIDEO chats, ALWAYS try frames first
-            print("🔍 Non-video chat - trying frames collection first...")
+            print("[CHATBOT] Non-video chat - trying frames collection first...")
             frames_query_spec = self.query_gen.generate(question, "frames", location_info, history_to_use)
             
             if frames_query_spec:
                 # Apply auto-corrections
                 frames_query_spec = QueryCorrector.fix_query(frames_query_spec, question)
                 
-                print(f"📊 Query: frames.{frames_query_spec['type']}")
+                print(f"[CHATBOT FRAMES] Query: frames.{frames_query_spec['type']}")
                 
                 # Execute frames query
                 if frames_query_spec["type"] == "find":
@@ -1581,11 +1622,11 @@ class RoadRunnerChatbot:
                 else:
                     frames_results = self.db.aggregate("frames", frames_query_spec["query"])
                 
-                print(f"📈 Found {len(frames_results)} results in frames")
+                print(f"[CHATBOT FRAMES] Found {len(frames_results)} results in frames")
                 
                 # If frames has results, use them
                 if frames_results and len(frames_results) > 0:
-                    print("✅ Using frames collection results")
+                    print("[CHATBOT FRAMES] Using frames collection results")
                     answer = self.answer_gen.generate(question, frames_results, location_info, history_to_use, frames_query_spec)
                     
                     if update_internal:
@@ -1593,7 +1634,7 @@ class RoadRunnerChatbot:
                     
                     return answer
                 else:
-                    print(f"⚠️ No results in frames, falling back to {collection} collection...")
+                    print("[CHATBOT FRAMES] No results in frames, falling back to {collection} collection...")
             
             # STEP 4: Fallback - Generate query for intended collection (uses schema.py)
             print(f"🔄 Generating query for {collection}...")
@@ -1669,28 +1710,36 @@ if __name__ == "__main__":
     print("="*70)
     
     try:
-        chatbot = get_chatbot()
-        
+        # chatbot = get_chatbot()
+        f = AnswerFormatter()
+        s = """
+            At frame 60, corresponding to a timestamp of 2.0 seconds, the survey data includes the following detections across multiple entries for Route 258:
+            Street Lights: One entry identifies multiple street lights, with confidence levels ranging from 0.3331 to 0.8969.
+            Street Light Assets (Good Condition): Another entry detects STREET_LIGHT_POLE_AssetCondition_Good (confidence: 0.9116) and STREET_LIGHT_AssetCondition_Good (confidence: 0.8417).
+            Pavement Assets (Good Condition): There are detections of Kerb (confidence: 0.9454), Median_AssetCondition_Good (confidence: 0.8514), Kerb_AssetCondition_Good (confidence: 0.8417), and Road_Marking_Line_AssetCondition_Good (confidence: 0.8061).
+            Traffic Signal Heads (Good Condition): There are detections of TRAFFIC_SIGNAL_HEAD_AssetCondition_Good (confidence: 0.5835).
+        """
+        print(f.format(s))
         # Test questions
-        test_questions = [
-            "How many street lights on route 105?",
-            "What's on Al Waab Street?",
-            "How many countdown timers?",
-            "Show me defects",
-            "What videos are there?",
-        ]
+        # test_questions = [
+        #     "How many street lights on route 105?",
+        #     "What's on Al Waab Street?",
+        #     "How many countdown timers?",
+        #     "Show me defects",
+        #     "What videos are there?",
+        # ]
         
-        print("\n✅ Chatbot initialized successfully!")
-        print("\nTest questions:")
-        for i, q in enumerate(test_questions, 1):
-            print(f"  {i}. {q}")
+        # print("\n✅ Chatbot initialized successfully!")
+        # print("\nTest questions:")
+        # for i, q in enumerate(test_questions, 1):
+        #     print(f"  {i}. {q}")
         
-        print("\n✨ Ready to answer questions!")
-        print("\nUsage:")
-        print("  from chatbot_full_redesign import get_chatbot")
-        print("  chatbot = get_chatbot()")
-        print("  answer = chatbot.ask('Your question here?')")
-        print("  print(answer)")
+        # print("\n✨ Ready to answer questions!")
+        # print("\nUsage:")
+        # print("  from chatbot_full_redesign import get_chatbot")
+        # print("  chatbot = get_chatbot()")
+        # print("  answer = chatbot.ask('Your question here?')")
+        # print("  print(answer)")
         
     except Exception as e:
         print(f"❌ Error: {e}")

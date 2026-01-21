@@ -546,11 +546,11 @@ class DemoChatbot:
         if breakdown['total'] == 0:
             return f"No {asset_type} assets found in this video."
         
-        lines = [f"Condition of {asset_type.title()} - {video_key or 'All videos'}\n"]
-        lines.append(f"Total: **{breakdown['total']:,}** {asset_type} assets\n")
-        lines.append(f"Good condition: **{breakdown['good']:,}**")
-        lines.append(f"Damaged/Defective: **{breakdown['damaged']:,}**")
-        lines.append(f"\nDamage rate: **{breakdown['damage_rate']}%**")
+        lines = [f"Condition of **{asset_type.title()}**\n"]
+        lines.append(f"* Total: **{breakdown['total']:,}** {asset_type} assets\n")
+        lines.append(f"* Good condition: **{breakdown['good']:,}**\n")
+        lines.append(f"* Damaged/Defective: **{breakdown['damaged']:,}**\n")
+        lines.append(f"* Damage rate: **{breakdown['damage_rate']}%**")
         
         if breakdown['damage_rate'] > 20:
             lines.append(f"\nHigh damage rate - recommend prioritized maintenance")

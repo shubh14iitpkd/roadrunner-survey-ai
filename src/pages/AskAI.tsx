@@ -212,7 +212,7 @@ export default function AskAI() {
           if (video) {
             setMessages(prev => [...prev, {
               role: "assistant",
-              content: `Loaded video "${video.title}" (Route ${video.route_id}). Found ${frames.length} frames with detections. You can now ask me about:\n• What assets are at a specific timestamp (e.g., "What's at 2:30?")\n• Asset summaries (e.g., "How many traffic signs are there?")\n• Condition analysis\n• Location-based queries`,
+              content: `Loaded video "${video.title}" (Route ${video.route_id}).\nYou can now ask me about:\n* What assets are at a specific timestamp (e.g., "What's at 2:30?")\n* Asset summaries (e.g., "How many traffic signs are there?")\n* Condition analysis\n* Location-based queries`,
             }]);
           }
         }
