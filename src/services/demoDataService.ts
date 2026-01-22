@@ -53,6 +53,7 @@ const CONDITION_MAPPING: Record<string, string> = {
   'Bad': 'damaged',
   'Damaged': 'damaged',
   'Missing': 'damaged',
+  'damaged': 'damaged',
 };
 
 export interface GpxPoint {

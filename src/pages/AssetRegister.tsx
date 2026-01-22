@@ -54,7 +54,7 @@ interface Survey {
   totals?: {
     total_assets: number;
     good: number;
-    bad: number;
+    damaged: number;
   };
 }
 
@@ -255,7 +255,7 @@ export default function AssetRegister() {
                   survey_id: surveyId,
                   category: detection.class_name || 'Unknown',
                   type: detection.class_name || 'Unknown',
-                  condition: detection.confidence > 0.8 ? 'good' : 'bad',
+                  condition: detection.confidence > 0.8 ? 'good' : 'damaged',
                   confidence: detection.confidence,
                   lat: frame.lat,
                   lng: frame.lon,
@@ -795,7 +795,7 @@ export default function AssetRegister() {
                             <SelectContent>
                               <SelectItem value="all">All Conditions</SelectItem>
                               <SelectItem value="good">Good</SelectItem>
-                              <SelectItem value="bad">Bad</SelectItem>
+                              <SelectItem value="damaged">Damaged</SelectItem>
                             </SelectContent>
                           </Select>
                         </div>

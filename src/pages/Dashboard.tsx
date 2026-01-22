@@ -41,8 +41,7 @@ export default function Dashboard() {
     totalAssets: 0,
     totalAnomalies: 0,
     good: 0,
-    fair: 0,
-    poor: 0,
+    damaged: 0,
     kmSurveyed: 0,
   });
   const [categoryChartData, setCategoryChartData] = useState<any[]>([]);
@@ -133,16 +132,14 @@ export default function Dashboard() {
         // Calculate KPIs from loaded demo assets
         const totalAssets = allAssets.length;
         const good = allAssets.filter(a => a.condition?.toLowerCase() === 'good').length;
-        const fair = allAssets.filter(a => a.condition?.toLowerCase() === 'fair').length;
-        const poor = allAssets.filter(a => a.condition?.toLowerCase() === 'poor').length;
+        const damaged = allAssets.filter(a => a.condition?.toLowerCase() === 'damaged').length;
         const kmSurveyed = roads.reduce((sum: number, r: any) => sum + (r.estimated_distance_km || 0), 0);
 
         setKpis({
           totalAssets,
-          totalAnomalies: poor,
+          totalAnomalies: damaged,
           good,
-          fair,
-          poor,
+          damaged,
           kmSurveyed: Math.round(kmSurveyed * 10) / 10,
         });
 
@@ -208,11 +205,11 @@ export default function Dashboard() {
 
   // Calculate health data from actual KPIs
   const totalAssets = kpis.totalAssets || 1; // Avoid division by zero
-  const healthData = [
-    { name: "Good", value: kpis.good, percentage: Math.round((kpis.good / totalAssets) * 100), color: "#22c55e" },
-    { name: "Fair", value: kpis.fair, percentage: Math.round((kpis.fair / totalAssets) * 100), color: "#f59e0b" },
-    { name: "Poor", value: kpis.poor, percentage: Math.round((kpis.poor / totalAssets) * 100), color: "#ef4444" },
-  ];
+  // const healthData = [
+  //   { name: "Good", value: kpis.good, percentage: Math.round((kpis.good / totalAssets) * 100), color: "#22c55e" },
+  //   { name: "Fair", value: kpis.fair, percentage: Math.round((kpis.fair / totalAssets) * 100), color: "#f59e0b" },
+  //   { name: "Poor", value: kpis.poor, percentage: Math.round((kpis.poor / totalAssets) * 100), color: "#ef4444" },
+  // ];
 
   return (
     <div className="space-y-6">
@@ -414,7 +411,7 @@ export default function Dashboard() {
         {/* Tables Section */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Roads with Most Anomalies */}
-          <Card className="p-6 sm:p-8 shadow-elevated border-0 gradient-card">
+          {/* <Card className="p-6 sm:p-8 shadow-elevated border-0 gradient-card">
             <div className="flex items-center gap-3 mb-6">
               <div className="p-3 rounded-xl bg-gradient-to-br from-orange-500 to-red-500">
                 <MapPin className="h-6 w-6 text-white" />
@@ -445,10 +442,10 @@ export default function Dashboard() {
                 </TableBody>
               </Table>
             </div>
-          </Card>
+          </Card> */}
 
           {/* Recent Survey Activity */}
-          <Card className="p-6 sm:p-8 shadow-elevated border-0 gradient-card">
+          {/* <Card className="p-6 sm:p-8 shadow-elevated border-0 gradient-card">
             <div className="flex items-center gap-3 mb-6">
               <div className="p-3 rounded-xl bg-gradient-to-br from-purple-500 to-pink-500">
                 <LineChartIcon className="h-6 w-6 text-white" />
@@ -479,7 +476,7 @@ export default function Dashboard() {
                 </TableBody>
               </Table>
             </div>
-          </Card>
+          </Card> */}
         </div>
       </div>
     </div>
