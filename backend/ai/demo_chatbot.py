@@ -665,7 +665,7 @@ class DemoChatbot:
 
         for category, count in sorted_defects:
             percentage = round(count / total_defects * 100, 1)
-            lines.append(f"• {category}: {count:,} ({percentage}%)")
+            lines.append(f"\n- {category}: {count:,} ({percentage}%)")
 
         return "\n".join(lines)
 

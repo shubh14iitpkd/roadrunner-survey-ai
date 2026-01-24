@@ -1870,6 +1870,90 @@ class RoadRunnerChatbot:
             traceback.print_exc()
             return "I couldn't retrieve the survey statistics."
 
+    def _handle_defect_ranking(self) -> str:
+        """Handle queries about which road has the most defects"""
+        try:
+            print("[CHATBOT] calculating defect ranking...")
+
+            # Pipeline to count damaged assets per video
+            pipeline = [
+                # 1. Match damaged assets
+                {
+                    "$match": {
+                        "condition": {
+                            "$in": [
+                                "poor",
+                                "damaged",
+                                "bad",
+                                "critical",
+                                "missing",
+                                "broken",
+                            ]
+                        }
+                    }
+                },
+                # 2. Group by video
+                {"$group": {"_id": "$video_id", "defect_count": {"$sum": 1}}},
+                # 3. Sort by count descending
+                {"$sort": {"defect_count": -1}},
+                # 4. Limit to top 5 videos
+                {"$limit": 5},
+            ]
+
+            top_videos = list(self.db.db.assets.aggregate(pipeline))
+
+            if not top_videos:
+                return "I couldn't find any defects recorded in the system yet."
+
+            # Now we need to link video_id -> route_id -> road_name
+            # We'll do this manually since lookup can be tricky with different types
+
+            lines = ["**Roads with the most defects:**"]
+
+            for item in top_videos:
+                video_id = item["_id"]
+                count = item["defect_count"]
+
+                # Find survey to get route
+                # Surveys connect video_id (or filename) to route_id
+                # video_id in assets might be full filename or normalized ID
+
+                # Try finding exact match
+                survey = self.db.db.surveys.find_one({"video_id": video_id})
+
+                # If not found, try matching regex (assets usually have full filename)
+                if not survey:
+                    normalized = video_id.replace(".mp4", "")
+                    survey = self.db.db.surveys.find_one(
+                        {"video_id": {"$regex": f"^{normalized}"}}
+                    )
+
+                route_name = "Unknown Route"
+                if survey:
+                    route_id = survey.get("route_id")
+
+                    # Look up road name
+                    road = self.db.db.roads.find_one({"route_id": route_id})
+                    if road:
+                        route_name = (
+                            f"{road.get('road_name', 'Unknown')} (Route {route_id})"
+                        )
+                    else:
+                        route_name = f"Route {route_id}"
+                else:
+                    route_name = f"Video {video_id}"
+
+                lines.append(f"\n- **{route_name}**: {count} defects")
+
+            return "\n".join(lines)
+
+        except Exception as e:
+            print(f"Error ranking defects: {e}")
+            import traceback
+
+            traceback.print_exc()
+            return "I clearly encountered an error while calculating defect statistics."
+
     def ask(
         self,
         question: str,
@@ -1909,6 +1993,19 @@ class RoadRunnerChatbot:
                 "what was the",
                 "remind me",
             ]
+
+            # Special case for "which road/route has highest/most defects"
+            q_lower = question.lower()
+            if (
+                ("road" in q_lower or "route" in q_lower)
+                and ("highest" in q_lower or "most" in q_lower)
+                and (
+                    "defect" in q_lower or "damage" in q_lower or "condition" in q_lower
+                )
+            ):
+                print("[CHATBOT] Defect Ranking Query detected")
+                return self._handle_defect_ranking()
+
             if any(keyword in question.lower() for keyword in meta_keywords):
                 print("[CHATBOT] Meta-question detected")
                 print("[CHATBOT] Meta-question detected")
