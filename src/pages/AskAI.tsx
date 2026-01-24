@@ -424,7 +424,12 @@ ${sampleFrames}`;
     "Are there any damaged or poor condition assets?",
     "Summarize the road infrastructure",
     "What's at frame 60?",
-  ] : [];
+  ] : [
+    "How many street lights are there in total?",
+    "What happened in most recent survey?",
+    "Tell me about route 258",
+    "What is the condition of assets?",
+  ];
 
   const roadReportMarkdown = `
 To improve the road shown in \`2025_0817_115147_F\`
@@ -711,17 +716,17 @@ Found **183** damaged assets requiring attention.
         <div className="p-6 border-t border-border">
           <div className="flex gap-2">
             <Input
-              placeholder={selectedVideoId ? "Ask about assets, timestamps, conditions..." : "Select a video first..."}
+              placeholder={selectedVideoId ? "Ask about assets, timestamps, conditions..." : "Ask about assets, timestamps, conditions... (Select a video for specific analysis)"}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handleSend()}
               className="flex-1"
-              disabled={!selectedVideoId || busy}
+              disabled={busy}
             />
             <Button
               onClick={handleSend}
               size="icon"
-              disabled={busy || !selectedVideoId}
+              disabled={busy}
             >
               {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
             </Button>
@@ -732,6 +737,3 @@ Found **183** damaged assets requiring attention.
   );
 }
 
-function cn(...classes: (string | boolean | undefined)[]) {
-  return classes.filter(Boolean).join(" ");
-}
