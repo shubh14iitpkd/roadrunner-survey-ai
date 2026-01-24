@@ -565,9 +565,9 @@ export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                 toast.info(`Loading pre-processed AI data for ${video.name}...`);
 
                 // Simulate processing time for demo effect
-                const progressSteps = [10, 25, 45, 65, 80, 95, 100];
+                const progressSteps = [3, 7, 16, 24, 33, 38, 41, 44, 49, 52, 56, 58, 61, 65, 71, 74, 78, 82, 86, 90, 93, 96, 99, 100];
                 for (let i = 0; i < progressSteps.length; i++) {
-                    await new Promise(resolve => setTimeout(resolve, 400));
+                    await new Promise(resolve => setTimeout(resolve, 800));
                     setVideos((prev) =>
                         prev.map((v) =>
                             v.id === videoId ? { ...v, progress: progressSteps[i] } : v

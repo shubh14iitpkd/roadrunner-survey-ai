@@ -106,7 +106,7 @@ export default function VideoLibrary() {
 
         // Best-effort enrichment with surveys
         try {
-          const surveysResp = await api.Surveys.list();
+          const surveysResp = await api.Surveys.list({ latest_only: false });
           const surveyMap = new Map<string, any>();
           (surveysResp.items as any[]).forEach(s => {
             const surveyIdStr = getIdString(s._id);
@@ -292,7 +292,21 @@ export default function VideoLibrary() {
             >
               <div
                 className="aspect-video bg-gradient-to-br from-muted to-muted/50 flex items-center justify-center relative group cursor-pointer overflow-hidden"
-                onClick={() => compareMode && toggleCompareSelection(video.id)}
+                onClick={() => {
+                  if (video.storageUrl) {
+                    setPlayerSrc(video.storageUrl);
+                    setPlayerAnnotatedSrc(video.annotatedVideoUrl || "");
+                    setPlayerCategoryVideos(video.categoryVideos || {});
+                    if (video.categoryVideos) {
+                      const firstCat = Object.keys(video.categoryVideos).sort()[0];
+                      if (firstCat) {
+                        setActiveCategory(firstCat);
+                        setPlayerAnnotatedSrc(video.categoryVideos[firstCat]);
+                      }
+                    }
+                    setShowPlayer(true);
+                  }
+                }}
               >
                 {video.thumbnailUrl ? (
                   <>
@@ -336,8 +350,6 @@ export default function VideoLibrary() {
                     <span>{video.surveyDate}</span>
                     <span>•</span>
                     <span>{video.surveyorName}</span>
-                    <span>•</span>
-                    <span>{video.duration}</span>
                     <span>•</span>
                     <span>{video.size}</span>
                   </div>

@@ -19,12 +19,15 @@ from db import get_db
 from utils.ids import get_now_iso
 from utils.rbac import role_required
 from utils.extract_gpx import extract_gpx
+
 videos_bp = Blueprint("videos", __name__)
 from config import Config
+
 # from services.sagemaker_processor import SageMakerVideoProcessor
 
 config = Config()
 aws_session = boto3.Session(region_name=config.AWS_REGION)
+
 
 @videos_bp.get("/")
 @role_required(["admin", "surveyor", "viewer"])
@@ -47,7 +50,7 @@ def list_videos():
     # Use bson.json_util to safely handle ObjectId, datetime, etc.
     return Response(
         json_util.dumps({"items": items, "count": len(items)}),
-        mimetype="application/json"
+        mimetype="application/json",
     )
 
 
@@ -62,10 +65,7 @@ def get_video(video_id: str):
             print(f"[VIDEO] Video not found in DB: {video_id}")
             return jsonify({"error": "Video not found"}), 404
 
-        return Response(
-            json_util.dumps(video),
-            mimetype="application/json"
-        )
+        return Response(json_util.dumps(video), mimetype="application/json")
     except Exception as e:
         print(f"[VIDEO] Error retrieving video {video_id}: {e}")
         return jsonify({"error": f"Invalid video ID format: {str(e)}"}), 400
@@ -81,7 +81,7 @@ def create_video():
         return jsonify({"error": f"missing: {', '.join(missing)}"}), 400
 
     db = get_db()
-    
+
     # Handle survey_id - create a temporary one if not provided or invalid
     survey_id_value = body.get("survey_id")
     if survey_id_value:
@@ -114,7 +114,7 @@ def create_video():
         }
         survey_res = db.surveys.insert_one(temp_survey)
         survey_id = survey_res.inserted_id
-    
+
     doc = {
         "survey_id": survey_id,
         "route_id": int(body["route_id"]),
@@ -164,7 +164,7 @@ def upload_direct():
     print(f"[UPLOAD] Upload request received")
     print(f"[UPLOAD] Files: {list(request.files.keys())}")
     print(f"[UPLOAD] Form data: {list(request.form.keys())}")
-    
+
     if "file" not in request.files:
         return jsonify({"error": "file is required", "gpx_created": False}), 400
     file = request.files["file"]
@@ -178,12 +178,20 @@ def upload_direct():
     if video_id:
         result = db.videos.find_one_and_update(
             {"_id": ObjectId(video_id)},
-            {"$set": {"status": "uploading", "progress": 0, "updated_at": get_now_iso()}}
+            {
+                "$set": {
+                    "status": "uploading",
+                    "progress": 0,
+                    "updated_at": get_now_iso(),
+                }
+            },
         )
         if not result:
             return jsonify({"error": "video_id not found", "gpx_created": False}), 404
 
-    upload_root = Path(os.getenv("UPLOAD_DIR", Path(__file__).resolve().parents[1] / "uploads"))
+    upload_root = Path(
+        os.getenv("UPLOAD_DIR", Path(__file__).resolve().parents[1] / "uploads")
+    )
     upload_root.mkdir(parents=True, exist_ok=True)
     filename = secure_filename(file.filename)
     save_path = upload_root / filename
@@ -199,7 +207,7 @@ def upload_direct():
     try:
         # Stream file in chunks to avoid memory issues with large files
         chunk_size = 4096 * 1024  # 4MB chunks
-        with open(str(save_path), 'wb') as f:
+        with open(str(save_path), "wb") as f:
             while True:
                 chunk = file.read(chunk_size)
                 if not chunk:
@@ -218,10 +226,19 @@ def upload_direct():
         if video_id:
             db.videos.find_one_and_update(
                 {"_id": ObjectId(video_id)},
-                {"$set": {"status": "failed", "error": str(e), "updated_at": get_now_iso()}}
+                {
+                    "$set": {
+                        "status": "failed",
+                        "error": str(e),
+                        "updated_at": get_now_iso(),
+                    }
+                },
             )
 
-        return jsonify({"error": f"File upload failed: {str(e)}", "gpx_created": False}), 500
+        return (
+            jsonify({"error": f"File upload failed: {str(e)}", "gpx_created": False}),
+            500,
+        )
 
     # Extracting gpx from saved video here
     gpx_file = extract_gpx(str(save_path))
@@ -230,7 +247,7 @@ def upload_direct():
     # verify gpx extraction
     if gpx_created:
         print(f"[UPLOAD] GPX extracted: {gpx_file}")
-    else: 
+    else:
         print(f"[UPLOAD] No GPX data found in video: {filename}")
 
     storage_url = f"/uploads/{filename}"
@@ -241,25 +258,39 @@ def upload_direct():
     if video_id:
         db.videos.find_one_and_update(
             {"_id": ObjectId(video_id)},
-            {"$set": {
-                "storage_url": storage_url,
-                "gpx_file_url": gpx_file_url,
-                "size_bytes": file_size,
-                "status": "uploaded",
-                "progress": 100,
-                "updated_at": get_now_iso()
-            }}
+            {
+                "$set": {
+                    "storage_url": storage_url,
+                    "gpx_file_url": gpx_file_url,
+                    "size_bytes": file_size,
+                    "status": "uploaded",
+                    "progress": 100,
+                    "updated_at": get_now_iso(),
+                }
+            },
         )
-        return jsonify({"storage_url": storage_url, "size_bytes": file_size, "gpx_created": gpx_created}), 200
+        return (
+            jsonify(
+                {
+                    "storage_url": storage_url,
+                    "size_bytes": file_size,
+                    "gpx_created": gpx_created,
+                }
+            ),
+            200,
+        )
 
-    # If no existing video row, create one minimal from form fields    
+    # If no existing video row, create one minimal from form fields
     survey_id = request.form.get("survey_id")
     route_id = request.form.get("route_id", type=int)
     title = request.form.get("title") or filename
     if not (survey_id and route_id):
         # Clean up uploaded file if DB entry can't be created
         save_path.unlink()
-        return jsonify({"error": "missing survey_id or route_id", "gpx_created": False}), 400
+        return (
+            jsonify({"error": "missing survey_id or route_id", "gpx_created": False}),
+            400,
+        )
 
     doc = {
         "survey_id": ObjectId(survey_id),
@@ -275,7 +306,19 @@ def upload_direct():
     }
 
     res = db.videos.insert_one(doc)
-    return jsonify({"item": {**doc, "_id": str(res.inserted_id), "survey_id": survey_id, "gpx_created": gpx_created}}), 201
+    return (
+        jsonify(
+            {
+                "item": {
+                    **doc,
+                    "_id": str(res.inserted_id),
+                    "survey_id": survey_id,
+                    "gpx_created": gpx_created,
+                }
+            }
+        ),
+        201,
+    )
 
 
 @videos_bp.post("/presign")
@@ -298,7 +341,9 @@ def upload_gpx():
     if not video_id:
         return jsonify({"error": "video_id is required"}), 400
 
-    upload_root = Path(os.getenv("UPLOAD_DIR", Path(__file__).resolve().parents[1] / "uploads"))
+    upload_root = Path(
+        os.getenv("UPLOAD_DIR", Path(__file__).resolve().parents[1] / "uploads")
+    )
     upload_root.mkdir(parents=True, exist_ok=True)
     filename = secure_filename(file.filename)
     # Add gpx_ prefix to distinguish from videos
@@ -318,7 +363,7 @@ def upload_gpx():
     db = get_db()
     db.videos.find_one_and_update(
         {"_id": ObjectId(video_id)},
-        {"$set": {"gpx_file_url": gpx_url, "updated_at": get_now_iso()}}
+        {"$set": {"gpx_file_url": gpx_url, "updated_at": get_now_iso()}},
     )
     return jsonify({"gpx_file_url": gpx_url}), 200
 
@@ -337,7 +382,9 @@ def upload_thumbnail():
     if not video_id:
         return jsonify({"error": "video_id is required"}), 400
 
-    upload_root = Path(os.getenv("UPLOAD_DIR", Path(__file__).resolve().parents[1] / "uploads"))
+    upload_root = Path(
+        os.getenv("UPLOAD_DIR", Path(__file__).resolve().parents[1] / "uploads")
+    )
     upload_root.mkdir(parents=True, exist_ok=True)
     filename = secure_filename(file.filename)
     # Add thumb_ prefix to distinguish thumbnails
@@ -357,7 +404,7 @@ def upload_thumbnail():
     db = get_db()
     db.videos.find_one_and_update(
         {"_id": ObjectId(video_id)},
-        {"$set": {"thumbnail_url": thumbnail_url, "updated_at": get_now_iso()}}
+        {"$set": {"thumbnail_url": thumbnail_url, "updated_at": get_now_iso()}},
     )
     return jsonify({"thumbnail_url": thumbnail_url}), 200
 
@@ -387,23 +434,25 @@ def process_video_with_ai(video_id: str):
     gpx_file_url = video.get("gpx_file_url")
     route_id = video.get("route_id")
     survey_id = video.get("survey_id")
-    
+
     # DEMO MODE CHECK
     # Check if this video exists in video_library and has corresponding annotated files in annotated_library
-    upload_root = Path(os.getenv("UPLOAD_DIR") or str(Path(__file__).resolve().parents[1] / "uploads")).resolve()
-    
+    upload_root = Path(
+        os.getenv("UPLOAD_DIR") or str(Path(__file__).resolve().parents[1] / "uploads")
+    ).resolve()
+
     # Extract filename from storage_url
     # storage_url is like /uploads/video_library/filename.mp4 or /uploads/filename.mp4
     filename = os.path.basename(storage_url)
     filename_no_ext = os.path.splitext(filename)[0]
-    
+
     annotated_lib_path = upload_root / "annotated_library"
     print(f"[PROCESS] Looking for annotated files in {annotated_lib_path}")
     # Look for matching annotated files
     # Pattern: *_{filename_no_ext}_annotated_compressed.mp4
     # Example: corridor_fence_000_2025_0817_115147_F_annotated_compressed.mp4
     # where 2025_0817_115147_F is the filename_no_ext
-    
+
     demo_matches = []
     if annotated_lib_path.exists():
         search_pattern = f"*_{filename_no_ext}_annotated_compressed.mp4"
@@ -411,16 +460,25 @@ def process_video_with_ai(video_id: str):
 
     # demo_matches = []
     if demo_matches:
-        print(f"[PROCESS] DEMO MODE DETECTED for {video_id}. Found {len(demo_matches)} annotated files.")
-        
+        print(
+            f"[PROCESS] DEMO MODE DETECTED for {video_id}. Found {len(demo_matches)} annotated files."
+        )
+
         # Update to processing first
         db.videos.update_one(
             {"_id": ObjectId(video_id)},
-            {"$set": {"status": "processing", "progress": 0, "updated_at": get_now_iso()}}
+            {
+                "$set": {
+                    "status": "processing",
+                    "progress": 0,
+                    "updated_at": get_now_iso(),
+                }
+            },
         )
-        
+
         # Get Flask app for context
         from flask import current_app
+
         app = current_app._get_current_object()
 
         def process_demo_in_background():
@@ -428,33 +486,35 @@ def process_video_with_ai(video_id: str):
                 try:
                     import time
                     from pymongo import MongoClient
+
                     mongo_client = MongoClient(app.config["MONGO_URI"])
                     mongo_db = mongo_client[app.config["MONGO_DB_NAME"]]
-                    
+
                     # Simulate progress
-                    for i in range(1, 101, 20):
-                        time.sleep(0.8)
+                    for i in range(1, 101, 7):
+                        time.sleep(2.3)
+                        print(f"[PROCESS] Updating progress to {i}%")
                         mongo_db.videos.update_one(
                             {"_id": ObjectId(video_id)},
-                            {"$set": {"progress": i, "updated_at": get_now_iso()}}
+                            {"$set": {"progress": i, "updated_at": get_now_iso()}},
                         )
-                    
+
                     # Construct category map
                     # Filename format: {CATEGORY}_{INDEX}_{ORIGINAL}_annotated_compressed.mp4
                     # e.g. corridor_fence_000_2025...
                     category_videos = {}
-                    
+
                     known_categories = [
-                        "oia", 
-                        "corridor_pavement", 
-                        "corridor_structure", 
-                        "directional_signage", 
-                        "its", 
-                        "roadway_lighting"
+                        "oia",
+                        "corridor_pavement",
+                        "corridor_structure",
+                        "directional_signage",
+                        "its",
+                        "roadway_lighting",
                     ]
-                    
+
                     primary_annotated_url = None
-                    
+
                     for match in demo_matches:
                         match_name = match.name
                         # Try to match category
@@ -463,71 +523,85 @@ def process_video_with_ai(video_id: str):
                             if match_name.startswith(cat):
                                 found_cat = cat
                                 break
-                        
-                        # Fix for categories that might be substrings of each other? 
+
+                        # Fix for categories that might be substrings of each other?
                         # In this list, they seem distinct enough.
-                        
+
                         # Build URL
                         # Path relative to uploads
                         rel_path = match.relative_to(upload_root)
                         url = f"/uploads/{rel_path}"
-                        
+
                         category_videos[found_cat] = url
-                        
+
                         if not primary_annotated_url:
                             primary_annotated_url = url
-                            
+
                     # Update DB completion
                     mongo_db.videos.update_one(
                         {"_id": ObjectId(video_id)},
-                        {"$set": {
-                            "status": "completed",
-                            "progress": 100,
-                            "annotated_video_url": primary_annotated_url,
-                            "category_videos": category_videos,
-                            "updated_at": get_now_iso()
-                        }}
+                        {
+                            "$set": {
+                                "status": "completed",
+                                "progress": 100,
+                                "annotated_video_url": primary_annotated_url,
+                                "category_videos": category_videos,
+                                "updated_at": get_now_iso(),
+                            }
+                        },
                     )
-                    
+
                     print(f"[PROCESS] Demo processing complete for {video_id}")
-                    
+
                 except Exception as e:
                     print(f"Error in demo processing: {e}")
                     import traceback
+
                     traceback.print_exc()
-        
+
         thread = threading.Thread(target=process_demo_in_background, daemon=True)
         thread.start()
-        
-        return jsonify({
-            "ok": True,
-            "message": "Video processing started (DEMO MODE)",
-            "video_id": video_id,
-            "status": "processing"
-        }), 202
+
+        return (
+            jsonify(
+                {
+                    "ok": True,
+                    "message": "Video processing started (DEMO MODE)",
+                    "video_id": video_id,
+                    "status": "processing",
+                }
+            ),
+            202,
+        )
 
     # Initialize processor and check health FIRST (Synchronous check)
     from services.sagemaker_processor import SageMakerVideoProcessor
-    
+
     processor = SageMakerVideoProcessor()
     is_healthy, error_msg = processor.check_endpoint_health()
-    
+
     # processor = MultiEndpointSageMaker()
     # processor.check_endpoints_health()
 
     if not is_healthy:
-        return jsonify({
-            "error": f"SageMaker Error: {error_msg}. Processing aborted to prevent local overload."
-        }), 400
+        return (
+            jsonify(
+                {
+                    "error": f"SageMaker Error: {error_msg}. Processing aborted to prevent local overload."
+                }
+            ),
+            400,
+        )
 
     # Update status to processing
     db.videos.update_one(
         {"_id": ObjectId(video_id)},
-        {"$set": {"status": "processing", "progress": 0, "updated_at": get_now_iso()}}
+        {"$set": {"status": "processing", "progress": 0, "updated_at": get_now_iso()}},
     )
 
     # Get Flask app for context
     from flask import current_app
+
     app = current_app._get_current_object()
 
     # Start background processing
@@ -537,7 +611,10 @@ def process_video_with_ai(video_id: str):
                 import json
 
                 # Setup paths with absolute path
-                upload_root = Path(os.getenv("UPLOAD_DIR") or str(Path(__file__).resolve().parents[1] / "uploads"))
+                upload_root = Path(
+                    os.getenv("UPLOAD_DIR")
+                    or str(Path(__file__).resolve().parents[1] / "uploads")
+                )
                 upload_root = upload_root.resolve()  # Ensure absolute path
 
                 # Handle storage_url which might be relative or absolute
@@ -555,7 +632,7 @@ def process_video_with_ai(video_id: str):
                     "original_videos": upload_root / "original_videos",
                     "annotated_videos": upload_root / "annotated_videos",
                     "frames": upload_root / "frames",
-                    "metadata": upload_root / "metadata"
+                    "metadata": upload_root / "metadata",
                 }
                 for dir_path in output_dirs.values():
                     dir_path.mkdir(parents=True, exist_ok=True)
@@ -564,17 +641,21 @@ def process_video_with_ai(video_id: str):
                 original_video_path = output_dirs["original_videos"] / f"{video_id}.mp4"
                 if not original_video_path.exists():
                     if not video_path.exists():
-                        raise FileNotFoundError(f"Source video not found at: {video_path}")
+                        raise FileNotFoundError(
+                            f"Source video not found at: {video_path}"
+                        )
                     import shutil
+
                     shutil.copy2(str(video_path), str(original_video_path))
 
                 print(f"[PROCESS] Starting SageMaker processing for video {video_id}")
 
                 # Initialize SageMaker processor
-                processor = SageMakerVideoProcessor() # MultiEndpointSageMaker()
+                processor = SageMakerVideoProcessor()  # MultiEndpointSageMaker()
 
                 # Get MongoDB client directly (not using get_db() to avoid Flask context issues in callback)
                 from pymongo import MongoClient
+
                 mongo_client = MongoClient(app.config["MONGO_URI"])
                 mongo_db = mongo_client[app.config["MONGO_DB_NAME"]]
 
@@ -582,7 +663,7 @@ def process_video_with_ai(video_id: str):
                 def update_progress(progress: int, message: str):
                     mongo_db.videos.update_one(
                         {"_id": ObjectId(video_id)},
-                        {"$set": {"progress": progress, "updated_at": get_now_iso()}}
+                        {"$set": {"progress": progress, "updated_at": get_now_iso()}},
                     )
                     print(f"[PROCESS] {message} ({progress}%)")
 
@@ -594,7 +675,7 @@ def process_video_with_ai(video_id: str):
                     route_id=route_id,  # Pass route_id for organizing frames by road
                     survey_id=survey_id,  # Pass survey_id for linking frames
                     db=mongo_db,  # Pass MongoDB connection for frame storage
-                    progress_callback=update_progress
+                    progress_callback=update_progress,
                 )
 
                 print(f"[PROCESS] Processing complete: {result}")
@@ -608,42 +689,63 @@ def process_video_with_ai(video_id: str):
                         if gpx_path.exists():
                             # Parse GPX file
                             import xml.etree.ElementTree as ET
+
                             tree = ET.parse(str(gpx_path))
                             root = tree.getroot()
 
                             # Extract GPX points with timestamps
-                            ns = {'gpx': 'http://www.topografix.com/GPX/1/1'}
+                            ns = {"gpx": "http://www.topografix.com/GPX/1/1"}
                             gpx_data = []
-                            for idx, trkpt in enumerate(root.findall('.//gpx:trkpt', ns) or root.findall('.//trkpt')):
-                                lat = float(trkpt.get('lat', 0))
-                                lon = float(trkpt.get('lon', 0))
-                                ele = trkpt.find('gpx:ele', ns) or trkpt.find('ele')
-                                altitude = float(ele.text) if ele is not None and ele.text else None
+                            for idx, trkpt in enumerate(
+                                root.findall(".//gpx:trkpt", ns)
+                                or root.findall(".//trkpt")
+                            ):
+                                lat = float(trkpt.get("lat", 0))
+                                lon = float(trkpt.get("lon", 0))
+                                ele = trkpt.find("gpx:ele", ns) or trkpt.find("ele")
+                                altitude = (
+                                    float(ele.text)
+                                    if ele is not None and ele.text
+                                    else None
+                                )
 
                                 # Estimate timestamp based on position if not available
-                                timestamp = idx / len(list(root.findall('.//gpx:trkpt', ns) or root.findall('.//trkpt'))) * result['duration']
+                                timestamp = (
+                                    idx
+                                    / len(
+                                        list(
+                                            root.findall(".//gpx:trkpt", ns)
+                                            or root.findall(".//trkpt")
+                                        )
+                                    )
+                                    * result["duration"]
+                                )
 
-                                gpx_data.append({
-                                    'timestamp': timestamp,
-                                    'lat': lat,
-                                    'lon': lon,
-                                    'altitude': altitude
-                                })
+                                gpx_data.append(
+                                    {
+                                        "timestamp": timestamp,
+                                        "lat": lat,
+                                        "lon": lon,
+                                        "altitude": altitude,
+                                    }
+                                )
 
                             # Link frames to GPX
-                            metadata_path = output_dirs["metadata"] / f"{video_id}_frame_metadata.json"
+                            metadata_path = (
+                                output_dirs["metadata"]
+                                / f"{video_id}_frame_metadata.json"
+                            )
                             linked_frames = processor.link_frames_to_gpx(
-                                metadata_path,
-                                gpx_data,
-                                video_id=video_id,
-                                db=mongo_db
+                                metadata_path, gpx_data, video_id=video_id, db=mongo_db
                             )
 
                             # Save linked metadata
-                            with open(metadata_path, 'w') as f:
+                            with open(metadata_path, "w") as f:
                                 json.dump(linked_frames, f, indent=2)
 
-                            print(f"[PROCESS] Linked {len(linked_frames)} frames to GPX data")
+                            print(
+                                f"[PROCESS] Linked {len(linked_frames)} frames to GPX data"
+                            )
                     except Exception as e:
                         print(f"[PROCESS] Warning: Could not link GPX data: {e}")
 
@@ -655,27 +757,48 @@ def process_video_with_ai(video_id: str):
                     if not path:
                         return path
                     # Remove any leading slashes
-                    path = path.lstrip('/')
+                    path = path.lstrip("/")
                     # Add single leading slash
                     return f"/{path}"
 
-                annotated_video_url = normalize_path(result.get('annotated_video_path', f'uploads/annotated_videos/{video_id}_annotated.mp4'))
-                frames_directory = normalize_path(result.get('frames_directory', f'uploads/frames/route_{route_id}/{video_id}' if route_id else f'uploads/frames/{video_id}'))
-                frame_metadata_url = normalize_path(result.get('frame_metadata_path', f'uploads/metadata/{video_id}_frame_metadata.json'))
+                annotated_video_url = normalize_path(
+                    result.get(
+                        "annotated_video_path",
+                        f"uploads/annotated_videos/{video_id}_annotated.mp4",
+                    )
+                )
+                frames_directory = normalize_path(
+                    result.get(
+                        "frames_directory",
+                        (
+                            f"uploads/frames/route_{route_id}/{video_id}"
+                            if route_id
+                            else f"uploads/frames/{video_id}"
+                        ),
+                    )
+                )
+                frame_metadata_url = normalize_path(
+                    result.get(
+                        "frame_metadata_path",
+                        f"uploads/metadata/{video_id}_frame_metadata.json",
+                    )
+                )
 
                 mongo_db.videos.update_one(
                     {"_id": ObjectId(video_id)},
-                    {"$set": {
-                        "status": "completed",
-                        "progress": 100,
-                        "annotated_video_url": annotated_video_url,
-                        "frames_directory": frames_directory,
-                        "frame_metadata_url": frame_metadata_url,
-                        "total_detections": result.get("total_detections", 0),
-                        "detections_summary": result.get("detections_summary", {}),
-                        "processed_frames": result.get("processed_frames", 0),
-                        "updated_at": get_now_iso()
-                    }}
+                    {
+                        "$set": {
+                            "status": "completed",
+                            "progress": 100,
+                            "annotated_video_url": annotated_video_url,
+                            "frames_directory": frames_directory,
+                            "frame_metadata_url": frame_metadata_url,
+                            "total_detections": result.get("total_detections", 0),
+                            "detections_summary": result.get("detections_summary", {}),
+                            "processed_frames": result.get("processed_frames", 0),
+                            "updated_at": get_now_iso(),
+                        }
+                    },
                 )
 
                 print(f"[PROCESS] Video {video_id} processing completed successfully")
@@ -683,31 +806,41 @@ def process_video_with_ai(video_id: str):
             except Exception as e:
                 print(f"[PROCESS] Error processing video {video_id}: {e}")
                 import traceback
+
                 traceback.print_exc()
 
                 # Update status to failed
                 from pymongo import MongoClient
+
                 mongo_client = MongoClient(app.config["MONGO_URI"])
                 mongo_db = mongo_client[app.config["MONGO_DB_NAME"]]
                 mongo_db.videos.update_one(
                     {"_id": ObjectId(video_id)},
-                    {"$set": {
-                        "status": "failed",
-                        "error": str(e),
-                        "updated_at": get_now_iso()
-                    }}
+                    {
+                        "$set": {
+                            "status": "failed",
+                            "error": str(e),
+                            "updated_at": get_now_iso(),
+                        }
+                    },
                 )
 
     # Start background thread
     thread = threading.Thread(target=process_in_background, daemon=True)
     thread.start()
     # time.sleep(3)  # Simulate brief delay for demo purposes
-    return jsonify({
-        "ok": True,
-        "message": "Video processing started with SageMaker",
-        "video_id": video_id,
-        "status": "processing"
-    }), 202
+    return (
+        jsonify(
+            {
+                "ok": True,
+                "message": "Video processing started with SageMaker",
+                "video_id": video_id,
+                "status": "processing",
+            }
+        ),
+        202,
+    )
+
 
 @videos_bp.get("/<video_id>/frame_annotated")
 def get_video_frame_annotated(video_id: str):
@@ -720,13 +853,15 @@ def get_video_frame_annotated(video_id: str):
     video_url = video.get("storage_url")
     route_id = video.get("route_id")
     # Get the video file path
-    upload_root = Path(os.getenv("UPLOAD_DIR", Path(__file__).resolve().parents[1] / "uploads"))
+    upload_root = Path(
+        os.getenv("UPLOAD_DIR", Path(__file__).resolve().parents[1] / "uploads")
+    )
     filename = video_url.replace("/uploads/", "")
     video_path = upload_root / filename
     print(video_path)
     if not video_path or not video_path.exists():
-            return jsonify({"error": "Video found in db but not in storage"}), 404
-    
+        return jsonify({"error": "Video found in db but not in storage"}), 404
+
     try:
         cap = cv2.VideoCapture(str(video_path))
         if not cap.isOpened():
@@ -735,7 +870,7 @@ def get_video_frame_annotated(video_id: str):
         # Get video properties
         fps = cap.get(cv2.CAP_PROP_FPS)
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        
+
         # Determine which frame to extract
         timestamp = request.args.get("timestamp", type=float)
         frame_number = request.args.get("frame_number", type=int)
@@ -766,28 +901,36 @@ def get_video_frame_annotated(video_id: str):
         # Scale to reduce the payload size
         frame_height = frame.shape[0]
         frame_width = frame.shape[1]
-        resize_width = 640 # request.args.get("width", type=int)
+        resize_width = 640  # request.args.get("width", type=int)
         new_height = int(frame_height * (resize_width / frame_width))
         frame = cv2.resize(frame, (resize_width, new_height))
 
         # sgm = SageMakerVideoProcessor()
         # Check if this is a demo video by matching storage_url basename with frame 'key'
-        storage_basename = os.path.splitext(os.path.basename(video_url))[0] if video_url else None
-        
+        storage_basename = (
+            os.path.splitext(os.path.basename(video_url))[0] if video_url else None
+        )
+
         # First try to find frame by key (for demo videos)
         frame_db_info = None
         print(storage_basename, "storage_basename")
         if storage_basename:
             key_query = {"key": storage_basename, "frame_number": frame_number}
-            frame_db_info = db.frames.find_one(key_query, sort=[('created_at', pymongo.DESCENDING)])
+            frame_db_info = db.frames.find_one(
+                key_query, sort=[("created_at", pymongo.DESCENDING)]
+            )
             if frame_db_info:
-                print(f"[DEMO] Found frame by key '{storage_basename}' for frame {frame_number}")
-        
+                print(
+                    f"[DEMO] Found frame by key '{storage_basename}' for frame {frame_number}"
+                )
+
         # Fall back to video_id-based lookup
         if not frame_db_info:
             query = {"video_id": video_id, "frame_number": frame_number}
-            frame_db_info = db.frames.find_one(query, sort=[('created_at', pymongo.DESCENDING)])
-        
+            frame_db_info = db.frames.find_one(
+                query, sort=[("created_at", pymongo.DESCENDING)]
+            )
+
         detections = frame_db_info.get("detections", []) if frame_db_info else []
         annotclasses = request.args.getlist("class")
         # print(frame_db_info, "frame")
@@ -798,7 +941,9 @@ def get_video_frame_annotated(video_id: str):
             annotated_frame = frame
         else:
             if annotclasses:
-                detections = [det for det in detections if det.get("class_name") in annotclasses]
+                detections = [
+                    det for det in detections if det.get("class_name") in annotclasses
+                ]
             # print(f"Detections to annotate: {detections}")
             # annotated_frame = sgm.draw_detections(frame.copy(), detections)
 
@@ -809,23 +954,25 @@ def get_video_frame_annotated(video_id: str):
         # Convert to PIL Image and save to bytes
         pil_image = Image.fromarray(frame_rgb)
         img_io = io.BytesIO()
-        pil_image.save(img_io, 'JPEG', quality=85)
+        pil_image.save(img_io, "JPEG", quality=85)
         img_io.seek(0)
 
         img_bytes = img_io.read()
-        base64_image = base64.b64encode(img_bytes).decode('utf-8')
+        base64_image = base64.b64encode(img_bytes).decode("utf-8")
 
         # Note from Neelansh:
         # It is important to return the original frame dimensions on the frontend
         # because the bounding boxes are with respect to the original frame dimensions
         # and therefore the canvas will need original dimensions to scale boxes properly
-        return jsonify({
-            "frame_number": frame_number,
-            "width": frame_width,
-            "height": frame_height,
-            "image_data": f"data:image/jpeg;base64,{base64_image}",
-            "detections": detections
-        })
+        return jsonify(
+            {
+                "frame_number": frame_number,
+                "width": frame_width,
+                "height": frame_height,
+                "image_data": f"data:image/jpeg;base64,{base64_image}",
+                "detections": detections,
+            }
+        )
 
         # return send_file(
         #     img_io,
@@ -844,7 +991,7 @@ def get_video_annotated_frames(video_id: str):
     """
     Fetch all frames for a video (metadata only, no image data).
     Supports demo videos by matching storage_url basename with frame 'key'.
-    
+
     Query parameters:
     - has_detections: If true, only return frames with detections
     """
@@ -855,45 +1002,48 @@ def get_video_annotated_frames(video_id: str):
         return jsonify({"error": "Video not found"}), 404
 
     video_url = video.get("storage_url")
-    
+
     # Check if this is a demo video by matching storage_url basename with frame 'key'
-    storage_basename = os.path.splitext(os.path.basename(video_url))[0] if video_url else None
-    
+    storage_basename = (
+        os.path.splitext(os.path.basename(video_url))[0] if video_url else None
+    )
+
     has_detections = request.args.get("has_detections", "").lower() == "true"
-    
+
     # First try to find frames by key (for demo videos)
     frames = []
     is_demo = False
-    
+
     if storage_basename:
         key_query = {"key": storage_basename}
         if has_detections:
             key_query["detections_count"] = {"$gt": 0}
-        
+
         frames = list(db.frames.find(key_query).sort("frame_number", 1))
         if frames:
             is_demo = True
             print(f"[DEMO] Found {len(frames)} frames by key '{storage_basename}'")
-    
+
     # Fall back to video_id-based lookup
     if not frames:
         query = {"video_id": video_id}
         if has_detections:
             query["detections_count"] = {"$gt": 0}
-        
+
         frames = list(db.frames.find(query).sort("frame_number", 1))
-    
+
     # Use bson.json_util for proper serialization
     return Response(
-        json_util.dumps({
-            "video_id": video_id,
-            "is_demo": is_demo,
-            "items": frames,
-            "total": len(frames)
-        }),
-        mimetype="application/json"
+        json_util.dumps(
+            {
+                "video_id": video_id,
+                "is_demo": is_demo,
+                "items": frames,
+                "total": len(frames),
+            }
+        ),
+        mimetype="application/json",
     )
-
 
 
 @videos_bp.get("/<video_id>/frame")
@@ -933,7 +1083,9 @@ def get_video_frame(video_id: str):
         return jsonify({"error": "Video file not uploaded yet"}), 400
 
     # Get the video file path
-    upload_root = Path(os.getenv("UPLOAD_DIR", Path(__file__).resolve().parents[1] / "uploads"))
+    upload_root = Path(
+        os.getenv("UPLOAD_DIR", Path(__file__).resolve().parents[1] / "uploads")
+    )
     filename = video_url.replace("/uploads/", "")
     video_path = upload_root / filename
 
@@ -964,9 +1116,14 @@ def get_video_frame(video_id: str):
         # Validate frame number
         if frame_number < 0 or frame_number >= total_frames:
             cap.release()
-            return jsonify({
-                "error": f"Frame number {frame_number} out of range (0-{total_frames-1})"
-            }), 400
+            return (
+                jsonify(
+                    {
+                        "error": f"Frame number {frame_number} out of range (0-{total_frames-1})"
+                    }
+                ),
+                400,
+            )
 
         # Seek to the specific frame
         cap.set(cv2.CAP_PROP_POS_FRAMES, frame_number)
@@ -993,14 +1150,14 @@ def get_video_frame(video_id: str):
         # Convert to PIL Image and save to bytes
         pil_image = Image.fromarray(frame_rgb)
         img_io = io.BytesIO()
-        pil_image.save(img_io, 'JPEG', quality=85)
+        pil_image.save(img_io, "JPEG", quality=85)
         img_io.seek(0)
 
         return send_file(
             img_io,
-            mimetype='image/jpeg',
+            mimetype="image/jpeg",
             as_attachment=False,
-            download_name=f"frame_{frame_number}.jpg"
+            download_name=f"frame_{frame_number}.jpg",
         )
 
     except Exception as e:
@@ -1029,7 +1186,9 @@ def get_video_metadata(video_id: str):
         return jsonify({"error": "No metadata available for this video"}), 404
 
     # Get the metadata file path
-    upload_root = Path(os.getenv("UPLOAD_DIR", Path(__file__).resolve().parents[1] / "uploads"))
+    upload_root = Path(
+        os.getenv("UPLOAD_DIR", Path(__file__).resolve().parents[1] / "uploads")
+    )
 
     # Handle the path - could be /uploads/metadata/... or uploads/metadata/...
     filename = metadata_url.replace("/uploads/", "").lstrip("/")
@@ -1042,34 +1201,41 @@ def get_video_metadata(video_id: str):
 
     try:
         # Read and return the metadata JSON
-        with open(metadata_path, 'r') as f:
+        with open(metadata_path, "r") as f:
             metadata = json.load(f)
 
-        return jsonify({
-            "video_id": video_id,
-            "metadata": metadata,
-            "total_frames": len(metadata),
-            "detections_count": sum(len(frame.get("detections", [])) for frame in metadata)
-        })
+        return jsonify(
+            {
+                "video_id": video_id,
+                "metadata": metadata,
+                "total_frames": len(metadata),
+                "detections_count": sum(
+                    len(frame.get("detections", [])) for frame in metadata
+                ),
+            }
+        )
 
     except Exception as e:
         print(f"Error reading metadata file {metadata_path}: {e}")
         return jsonify({"error": f"Failed to read metadata: {str(e)}"}), 500
 
+
 @videos_bp.get("/library")
 def list_from_library():
-    upload_root = Path(os.getenv("UPLOAD_DIR", Path(__file__).resolve().parents[1] / "uploads"))
+    upload_root = Path(
+        os.getenv("UPLOAD_DIR", Path(__file__).resolve().parents[1] / "uploads")
+    )
     library_path = upload_root / "video_library"
 
     # Ensure directory exists
     if not library_path.exists():
         library_path.mkdir(parents=True, exist_ok=True)
 
-    folder_path = request.args.get('path', '')
+    folder_path = request.args.get("path", "")
     # Secure the path to prevent directory traversal
     if folder_path:
         # Remove leading/trailing slashes and join with library path
-        sanitized_path = secure_filename(folder_path) if folder_path != '/' else ''
+        sanitized_path = secure_filename(folder_path) if folder_path != "/" else ""
         current_search_path = library_path / sanitized_path
     else:
         current_search_path = library_path
@@ -1085,17 +1251,17 @@ def list_from_library():
 
     try:
         for item in current_search_path.iterdir():
-            if item.name.startswith('.'):
+            if item.name.startswith("."):
                 continue
 
             if item.is_dir():
-                folders.append(item.name + '/')
+                folders.append(item.name + "/")
                 continue
-                
+
             # Get base name and extension
             base_name = item.stem
             ext = item.suffix.lower()
-            
+
             # Key for grouping (base filename without extension)
             group_key = base_name
 
@@ -1111,19 +1277,21 @@ def list_from_library():
             relative_path = f"video_library/{item.name}"
 
             if folder_path:
-                 relative_path = f"video_library/{folder_path}/{item.name}"
-            
+                relative_path = f"video_library/{folder_path}/{item.name}"
+
             url_path = f"/uploads/{relative_path}"
 
-            if ext in ['.mp4', '.mov', '.avi', '.mkv', '.webm']:
-                grouped_data[group_key]['video_path'] = relative_path
-                grouped_data[group_key]['video_url'] = url_path
-                grouped_data[group_key]['size_bytes'] = item.stat().st_size
-                grouped_data[group_key]['last_modified'] = datetime.fromtimestamp(item.stat().st_mtime).isoformat()
-            
-            elif ext in ['.jpg', '.jpeg', '.png', '.webp']:
-                grouped_data[group_key]['thumb_path'] = relative_path
-                grouped_data[group_key]['thumb_url'] = url_path
+            if ext in [".mp4", ".mov", ".avi", ".mkv", ".webm"]:
+                grouped_data[group_key]["video_path"] = relative_path
+                grouped_data[group_key]["video_url"] = url_path
+                grouped_data[group_key]["size_bytes"] = item.stat().st_size
+                grouped_data[group_key]["last_modified"] = datetime.fromtimestamp(
+                    item.stat().st_mtime
+                ).isoformat()
+
+            elif ext in [".jpg", ".jpeg", ".png", ".webp"]:
+                grouped_data[group_key]["thumb_path"] = relative_path
+                grouped_data[group_key]["thumb_url"] = url_path
 
     except Exception as e:
         print(f"Error listing library: {e}")
@@ -1133,11 +1301,17 @@ def list_from_library():
     # For now keep all
     items = list(grouped_data.values())
 
-    return jsonify({
-        "current_path": folder_path,
-        "folders": sorted(folders),
-        "items": sorted(items, key=lambda x: x['last_modified'], reverse=True)
-    }), 200
+    return (
+        jsonify(
+            {
+                "current_path": folder_path,
+                "folders": sorted(folders),
+                "items": sorted(items, key=lambda x: x["last_modified"], reverse=True),
+            }
+        ),
+        200,
+    )
+
 
 @videos_bp.post("/library")
 @role_required(["admin", "surveyor"])
@@ -1147,35 +1321,50 @@ def upload_library_video():
     if not data:
         return jsonify({"error": "invalid JSON body", "gpx_created": False}), 400
 
-    video_path_str = data.get("video_key") # frontend sends path in video_key field
+    video_path_str = data.get("video_key")  # frontend sends path in video_key field
     thumb_path_str = data.get("thumb_path")
     video_id = data.get("video_id")
     survey_id = data.get("survey_id")
     route_id = data.get("route_id")
 
     if not video_path_str or not survey_id or not route_id:
-        return jsonify({"error": "video_key (path), survey_id, and route_id are required", "gpx_created": False}), 400
+        return (
+            jsonify(
+                {
+                    "error": "video_key (path), survey_id, and route_id are required",
+                    "gpx_created": False,
+                }
+            ),
+            400,
+        )
 
     db = get_db()
-    
+
     # 2. Verify Local File Exists
-    upload_root = Path(os.getenv("UPLOAD_DIR", Path(__file__).resolve().parents[1] / "uploads"))
-    
+    upload_root = Path(
+        os.getenv("UPLOAD_DIR", Path(__file__).resolve().parents[1] / "uploads")
+    )
+
     # Clean up path to avoid traversal attacks
     def clean_relative_path(p):
-        clean = p.lstrip('/')
-        if clean.startswith('uploads/'):
+        clean = p.lstrip("/")
+        if clean.startswith("uploads/"):
             clean = clean[8:]
         return clean
-    
+
     clean_path = clean_relative_path(video_path_str)
     full_path = upload_root / clean_path
-    
+
     print(f"[LIBRARY UPLOAD] Linking video from: {full_path}")
-    
+
     if not full_path.exists():
-         return jsonify({"error": f"Video file not found at {clean_path}", "gpx_created": False}), 404
-         
+        return (
+            jsonify(
+                {"error": f"Video file not found at {clean_path}", "gpx_created": False}
+            ),
+            404,
+        )
+
     file_size = full_path.stat().st_size
     filename = full_path.name
 
@@ -1190,17 +1379,17 @@ def upload_library_video():
     # 4. Extract GPX
     gpx_file = extract_gpx(str(full_path))
     gpx_created = gpx_file and os.path.exists(gpx_file)
-    
+
     storage_url = f"/uploads/{clean_path}"
-    
+
     gpx_file_url = None
     if gpx_file:
-         gpx_path = Path(gpx_file)
-         try:
-             rel_gpx = gpx_path.relative_to(upload_root)
-             gpx_file_url = f"/uploads/{rel_gpx}"
-         except ValueError:
-             gpx_file_url = f"/uploads/{gpx_path.name}"
+        gpx_path = Path(gpx_file)
+        try:
+            rel_gpx = gpx_path.relative_to(upload_root)
+            gpx_file_url = f"/uploads/{rel_gpx}"
+        except ValueError:
+            gpx_file_url = f"/uploads/{gpx_path.name}"
 
     # 5. Final Database Update
     update_doc = {
@@ -1210,20 +1399,24 @@ def upload_library_video():
         "size_bytes": file_size,
         "status": "uploaded",
         "progress": 100,
-        "updated_at": get_now_iso()
+        "updated_at": get_now_iso(),
     }
 
     if video_id:
         res = db.videos.find_one_and_update(
-            {"_id": ObjectId(video_id)}, 
-            {"$set": update_doc}
+            {"_id": ObjectId(video_id)}, {"$set": update_doc}
         )
-        return jsonify({
-            "id": str(res['_id']), 
-            "storage_url": storage_url, 
-            "size_bytes": file_size,
-            "gpx_created": gpx_created
-        }), 200
+        return (
+            jsonify(
+                {
+                    "id": str(res["_id"]),
+                    "storage_url": storage_url,
+                    "size_bytes": file_size,
+                    "gpx_created": gpx_created,
+                }
+            ),
+            200,
+        )
 
     doc = {
         "survey_id": ObjectId(survey_id),
@@ -1234,8 +1427,17 @@ def upload_library_video():
     }
 
     res = db.videos.insert_one(doc)
-    return jsonify({
-        "id": str(res.inserted_id), 
-        "item": {**doc, "_id": str(res.inserted_id), "survey_id": str(survey_id)},
-        "gpx_created": gpx_created
-    }), 201
+    return (
+        jsonify(
+            {
+                "id": str(res.inserted_id),
+                "item": {
+                    **doc,
+                    "_id": str(res.inserted_id),
+                    "survey_id": str(survey_id),
+                },
+                "gpx_created": gpx_created,
+            }
+        ),
+        201,
+    )
