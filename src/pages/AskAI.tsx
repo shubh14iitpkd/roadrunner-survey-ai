@@ -425,10 +425,12 @@ ${sampleFrames}`;
     "Summarize the road infrastructure",
     "What's at frame 60?",
   ] : [
-    "How many street lights are there in total?",
-    "What happened in most recent survey?",
+    "How many routes we have surveyed?",
     "Tell me about route 258",
-    "What is the condition of assets?",
+    "How many surveys we have conducted this month?",
+    "Who conducted most surveys?",
+    "What dates were surveys conducted?",
+    "What is the condition of Street Lights?"
   ];
 
   const roadReportMarkdown = `

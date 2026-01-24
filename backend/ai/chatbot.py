@@ -28,6 +28,7 @@ import googlemaps
 import re
 from collections import defaultdict, Counter
 from difflib import SequenceMatcher
+from datetime import datetime, timedelta
 
 # Import from schema.py
 from ai.schema import SCHEMA, DB_NAME
@@ -976,11 +977,14 @@ INSTRUCTIONS:
    - Don't make up numbers
    - If multiple types, organize them clearly
 
-4. **Formatting guidelines**:
-   - For lists: Use simple paragraphs or sentences, NOT markdown bullets
-   - For categories: Group related items together
-   - For timestamps: Convert to readable format (e.g., "at 0:26 seconds")
-   - Keep it clean and readable
+4. **Formatting guidelines (IMPORTANT - use valid GitHub Flavored Markdown)**:
+   - For bullet lists: Use "- " with a space after, one item per line
+   - For numbered lists: Use "1. ", "2. ", etc. with a space after
+   - For bold text: Use **double asterisks** 
+   - For emphasis: Use *single asterisks*
+   - Ensure blank lines before and after lists
+   - Do NOT use escaped underscores like \\_
+   - Keep paragraphs separated by blank lines
 
 5. **Be specific**:
    - Mention the route number if asked
@@ -1063,13 +1067,13 @@ Now answer the user's question clearly and professionally:
                 if location_name:
                     message = f"No data found near {location_name}. Try asking by route number instead."
                 else:
-                    message = "I couldn't find any data matching your question. Try asking about a specific route number."
+                    message = "Please provide a specific route number or video."
         else:
             # Generic fallback
             if location_name:
                 message = f"No data found near {location_name}. Try asking by route number instead."
             else:
-                message = "I couldn't find any data matching your question. Try asking about a specific route number."
+                message = "Please provide a specific route number or video."
 
         # Apply formatting
         return AnswerFormatter.format(message, None, question)
@@ -1721,6 +1725,151 @@ class RoadRunnerChatbot:
             print(f"Error finding latest global video: {e}")
             return None
 
+    def _handle_road_summary_query(self) -> str:
+        """Handle queries about how many routes/roads are surveyed"""
+        try:
+            # Query distinct route_ids from surveys collection
+            route_ids = self.db.db.surveys.distinct("route_id")
+
+            count = len(route_ids)
+            if count == 0:
+                return "We haven't surveyed any routes yet."
+
+            # Get road details for each route
+            lines = [f"We have surveyed **{count}** routes:"]
+
+            for route_id in sorted(route_ids):
+                # Try to find road info for this route
+                road = self.db.db.roads.find_one({"route_id": route_id})
+                if road:
+                    name = road.get("road_name", f"Route {route_id}")
+                    distance = road.get("estimated_distance_km", 0)
+                    lines.append(f"\n- **{name}** (Route {route_id}, {distance} km)")
+                else:
+                    lines.append(f"\n- **Route {route_id}**")
+
+            return "\n".join(lines)
+
+        except Exception as e:
+            print(f"Error handling road summary: {e}")
+            return "I encountered an error while retrieving the route list."
+
+    def _handle_survey_stats_query(self, question: str) -> str:
+        """Handle queries about survey statistics (counts, surveyors, dates)"""
+        try:
+            # 1. Determine Time Filter
+            q_lower = question.lower()
+            end_date = datetime.utcnow()
+            date_filter_text = "in total"
+
+            # Survey date is stored as "YYYY-MM-DD" string in surveys collection
+            start_date_str = None
+
+            if "today" in q_lower:
+                start_date_str = end_date.strftime("%Y-%m-%d")
+                date_filter_text = "today"
+            elif "this month" in q_lower:
+                start_date_str = end_date.strftime("%Y-%m")
+                date_filter_text = "this month"
+            elif "this year" in q_lower:
+                start_date_str = end_date.strftime("%Y")
+                date_filter_text = "this year"
+
+            # Build Query on 'surveys' collection
+            match_query = {}
+            if start_date_str:
+                match_query["survey_date"] = {"$regex": f"^{start_date_str}"}
+
+            # 2. Determine Intent Type
+
+            # Intent A: "Who conducted most surveys?"
+            if "who" in q_lower and ("conducted" in q_lower or "surveyor" in q_lower):
+                pipeline = [
+                    {"$match": match_query},
+                    {"$group": {"_id": "$surveyor_name", "count": {"$sum": 1}}},
+                    {"$sort": {"count": -1}},
+                    {"$limit": 5},
+                ]
+                results = list(self.db.db.surveys.aggregate(pipeline))
+
+                if not results:
+                    return f"No surveys found {date_filter_text}."
+
+                top = results[0]
+                name = top.get("_id") or "Unknown"
+                count = top.get("count", 0)
+
+                # Build detailed response
+                lines = [
+                    f"**{name}** conducted the most surveys ({count}) {date_filter_text}."
+                ]
+
+                if len(results) > 1:
+                    lines.append("\n**Other contributors:**")
+                    for r in results[1:]:
+                        rname = r.get("_id") or "Unknown"
+                        rcount = r.get("count", 0)
+                        lines.append(f"\n- {rname}: {rcount} surveys")
+
+                return "\n".join(lines)
+
+            # Intent B: "What dates were surveys conducted?"
+            elif "what dates" in q_lower or "when" in q_lower:
+                cursor = self.db.db.surveys.find(
+                    match_query, {"survey_date": 1, "surveyor_name": 1}
+                ).sort("survey_date", -1)
+
+                survey_list = list(cursor)
+
+                if not survey_list:
+                    return f"No surveys found {date_filter_text}."
+
+                # Group by date
+                by_date = {}
+                for doc in survey_list:
+                    s_date = doc.get("survey_date", "Unknown")
+                    if s_date not in by_date:
+                        by_date[s_date] = 0
+                    by_date[s_date] += 1
+
+                lines = [f"**Survey activity {date_filter_text}:**"]
+                for d in sorted(by_date.keys(), reverse=True)[:7]:
+                    try:
+                        dt = datetime.strptime(d, "%Y-%m-%d")
+                        fmt_d = dt.strftime("%B %d, %Y")
+                    except:
+                        fmt_d = d
+                    count = by_date[d]
+                    lines.append(f"\n- **{fmt_d}**: {count} survey(s)")
+
+                total = len(survey_list)
+                lines.append(f"\n_Total: {total} surveys recorded._")
+
+                return "\n".join(lines)
+
+            # Intent C: "How many surveys?" (Default)
+            else:
+                count = self.db.db.surveys.count_documents(match_query)
+
+                # Get some extra stats
+                surveyors = self.db.db.surveys.distinct("surveyor_name", match_query)
+                routes = self.db.db.surveys.distinct("route_id", match_query)
+
+                lines = [f"We have conducted **{count}** surveys {date_filter_text}."]
+                if surveyors:
+                    lines.append(f"\n- **Surveyors involved:** {len(surveyors)}")
+                if routes:
+                    lines.append(f"\n- **Routes covered:** {len(routes)}")
+
+                return "\n".join(lines)
+
+        except Exception as e:
+            print(f"Error handling survey stats: {e}")
+            import traceback
+
+            traceback.print_exc()
+            return "I couldn't retrieve the survey statistics."
+
     def ask(
         self,
         question: str,
@@ -1762,7 +1911,30 @@ class RoadRunnerChatbot:
             ]
             if any(keyword in question.lower() for keyword in meta_keywords):
                 print("[CHATBOT] Meta-question detected")
+                print("[CHATBOT] Meta-question detected")
                 return self.memory._answer_meta_question(question)
+
+            # PRE-CHECK: Road/Route Summary Query?
+            # "How many roads", "How many routes", "What routes have we surveyed"
+            q_lower = question.lower()
+            if (
+                "how many roads" in q_lower
+                or "how many routes" in q_lower
+                or ("routes" in q_lower and "surveyed" in q_lower)
+                or ("roads" in q_lower and "surveyed" in q_lower)
+            ):
+                print("[CHATBOT] Road/Route Summary Query detected")
+                return self._handle_road_summary_query()
+
+            # PRE-CHECK: Survey Statistics Query?
+            # "How many surveys", "Who conducted most", "What dates surveys"
+            if (
+                "how many surveys" in q_lower
+                or ("who" in q_lower and "conducted" in q_lower)
+                or ("what dates" in q_lower and "survey" in q_lower)
+            ):
+                print("[CHATBOT] Survey Stats Query detected")
+                return self._handle_survey_stats_query(question)
 
             # Lazy import to avoid circular dependency
             from ai.demo_chatbot import get_demo_chatbot, DemoChatbot
@@ -1811,14 +1983,7 @@ class RoadRunnerChatbot:
                 target_video_id = current_video_id
                 print(f"✓ Context: Explicit Video Selected ({target_video_id})")
 
-            # Source B: Chat Context (Implicit Video)
-            # If chat_id exists and has videos associated, treat as "video selected"
-            elif chat_id and self.video_handler._chat_has_videos(chat_id):
-                # For "how many assets", we typically look at valid processed videos
-                # Ideally we pick the one matching the chat
-                pass
-
-            # Source C: Route Mentioned (Most Recent Survey Rule)
+            # Source B: Route Mentioned (Higher Priority than Chat Context)
             elif extracted_route_id:
                 target_video_id = self._get_latest_video_for_route(extracted_route_id)
                 if target_video_id:
@@ -1832,7 +1997,16 @@ class RoadRunnerChatbot:
                         f"⚠️ Context: Route {extracted_route_id} found but no videos exist"
                     )
 
-            # Check if target is Demo
+            # Source C: Chat Context (Implicit Video - Fallback)
+            # Only use if we haven't found a target video yet
+            elif chat_id and self.video_handler._chat_has_videos(chat_id):
+                print(f"✓ Context: Inferring video from Chat Session {chat_id}")
+                # NOTE: Chat context handling is complex as it might be multiple videos.
+                # For now, we let the standard handlers pick it up via chat_id,
+                # UNLESS we need a specific ID for Demo logic.
+                pass
+
+            # Check if target is Demo (Applies to ALL sources)
             if target_video_id:
                 # Check against Demo list
                 # Demo IDs are typically filenames like 2025_0817...
@@ -1842,58 +2016,28 @@ class RoadRunnerChatbot:
                     print("✓ Context Type: DEMO VIDEO")
 
             # =========================================================================
-            # 3. RULE ENGINE & EXECUTION
+            # 3. CONTEXT FALLBACK FOR ASSET/FRAME QUERIES
             # =========================================================================
-
-            # -------------------------------------------------------------------------
-            # RULE: AMBIGUITY HANDLING
-            # If questioning specific assets/condition/time WITHOUT video/route context
-            # -------------------------------------------------------------------------
-            requires_context = intent.get("query_type") in [
-                "video_defect_query",
-                "video_metadata_query",
-            ] or any(
-                kw in question.lower()
-                for kw in [
-                    "how many",
-                    "count",
-                    "condition",
-                    "what's at",
-                    "frame",
-                    "timestamp",
-                ]
-            )
-
-            # Allow global queries to proceed without specific video context
-            if (
-                requires_context
-                and not target_video_id
-                and not chat_id
-                and not is_global_query
-            ):
-                # FALLBACK LOGIC: Try to find the latest global video
-                print(
-                    "⚠️ Ambiguous context - Attempting fallback to Latest Global Video..."
-                )
+            # If no video context yet, fallback to the most recent uploaded video
+            if not target_video_id and not is_global_query:
+                print("⚠️ No context provided - Falling back to most recent video...")
                 fallback_video = self._get_latest_global_video()
 
                 if fallback_video:
                     target_video_id = fallback_video
-                    video_label = "the most recent survey"
+                    video_label = "the most recently uploaded survey"
                     print(f"✓ Fallback successful -> {target_video_id}")
 
-                    # Update demo status for fallback video
-                    normalized_fallback = target_video_id.replace(".mp4", "")
+                    # Check if fallback video is a demo video
+                    normalized_fallback = target_video_id.replace(".mp4", "").replace(
+                        ".MP4", ""
+                    )
                     if normalized_fallback in DemoChatbot.DEMO_VIDEOS:
                         is_demo = True
                         print("✓ Fallback Type: DEMO VIDEO")
-
                 else:
-                    # Only ask for clarification if we absolutely cannot find any data
-                    if extracted_route_id:
-                        return f"I see you're asking about Route {extracted_route_id}, but I couldn't find any survey videos for it yet."
-
-                    return "I couldn't identify which survey data you're referring to. Please select a video or route."
+                    # No videos exist at all
+                    return "No survey videos have been uploaded yet. Please upload a video to get started!"
 
             # -------------------------------------------------------------------------
             # PATH A: DEMO VIDEO LOGIC (JSON Source)
@@ -1963,16 +2107,31 @@ class RoadRunnerChatbot:
             if query_spec and target_video_id and not is_global_query:
                 if "query" in query_spec:
                     # Inject video_id filter to ensure "Most Recent Survey" rule
-                    # Check if query is find or aggregate
                     is_blocking_filter = True
 
+                    # Determine correct field name based on collection
+                    collection = query_spec.get(
+                        "collection", intent.get("collection", "")
+                    )
+
+                    # Frames use 'key' (basename), others use 'video_id'
+                    if collection == "frames":
+                        filter_field = "key"
+                        # Ensure we use basename for key
+                        filter_value = target_video_id.replace(".mp4", "").replace(
+                            ".MP4", ""
+                        )
+                    else:
+                        filter_field = "video_id"
+                        filter_value = target_video_id
+
                     if query_spec["type"] == "find":
-                        query_spec["query"]["video_id"] = {
-                            "$regex": re.escape(target_video_id),
+                        query_spec["query"][filter_field] = {
+                            "$regex": re.escape(filter_value),
                             "$options": "i",
                         }
                         print(
-                            f"   ➕ Injected filter: video_id matches '{target_video_id}'"
+                            f"   ➕ Injected filter: {filter_field} matches '{filter_value}'"
                         )
 
                     elif query_spec["type"] == "aggregate":
@@ -1984,8 +2143,8 @@ class RoadRunnerChatbot:
                                 (s for s in pipeline if "$match" in s), None
                             )
                             if match_stage:
-                                match_stage["$match"]["video_id"] = {
-                                    "$regex": re.escape(target_video_id),
+                                match_stage["$match"][filter_field] = {
+                                    "$regex": re.escape(filter_value),
                                     "$options": "i",
                                 }
                             else:
@@ -1993,15 +2152,15 @@ class RoadRunnerChatbot:
                                     0,
                                     {
                                         "$match": {
-                                            "video_id": {
-                                                "$regex": re.escape(target_video_id),
+                                            filter_field: {
+                                                "$regex": re.escape(filter_value),
                                                 "$options": "i",
                                             }
                                         }
                                     },
                                 )
                             print(
-                                f"   ➕ Injected aggregation filter: video_id matches '{target_video_id}'"
+                                f"   ➕ Injected aggregation filter: {filter_field} matches '{filter_value}'"
                             )
 
             if not query_spec:
@@ -2095,26 +2254,6 @@ if __name__ == "__main__":
             Traffic Signal Heads (Good Condition): There are detections of TRAFFIC_SIGNAL_HEAD_AssetCondition_Good (confidence: 0.5835).
         """
         print(f.format(s))
-        # Test questions
-        # test_questions = [
-        #     "How many street lights on route 105?",
-        #     "What's on Al Waab Street?",
-        #     "How many countdown timers?",
-        #     "Show me defects",
-        #     "What videos are there?",
-        # ]
-
-        # print("\n✅ Chatbot initialized successfully!")
-        # print("\nTest questions:")
-        # for i, q in enumerate(test_questions, 1):
-        #     print(f"  {i}. {q}")
-
-        # print("\n✨ Ready to answer questions!")
-        # print("\nUsage:")
-        # print("  from chatbot_full_redesign import get_chatbot")
-        # print("  chatbot = get_chatbot()")
-        # print("  answer = chatbot.ask('Your question here?')")
-        # print("  print(answer)")
 
     except Exception as e:
         print(f"❌ Error: {e}")
