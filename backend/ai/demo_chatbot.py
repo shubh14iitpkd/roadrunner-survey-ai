@@ -150,7 +150,6 @@ class DemoDataLoader:
             by_category[a.get("category", "Unknown")] += 1
             by_type[a.get("type", "Unknown")] += 1
             by_condition[a.get("condition", "Unknown")] += 1
-
         return {
             "video_id": video_id,
             "total_assets": len(assets),
@@ -158,6 +157,29 @@ class DemoDataLoader:
             "by_type": dict(by_type),
             "by_condition": dict(by_condition),
         }
+
+    def get_assets_by_condition(
+        self, condition_keywords: List[str], video_id: str = None
+    ) -> List[Dict]:
+        """Get full list of assets matching condition keywords"""
+        assets = self.get_assets_by_video(video_id) if video_id else self.assets
+        matches = []
+
+        for a in assets:
+            cond = a.get("condition", "").lower()
+            if any(k in cond for k in condition_keywords):
+                matches.append(
+                    {
+                        "type": a.get("type", "Unknown"),
+                        "condition": a.get("condition"),
+                        "timestamp": a.get("timestamp"),
+                        "frame": a.get("frame"),
+                    }
+                )
+
+        # Sort by timestamp
+        matches.sort(key=lambda x: x.get("timestamp", 0))
+        return matches
 
     def get_defects_by_category(self, video_id: str = None) -> Dict[str, int]:
         """Get count of damaged/defect assets per category"""
@@ -228,7 +250,10 @@ class DemoDataLoader:
             ]:
                 asset_type = a.get("type", "Unknown")
                 damaged_by_type[asset_type]["count"] += 1
-                if len(damaged_by_type[asset_type]["samples"]) < 3:
+                # Collect ALL samples if under a reasonable limit, or just 10?
+                # User wants a list, likely all of them if reasonable.
+                # For improvement suggestions specifically, we keep a sample.
+                if len(damaged_by_type[asset_type]["samples"]) < 5:
                     damaged_by_type[asset_type]["samples"].append(
                         {
                             "condition": a.get("condition"),
@@ -580,6 +605,35 @@ class DemoChatbot:
             )
 
         # Default asset query handling
+        # Check if user wants a LIST of items by condition
+        condition_keywords = ["poor", "damaged", "bad", "critical", "broken", "missing"]
+        matches_condition = any(k in question.lower() for k in condition_keywords)
+        is_list_query = any(
+            k in question.lower() for k in ["list", "what", "which", "show"]
+        )
+
+        if matches_condition and is_list_query:
+            # Fetch detailed list
+            assets = self.data.get_assets_by_condition(condition_keywords, video_key)
+            if not assets:
+                return f"No assets found matching the condition in {display_name}."
+
+            # Aggregate by type
+            counts = defaultdict(int)
+            for a in assets:
+                counts[a["type"]] += 1
+
+            # Build aggregated context string
+            asset_context = "\n".join(
+                [
+                    f"- **{atype}**: {count}"
+                    for atype, count in sorted(counts.items(), key=lambda x: -x[1])
+                ]
+            )
+
+            return f"Found {len(assets)} assets matching the condition in {display_name}:\n{asset_context}"
+
+        # Otherwise standard summary
         context = self._get_context_data(intent, video_key)
         context["video_name"] = display_name
 
