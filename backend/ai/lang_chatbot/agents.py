@@ -5,11 +5,15 @@ Creates an agent with all available tools for road survey queries
 
 from typing import Optional
 from langgraph.prebuilt import create_react_agent
+from langgraph.checkpoint.memory import MemorySaver
 from langchain_core.messages import SystemMessage
 
 from ai.lang_chatbot.models import get_gemini_model
 from ai.lang_chatbot.tools import ALL_TOOLS
 from ai.lang_chatbot.mongo_tools import FRAME_TOOLS
+
+# Global memory saver for conversation persistence
+_memory_saver = MemorySaver()
 
 
 SYSTEM_PROMPT = """You are RoadSightAI, an intelligent assistant for road survey analysis.
@@ -93,11 +97,12 @@ def agent_factory(
     if video_id:
         prompt += f"\n\n## Current Context\nActive Video ID: {video_id}\nUse this video_id for relevant queries unless the user specifies otherwise."
     
-    # Create the agent
+    # Create the agent with memory checkpointer for conversation persistence
     agent = create_react_agent(
         model=llm,
         tools=all_tools,
         prompt=prompt,
+        checkpointer=_memory_saver,  # Enable conversation memory
     )
     
     return agent

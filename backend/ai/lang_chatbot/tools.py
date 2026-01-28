@@ -1028,6 +1028,107 @@ def get_survey_summary() -> str:
     return "\n".join(lines)
 
 
+@tool
+def get_surveys_by_period(period: str = "month") -> str:
+    """
+    Get count of surveys conducted in a specific time period.
+    Use this when user asks about surveys this year, this month, today, or on a specific date.
+    
+    Args:
+        period: Time period - "today", "week", "month", "year", or a specific date like "2026-01-20"
+    
+    Returns:
+        Number of surveys conducted in the specified period with details
+    """
+    from datetime import datetime, timedelta
+    
+    db = get_db()
+    
+    # Parse the period
+    period_lower = period.lower().strip()
+    today = datetime.now()
+    
+    # Determine date range
+    if period_lower in ["today", "now"]:
+        start_date = today.strftime("%Y-%m-%d")
+        end_date = start_date
+        period_label = "Today"
+    elif period_lower in ["week", "this week"]:
+        start = today - timedelta(days=today.weekday())
+        start_date = start.strftime("%Y-%m-%d")
+        end_date = today.strftime("%Y-%m-%d")
+        period_label = "This Week"
+    elif period_lower in ["month", "this month"]:
+        start_date = today.strftime("%Y-%m-01")
+        end_date = today.strftime("%Y-%m-%d")
+        period_label = f"This Month ({today.strftime('%B %Y')})"
+    elif period_lower in ["year", "this year"]:
+        start_date = today.strftime("%Y-01-01")
+        end_date = today.strftime("%Y-%m-%d")
+        period_label = f"This Year ({today.year})"
+    elif period_lower in ["last month"]:
+        first_of_month = today.replace(day=1)
+        last_month_end = first_of_month - timedelta(days=1)
+        start_date = last_month_end.strftime("%Y-%m-01")
+        end_date = last_month_end.strftime("%Y-%m-%d")
+        period_label = f"Last Month ({last_month_end.strftime('%B %Y')})"
+    elif period_lower in ["yesterday"]:
+        yesterday = today - timedelta(days=1)
+        start_date = yesterday.strftime("%Y-%m-%d")
+        end_date = start_date
+        period_label = f"Yesterday ({start_date})"
+    else:
+        # Try to parse as a specific date
+        try:
+            for fmt in ["%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%Y/%m/%d"]:
+                try:
+                    parsed = datetime.strptime(period, fmt)
+                    start_date = parsed.strftime("%Y-%m-%d")
+                    end_date = start_date
+                    period_label = f"On {start_date}"
+                    break
+                except ValueError:
+                    continue
+            else:
+                return f"Could not parse date: {period}. Try 'today', 'week', 'month', 'year', or 'YYYY-MM-DD'."
+        except Exception:
+            return f"Invalid period: {period}. Use 'today', 'week', 'month', 'year', or a specific date."
+    
+    # Query surveys in date range
+    query = {"survey_date": {"$gte": start_date, "$lte": end_date}}
+    
+    surveys = list(db.surveys.find(query).sort("survey_date", -1))
+    count = len(surveys)
+    
+    if count == 0:
+        return f"No surveys conducted {period_label.lower()}."
+    
+    lines = [f"Surveys {period_label}\n"]
+    lines.append(f"Total: {count} survey(s)\n")
+    
+    # Group by surveyor
+    surveyors = {}
+    for s in surveys:
+        surveyor = s.get("surveyor_name", "Unknown")
+        surveyors[surveyor] = surveyors.get(surveyor, 0) + 1
+    
+    if surveyors:
+        lines.append("By Surveyor:")
+        for surveyor, c in sorted(surveyors.items(), key=lambda x: -x[1]):
+            lines.append(f"- {surveyor}: {c}")
+    
+    # List survey details (up to 10)
+    if count <= 10:
+        lines.append("\nSurvey Details:")
+        for s in surveys:
+            route = s.get("route_id", "?")
+            date = s.get("survey_date", "Unknown")
+            surveyor = s.get("surveyor_name", "Unknown")
+            lines.append(f"- Route {route} on {date} by {surveyor}")
+    
+    return "\n".join(lines)
+
+
 # =============================================================================
 # ROAD TOOLS
 # =============================================================================
@@ -1254,6 +1355,7 @@ ALL_TOOLS = [
     get_survey_dates,
     get_surveyor_stats,
     get_survey_summary,
+    get_surveys_by_period,
     # Road tools
     get_road_info,
     search_road_by_name,

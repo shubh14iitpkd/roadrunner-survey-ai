@@ -17,33 +17,37 @@ class LangChatbot:
     """
     Langchain-based chatbot for road survey queries.
     Supports both demo videos and regular MongoDB-backed videos.
+    Uses LangGraph memory for conversation persistence.
     """
     
-    def __init__(self, video_id: Optional[str] = None, route_id: Optional[int] = None):
+    def __init__(self, video_id: Optional[str] = None, route_id: Optional[int] = None, chat_id: Optional[str] = None):
         """
         Initialize chatbot with optional context.
         
         Args:
             video_id: Video identifier for queries
             route_id: Route number for survey queries
+            chat_id: Chat identifier for conversation memory (thread_id)
         """
         self.video_id = video_id
         self.route_id = route_id
+        self.chat_id = chat_id or "default_thread"
         self.agent = agent_factory(video_id=video_id)
-        self.conversation_history = []
     
-    def ask(self, question: str, video_id: str = None) -> str:
+    def ask(self, question: str, video_id: str = None, chat_id: str = None) -> str:
         """
-        Ask queston to the chatbot.
+        Ask question to the chatbot with conversation memory.
         
         Args:
             question: User's question
             video_id: Optional video ID override
+            chat_id: Optional chat ID for memory thread
         
         Returns:
             Agent's response
         """
         vid = video_id or self.video_id
+        thread_id = chat_id or self.chat_id
         
         # Inject video context if provided
         if vid:
@@ -53,9 +57,13 @@ class LangChatbot:
             full_question = question
         
         try:
-            response = self.agent.invoke({
-                "messages": [("user", full_question)]
-            })
+            # Configure thread for memory persistence
+            config = {"configurable": {"thread_id": thread_id}}
+            
+            response = self.agent.invoke(
+                {"messages": [("user", full_question)]},
+                config=config  # Pass thread config for memory
+            )
             
             # Extract final answer
             if "messages" in response and response["messages"]:
@@ -66,6 +74,8 @@ class LangChatbot:
             
         except Exception as e:
             print(f"[LangChatbot] Error: {e}")
+            import traceback
+            traceback.print_exc()
             return f"Error processing request: {str(e)}"
     
     def set_video(self, video_id: str):
