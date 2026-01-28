@@ -604,6 +604,16 @@ class DemoChatbot:
                 intent["asset_type"], video_key, display_name
             )
 
+        # New handlers for category, asset list, and road condition queries
+        if intent.get("wants_category_breakdown"):
+            return self._handle_category_breakdown(video_key, display_name)
+
+        if intent.get("wants_asset_list"):
+            return self._handle_asset_list(video_key, display_name)
+
+        if intent.get("wants_road_condition"):
+            return self._handle_road_condition(video_key, display_name)
+
         # Default asset query handling
         # Check if user wants a LIST of items by condition
         condition_keywords = ["poor", "damaged", "bad", "critical", "broken", "missing"]
@@ -746,6 +756,123 @@ class DemoChatbot:
 
         return "\n".join(lines)
 
+    def _handle_category_breakdown(self, video_key: str, display_name: str) -> str:
+        """Handle 'what are the asset categories' type queries"""
+        if video_key:
+            summary = self.data.get_summary_for_video(video_key)
+        else:
+            summary = self.data.summary
+
+        by_category = summary.get("by_category", {})
+        total_assets = summary.get("total_assets", 0)
+
+        if not by_category:
+            return f"No asset categories found in {display_name}."
+
+        lines = [f"**Asset Categories** - {display_name}\n"]
+        lines.append(f"Total assets: **{total_assets:,}**\n")
+        lines.append("**Categories:**\n")
+
+        for cat, count in sorted(by_category.items(), key=lambda x: -x[1]):
+            percentage = round(count / total_assets * 100, 1) if total_assets else 0
+            lines.append(f"- **{cat}**: {count:,} ({percentage}%)\n")
+
+        return "\n".join(lines)
+
+    def _handle_asset_list(self, video_key: str, display_name: str) -> str:
+        """Handle 'list assets' or 'asset report' type queries"""
+        if video_key:
+            summary = self.data.get_summary_for_video(video_key)
+        else:
+            summary = self.data.summary
+
+        by_type = summary.get("by_type", {})
+        by_condition = summary.get("by_condition", {})
+        total_assets = summary.get("total_assets", 0)
+
+        if not by_type:
+            return f"No assets found in {display_name}."
+
+        lines = [f"**Asset Report** - {display_name}\n"]
+        lines.append(f"Total detected: **{total_assets:,}** assets\n")
+
+        # Show condition summary
+        good_count = by_condition.get("good", 0) + by_condition.get("Good", 0)
+        bad_count = sum(v for k, v in by_condition.items() if k.lower() in ["bad", "damaged", "poor", "missing", "broken"])
+
+        lines.append(f"**Condition Summary:**\n")
+        lines.append(f"- Good: {good_count:,}\n")
+        lines.append(f"- Needs attention: {bad_count:,}\n")
+
+        # Show top asset types (limit to 15 for readability)
+        lines.append("**Asset Types (by count):**\n")
+        sorted_types = sorted(by_type.items(), key=lambda x: -x[1])[:15]
+
+        for asset_type, count in sorted_types:
+            # Humanize the asset name
+            display_type = asset_type.replace("_", " ").title()
+            lines.append(f"- {display_type}: {count:,}\n")
+
+        if len(by_type) > 15:
+            lines.append(f"\n*...and {len(by_type) - 15} more asset types*")
+
+        return "\n".join(lines)
+
+    def _handle_road_condition(self, video_key: str, display_name: str) -> str:
+        """Handle 'condition of road' or 'road condition' type queries"""
+        if video_key:
+            summary = self.data.get_summary_for_video(video_key)
+        else:
+            summary = self.data.summary
+
+        by_condition = summary.get("by_condition", {})
+        by_category = summary.get("by_category", {})
+        total_assets = summary.get("total_assets", 0)
+
+        if not total_assets:
+            return f"No asset data available for {display_name}."
+
+        # Calculate good vs damaged counts
+        good_count = sum(v for k, v in by_condition.items() if k.lower() in ["good", "fine", "visible"])
+        damaged_count = sum(v for k, v in by_condition.items() if k.lower() in ["bad", "damaged", "poor", "missing", "broken", "bent"])
+        other_count = total_assets - good_count - damaged_count
+
+        good_percentage = round(good_count / total_assets * 100, 1) if total_assets else 0
+        damaged_percentage = round(damaged_count / total_assets * 100, 1) if total_assets else 0
+
+        # Determine overall condition assessment
+        if good_percentage >= 80:
+            assessment = "**Good** - Road infrastructure is well-maintained"
+            recommendation = "Continue regular maintenance schedule"
+        elif good_percentage >= 60:
+            assessment = "**Fair** - Some areas require attention"
+            recommendation = "Schedule targeted repairs for damaged assets"
+        else:
+            assessment = "**Poor** - Significant maintenance required"
+            recommendation = "Prioritize repair work on critical assets"
+
+        lines = [f"**Road Condition Assessment** - {display_name}\n"]
+        lines.append(f"Based on **{total_assets:,}** detected assets:\n")
+
+        lines.append("**Asset Condition:**\n")
+        lines.append(f"- Good condition: {good_count:,} ({good_percentage}%)\n")
+        lines.append(f"- Needs repair: {damaged_count:,} ({damaged_percentage}%)\n")
+        if other_count > 0:
+            lines.append(f"- Other/Unknown: {other_count:,}\n")
+
+        lines.append(f"\n**Overall Assessment:** {assessment}\n")
+        lines.append(f"**Recommendation:** {recommendation}\n")
+
+        # Show category-wise breakdown if there are issues
+        if damaged_count > 0:
+            defects = self.data.get_defects_by_category(video_key)
+            if defects:
+                lines.append("\n**Issues by Category:**\n")
+                for cat, count in sorted(defects.items(), key=lambda x: -x[1])[:5]:
+                    lines.append(f"- {cat}: {count:,} issues\n")
+
+        return "\n".join(lines)
+
     def _analyze_intent(self, question: str) -> Dict:
         """Analyze question to determine what data to fetch"""
         q_lower = question.lower()
@@ -757,6 +884,9 @@ class DemoChatbot:
             "wants_defect_analysis": False,
             "wants_condition_breakdown": False,
             "wants_improvements": False,
+            "wants_category_breakdown": False,
+            "wants_asset_list": False,
+            "wants_road_condition": False,
             "asset_type": None,
             "category": None,
             "condition": None,
@@ -811,9 +941,58 @@ class DemoChatbot:
         # Summary queries
         if any(
             word in q_lower
-            for word in ["summary", "summarize", "overview", "breakdown"]
+            for word in ["summary", "summarize", "overview"]
         ):
             intent["wants_summary"] = True
+
+        # Category breakdown: "what are the categories", "asset categories"
+        if any(
+            phrase in q_lower
+            for phrase in [
+                "asset categor",
+                "what categor",
+                "which categor",
+                "list categor",
+                "show categor",
+                "category breakdown",
+                "breakdown by category",
+                "types of asset",
+                "asset types",
+            ]
+        ):
+            intent["wants_category_breakdown"] = True
+
+        # Asset list/report: "list assets", "asset report", "detected assets"
+        if any(
+            phrase in q_lower
+            for phrase in [
+                "list asset",
+                "list all asset",
+                "asset report",
+                "report of asset",
+                "show all asset",
+                "detected asset",
+                "all detected",
+            ]
+        ):
+            intent["wants_asset_list"] = True
+
+        # Road condition: "condition of road", "road condition"
+        if any(
+            phrase in q_lower
+            for phrase in [
+                "condition of road",
+                "condition of the road",
+                "road condition",
+                "road health",
+                "road state",
+                "state of road",
+                "state of the road",
+                "how is the road",
+                "road quality",
+            ]
+        ):
+            intent["wants_road_condition"] = True
 
         # Condition detection
         if "good" in q_lower:
@@ -976,17 +1155,17 @@ Answer:"""
 
         if intent.get("wants_summary"):
             lines = [f"**Asset Summary** - {video_name}"]
-            lines.append(f"Total assets: {context['total_assets']:,}")
+            lines.append(f"Total assets: {context['total_assets']:,}\n")
 
-            lines.append("\n**By Category:**")
+            lines.append("\n**By Category:**\n")
             for cat, count in sorted(
                 context["by_category"].items(), key=lambda x: -x[1]
             ):
-                lines.append(f"• {cat}: {count:,}")
+                lines.append(f"- {cat}: {count:,}\n")
 
-            lines.append("\n**By Condition:**")
+            lines.append("\n**By Condition:**\n")
             for cond, count in context["by_condition"].items():
-                lines.append(f"• {cond.title()}: {count:,}")
+                lines.append(f"- {cond.title()}: {count:,}\n")
 
             return "\n".join(lines)
 
@@ -1003,9 +1182,16 @@ Answer:"""
             result = f"Total assets detected: **{context['total_assets']:,}**"
             return result
 
-        # Default response
-        result = f"Video {video_name} contains **{context['total_assets']:,}** detected assets across {len(context['by_category'])} categories."
-        return result
+        # Default response - show category breakdown for better context
+        lines = [f"**Asset Overview** - {video_name}"]
+        lines.append(f"\nTotal detected: **{context['total_assets']:,}** assets\n")
+
+        if context.get("by_category"):
+            lines.append("**By Category:**\n")
+            for cat, count in sorted(context["by_category"].items(), key=lambda x: -x[1]):
+                lines.append(f"- {cat}: {count:,}\n")
+
+        return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------
