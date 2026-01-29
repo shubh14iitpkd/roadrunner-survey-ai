@@ -180,6 +180,7 @@ def add_message(chat_id: str):
     )
 
     # Return both messages so frontend can display conversation
+    print({"user_message": user_msg, "assistant_message": ai_msg})
     return jsonify({"user_message": user_msg, "assistant_message": ai_msg}), 201
 
 

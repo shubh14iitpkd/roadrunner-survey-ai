@@ -68,6 +68,9 @@ class LangChatbot:
             # Extract final answer
             if "messages" in response and response["messages"]:
                 answer = response["messages"][-1].content
+                
+                # Validate and sanitize response - ensure it's a valid string
+                answer = self._validate_response(answer)
                 return answer
             
             return "I couldn't process your question. Please try again."
@@ -76,7 +79,73 @@ class LangChatbot:
             print(f"[LangChatbot] Error: {e}")
             import traceback
             traceback.print_exc()
-            return f"Error processing request: {str(e)}"
+            return "I apologize, but I encountered an issue processing your request. Please try rephrasing your question."
+    
+    def _validate_response(self, answer) -> str:
+        """
+        Validate and sanitize the agent response to ensure it's valid markdown.
+        Returns a polite error message if response is invalid.
+        """
+        # Handle None
+        if answer is None:
+            return "I wasn't able to generate a response. Please try again."
+        
+        # Handle list responses - common in LangChain multimodal messages
+        # Format: [{'type': 'text', 'text': 'actual response'}, ...]
+        if isinstance(answer, list):
+            print(f"[LangChatbot] DEBUG: Response was a list with {len(answer)} items")
+            text_parts = []
+            for item in answer:
+                if isinstance(item, dict):
+                    # LangChain content part format
+                    if item.get("type") == "text" and "text" in item:
+                        text_parts.append(item["text"])
+                    elif "content" in item:
+                        text_parts.append(str(item["content"]))
+                    elif "text" in item:
+                        text_parts.append(str(item["text"]))
+                elif isinstance(item, str):
+                    text_parts.append(item)
+                else:
+                    text_parts.append(str(item))
+            
+            if text_parts:
+                answer = "\n".join(text_parts)
+            else:
+                return "I received an unexpected response format. Please try rephrasing your question."
+        
+        # Handle dict/object responses - convert to string or extract content
+        if isinstance(answer, dict):
+            print(f"[LangChatbot] DEBUG: Response was a dict")
+            # Check for LangChain content part format
+            if answer.get("type") == "text" and "text" in answer:
+                answer = answer["text"]
+            elif "content" in answer:
+                answer = str(answer["content"])
+            elif "text" in answer:
+                answer = str(answer["text"])
+            elif "output" in answer:
+                answer = str(answer["output"])
+            else:
+                # Last resort - stringify
+                try:
+                    import json
+                    answer = json.dumps(answer, indent=2)
+                except Exception:
+                    return "I received an unexpected response format. Please try rephrasing your question."
+        
+        # Ensure it's a string
+        if not isinstance(answer, str):
+            try:
+                answer = str(answer)
+            except Exception:
+                return "I received an unexpected response format. Please try rephrasing your question."
+        
+        # Check for empty response
+        if not answer.strip():
+            return "I wasn't able to generate a meaningful response. Please try again."
+        
+        return answer
     
     def set_video(self, video_id: str):
         """Set active video for queries"""

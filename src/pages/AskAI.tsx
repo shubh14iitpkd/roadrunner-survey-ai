@@ -67,6 +67,7 @@ async function sendMessageToBackend(
 ): Promise<string> {
   const response = await api.ai.sendMessage(chatId, "user", question, videoId);
   // Backend returns { user_message: {...}, assistant_message: {...} }
+  console.log(response);
   return response.assistant_message?.content || response.content || "(No response)";
 }
 
