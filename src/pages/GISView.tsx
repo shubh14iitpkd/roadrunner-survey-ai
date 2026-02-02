@@ -12,8 +12,9 @@ import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api";
 import {
   MapPin, ChevronDown, ChevronRight, Send,
-  Calendar, User, Percent, AlertCircle, X, Filter, Check, ChevronsUpDown
+  Calendar, User, Percent, AlertCircle, X, Filter, Check, ChevronsUpDown, Loader2
 } from "lucide-react";
+import { cn } from "@/lib/utils";
 import {
   Dialog,
   DialogContent,
@@ -441,14 +442,20 @@ export default function GISView() {
                     variant="outline"
                     role="combobox"
                     aria-expanded={roadSelectorOpen}
+                    disabled={loading}
                     className="w-full justify-between h-auto min-h-10 py-2"
                   >
-                    <span className="truncate text-left flex-1">
-                      {selectedRoads.length === 0
-                        ? "Select roads..."
-                        : selectedRoads.length === 1
-                          ? selectedRoads[0]
-                          : `${selectedRoads.length} roads selected`}
+                    <span className="truncate text-left flex-1 flex items-center gap-2">
+                      {loading && <Loader2 className="h-4 w-4 animate-spin text-primary" />}
+                      {loading ? (
+                        "Loading roads..."
+                      ) : selectedRoads.length === 0 ? (
+                        "Select roads..."
+                      ) : selectedRoads.length === 1 ? (
+                        selectedRoads[0]
+                      ) : (
+                        `${selectedRoads.length} roads selected`
+                      )}
                     </span>
                     <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                   </Button>
@@ -943,6 +950,3 @@ export default function GISView() {
   );
 }
 
-function cn(...classes: (string | boolean | undefined)[]) {
-  return classes.filter(Boolean).join(" ");
-}

@@ -121,6 +121,7 @@ export default function LeafletMapView({ selectedRoadNames = [], roads = [], sel
   const markersRef = useRef<L.Marker[]>([]);
   const [tracks, setTracks] = useState<GpxTrack[]>([]);
   const [videoFramesMap, setVideoFramesMap] = useState<Map<string, VideoFramesData>>(new Map());
+  const [fetchingFrames, setFetchingFrames] = useState(false);
   const frameDataCacheRef = useRef<Map<string, any>>(new Map());
   const canvasRendererRef = useRef<L.Canvas | null>(null);
   const popupRootRef = useRef<Root | null>(null);
@@ -252,30 +253,35 @@ export default function LeafletMapView({ selectedRoadNames = [], roads = [], sel
     if (tracks.length === 0) return;
 
     (async () => {
-      const framesMap = new Map<string, VideoFramesData>();
+      try {
+        setFetchingFrames(true);
+        const framesMap = new Map<string, VideoFramesData>();
 
-      // Parallel fetch all frames data using Promise.all
-      const fetchPromises = tracks.map(async (track) => {
-        try {
-          const framesResp = await api.videos.getAllFrames(track.videoId);
-          return { videoId: track.videoId, framesResp };
-        } catch (err) {
-          console.error(`Failed to fetch frames for video ${track.videoId}:`, err);
-          return { videoId: track.videoId, framesResp: null };
-        }
-      });
+        // Parallel fetch all frames data using Promise.all
+        const fetchPromises = tracks.map(async (track) => {
+          try {
+            const framesResp = await api.videos.getAllFrames(track.videoId);
+            return { videoId: track.videoId, framesResp };
+          } catch (err) {
+            console.error(`Failed to fetch frames for video ${track.videoId}:`, err);
+            return { videoId: track.videoId, framesResp: null };
+          }
+        });
 
-      const results = await Promise.all(fetchPromises);
+        const results = await Promise.all(fetchPromises);
 
-      results.forEach(({ videoId, framesResp }) => {
-        if (framesResp) {
-          framesMap.set(videoId, framesResp as VideoFramesData);
-          // console.log(`Loaded ${framesResp.total} frames for video ${videoId} (demo: ${framesResp.is_demo})`);
-        }
-      });
+        results.forEach(({ videoId, framesResp }) => {
+          if (framesResp) {
+            framesMap.set(videoId, framesResp as VideoFramesData);
+            // console.log(`Loaded ${framesResp.total} frames for video ${videoId} (demo: ${framesResp.is_demo})`);
+          }
+        });
 
-      setVideoFramesMap(framesMap);
-      // console.log(`Loaded frames for ${framesMap.size} videos`);
+        setVideoFramesMap(framesMap);
+        // console.log(`Loaded frames for ${framesMap.size} videos`);
+      } finally {
+        setFetchingFrames(false);
+      }
     })();
   }, [tracks]);
 
@@ -523,12 +529,28 @@ export default function LeafletMapView({ selectedRoadNames = [], roads = [], sel
   return (
     <div
       ref={containerRef}
+      className="relative"
       style={{
         width: "100%",
         height: "100%",
         borderRadius: 12,
         overflow: "hidden"
       }}
-    />
+    >
+      {fetchingFrames && (
+        <div className="absolute inset-0 z-[1000] bg-background/60 backdrop-blur-[2px] flex flex-col items-center justify-center">
+          <div className="bg-background/90 p-6 rounded-xl shadow-elevated border flex flex-col items-center gap-4 max-w-[280px] text-center">
+            <div className="relative w-12 h-12">
+              <div className="absolute top-0 left-0 w-full h-full border-4 border-primary/20 rounded-full"></div>
+              <div className="absolute top-0 left-0 w-full h-full border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
+            </div>
+            <div>
+              <div className="font-semibold text-primary">Loading Map Data</div>
+              <p className="text-xs text-muted-foreground mt-1">Preparing routes and asset markers for visualization</p>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
