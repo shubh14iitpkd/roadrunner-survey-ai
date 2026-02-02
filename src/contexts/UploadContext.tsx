@@ -45,6 +45,7 @@ interface UploadContextType {
     uploadGpxForVideo: (file: File, videoId: string) => Promise<void>;
     processWithAI: (videoId: string) => Promise<void>;
     resetVideoStatus: (videoId: string) => void;
+    loading: boolean;
 }
 
 
@@ -105,6 +106,7 @@ const extractThumbnail = (videoFile: File): Promise<Blob> => {
 export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     const [videos, setVideos] = useState<VideoFile[]>([]);
     const [isUploading, setIsUploading] = useState(false);
+    const [loading, setLoading] = useState(true);
 
     // Ref to keep track of active uploads to prevent duplicates if effect re-runs
     const activeUploads = useRef<Set<string>>(new Set());
@@ -165,6 +167,8 @@ export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                 setVideos(mappedVideos);
             } catch (err: any) {
                 console.error("Failed to load videos:", err);
+            } finally {
+                setLoading(false);
             }
         })();
         return () => { cancelled = true; };
@@ -669,7 +673,7 @@ export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     };
 
     return (
-        <UploadContext.Provider value={{ videos, isUploading, uploadFiles, uploadFromLibrary, retryUpload, removeVideo, uploadGpxForVideo, processWithAI, resetVideoStatus }}>
+        <UploadContext.Provider value={{ videos, isUploading, uploadFiles, uploadFromLibrary, retryUpload, removeVideo, uploadGpxForVideo, processWithAI, resetVideoStatus, loading }}>
             {children}
         </UploadContext.Provider>
     );

@@ -39,7 +39,7 @@ import { LibraryVideoItem } from "@/contexts/UploadContext";
 
 export default function SurveyUpload() {
   const navigate = useNavigate();
-  const { videos, isUploading, uploadFiles, uploadFromLibrary, uploadGpxForVideo, processWithAI, resetVideoStatus } = useUpload();
+  const { videos, isUploading, uploadFiles, uploadFromLibrary, uploadGpxForVideo, processWithAI, resetVideoStatus, loading } = useUpload();
   const [roads, setRoads] = useState<any[]>([]);
   const [selectedRoute, setSelectedRoute] = useState<string>("");
   // videos state removed (using context)
@@ -614,7 +614,16 @@ export default function SurveyUpload() {
               )}
             </div>
 
-            {videos.length === 0 ? (
+            {loading ? (
+              <div className="flex flex-col items-center justify-center py-20 animate-fade-in">
+                <div className="relative w-16 h-16 mb-6">
+                  <div className="absolute inset-0 border-4 border-primary/20 rounded-full" />
+                  <div className="absolute inset-0 border-4 border-primary border-t-transparent rounded-full animate-spin" />
+                </div>
+                <h3 className="text-xl font-semibold mb-2">Loading Surveys...</h3>
+                <p className="text-sm text-muted-foreground">Fetching latest survey data and AI processing status</p>
+              </div>
+            ) : videos.length === 0 ? (
               <div className="text-center py-16">
                 <div className="inline-flex p-6 rounded-full bg-primary/10 mb-4">
                   <Database className="h-16 w-16 text-primary" />
