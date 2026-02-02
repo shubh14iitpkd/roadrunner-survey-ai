@@ -3,7 +3,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Play, Download, Search, ArrowLeft, Video as VideoIcon, Columns2, X, MapPin } from "lucide-react";
+import { Play, Download, Search, ArrowLeft, Video as VideoIcon, Columns2, X, MapPin, Loader2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { roadRegister } from "@/data/roadRegister";
 import { Link } from "react-router-dom";
@@ -31,6 +31,7 @@ interface VideoData {
 
 export default function VideoLibrary() {
   const [videos, setVideos] = useState<VideoData[]>([]);
+  const [loading, setLoading] = useState(true);
   const [showPlayer, setShowPlayer] = useState(false);
   const [playerSrc, setPlayerSrc] = useState<string>("");
   const [playerAnnotatedSrc, setPlayerAnnotatedSrc] = useState<string>("");
@@ -125,8 +126,8 @@ export default function VideoLibrary() {
             }));
           }
         } catch { }
-      } catch (e) {
-        // silently ignore for now
+      } finally {
+        if (!cancelled) setLoading(false);
       }
     })();
     return () => { cancelled = true; };
@@ -280,139 +281,150 @@ export default function VideoLibrary() {
           </Card>
         )}
 
-        {/* Video Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filteredVideos.map((video) => (
-            <Card
-              key={video.id}
-              className={cn(
-                "overflow-hidden shadow-elevated border-0 gradient-card hover:shadow-glow transition-all duration-300 animate-fade-in",
-                compareMode && selectedForCompare.includes(video.id) && "ring-4 ring-primary shadow-glow"
-              )}
-            >
-              <div
-                className="aspect-video bg-gradient-to-br from-muted to-muted/50 flex items-center justify-center relative group cursor-pointer overflow-hidden"
-                onClick={() => {
-                  if (video.storageUrl) {
-                    setPlayerSrc(video.storageUrl);
-                    setPlayerAnnotatedSrc(video.annotatedVideoUrl || "");
-                    setPlayerCategoryVideos(video.categoryVideos || {});
-                    if (video.categoryVideos) {
-                      const firstCat = Object.keys(video.categoryVideos).sort()[0];
-                      if (firstCat) {
-                        setActiveCategory(firstCat);
-                        setPlayerAnnotatedSrc(video.categoryVideos[firstCat]);
-                      }
-                    }
-                    setShowPlayer(true);
-                  }
-                }}
+        {/* Video Grid or Loader */}
+        {loading ? (
+          <div className="flex flex-col items-center justify-center py-20 animate-fade-in content-card gradient-card rounded-2xl shadow-elevated border-0">
+            <div className="relative w-16 h-16 mb-6">
+              <div className="absolute inset-0 border-4 border-primary/20 rounded-full" />
+              <div className="absolute inset-0 border-4 border-primary border-t-transparent rounded-full animate-spin" />
+            </div>
+            <h3 className="text-xl font-semibold mb-2">Fetching Video Library...</h3>
+            <p className="text-sm text-muted-foreground">Preparing your survey videos and AI processing results</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {filteredVideos.map((video) => (
+              <Card
+                key={video.id}
+                className={cn(
+                  "overflow-hidden shadow-elevated border-0 gradient-card hover:shadow-glow transition-all duration-300 animate-fade-in",
+                  compareMode && selectedForCompare.includes(video.id) && "ring-4 ring-primary shadow-glow"
+                )}
               >
-                {video.thumbnailUrl ? (
-                  <>
-                    <img
-                      src={video.thumbnailUrl}
-                      alt={`Thumbnail for ${video.title}`}
-                      className="w-full h-full object-cover"
-                      onError={(e) => {
-                        e.currentTarget.style.display = 'none';
-                        e.currentTarget.nextElementSibling?.classList.remove('hidden');
-                      }}
-                    />
-                    <div className="hidden">
-                      <VideoIcon className="h-16 w-16 text-muted-foreground/30" />
-                    </div>
-                  </>
-                ) : (
-                  <VideoIcon className="h-16 w-16 text-muted-foreground/30" />
-                )}
-                <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                  <Play className="h-12 w-12 text-white" />
-                </div>
-                {compareMode && selectedForCompare.includes(video.id) && (
-                  <Badge className="absolute top-2 right-2">Selected</Badge>
-                )}
-              </div>
-
-              <div className="p-4 space-y-3">
-                <div>
-                  <h3 className="font-semibold mb-1">{video.title}</h3>
-                  <div className="flex flex-wrap gap-2 mb-2">
-                    <Badge variant="outline" className="text-xs">
-                      Route #{video.routeId}
-                    </Badge>
-                    <Badge variant="secondary" className="text-xs">
-                      {video.status}
-                    </Badge>
-                  </div>
-                  <p className="text-sm text-muted-foreground mb-1">{video.roadName}</p>
-                  <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                    <span>{video.surveyDate}</span>
-                    <span>•</span>
-                    <span>{video.surveyorName}</span>
-                    <span>•</span>
-                    <span>{video.size}</span>
-                  </div>
-                </div>
-
-                <div className="flex gap-2">
-                  {!compareMode && (
+                <div
+                  className="aspect-video bg-gradient-to-br from-muted to-muted/50 flex items-center justify-center relative group cursor-pointer overflow-hidden"
+                  onClick={() => {
+                    if (video.storageUrl) {
+                      setPlayerSrc(video.storageUrl);
+                      setPlayerAnnotatedSrc(video.annotatedVideoUrl || "");
+                      setPlayerCategoryVideos(video.categoryVideos || {});
+                      if (video.categoryVideos) {
+                        const firstCat = Object.keys(video.categoryVideos).sort()[0];
+                        if (firstCat) {
+                          setActiveCategory(firstCat);
+                          setPlayerAnnotatedSrc(video.categoryVideos[firstCat]);
+                        }
+                      }
+                      setShowPlayer(true);
+                    }
+                  }}
+                >
+                  {video.thumbnailUrl ? (
                     <>
+                      <img
+                        src={video.thumbnailUrl}
+                        alt={`Thumbnail for ${video.title}`}
+                        className="w-full h-full object-cover"
+                        onError={(e) => {
+                          e.currentTarget.style.display = 'none';
+                          e.currentTarget.nextElementSibling?.classList.remove('hidden');
+                        }}
+                      />
+                      <div className="hidden">
+                        <VideoIcon className="h-16 w-16 text-muted-foreground/30" />
+                      </div>
+                    </>
+                  ) : (
+                    <VideoIcon className="h-16 w-16 text-muted-foreground/30" />
+                  )}
+                  <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                    <Play className="h-12 w-12 text-white" />
+                  </div>
+                  {compareMode && selectedForCompare.includes(video.id) && (
+                    <Badge className="absolute top-2 right-2">Selected</Badge>
+                  )}
+                </div>
+
+                <div className="p-4 space-y-3">
+                  <div>
+                    <h3 className="font-semibold mb-1">{video.title}</h3>
+                    <div className="flex flex-wrap gap-2 mb-2">
+                      <Badge variant="outline" className="text-xs">
+                        Route #{video.routeId}
+                      </Badge>
+                      <Badge variant="secondary" className="text-xs">
+                        {video.status}
+                      </Badge>
+                    </div>
+                    <p className="text-sm text-muted-foreground mb-1">{video.roadName}</p>
+                    <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                      <span>{video.surveyDate}</span>
+                      <span>•</span>
+                      <span>{video.surveyorName}</span>
+                      <span>•</span>
+                      <span>{video.size}</span>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-2">
+                    {!compareMode && (
+                      <>
+                        <Button
+                          size="sm"
+                          className="flex-1"
+                          onClick={() => {
+                            if (video.storageUrl) {
+                              setPlayerSrc(video.storageUrl);
+                              setPlayerAnnotatedSrc(video.annotatedVideoUrl || "");
+                              setPlayerCategoryVideos(video.categoryVideos || {});
+                              if (video.categoryVideos) {
+                                const firstCat = Object.keys(video.categoryVideos).sort()[0];
+                                if (firstCat) {
+                                  setActiveCategory(firstCat);
+                                  setPlayerAnnotatedSrc(video.categoryVideos[firstCat]);
+                                }
+                              }
+                              setShowPlayer(true);
+                            }
+                          }}
+                          disabled={!video.storageUrl}
+                        >
+                          <Play className="h-3 w-3 mr-1" />
+                          {video.storageUrl ? "Watch" : "No Video"}
+                        </Button>
+                        <Button size="sm" variant="outline" asChild disabled={!video.storageUrl}>
+                          <a href={video.storageUrl} download>
+                            <Download className="h-3 w-3" />
+                          </a>
+                        </Button>
+                        {video.gpxFileUrl && (
+                          <Button size="sm" variant="outline" asChild>
+                            <a href={`/gis?id=${video.routeId}`} title="View on GIS">
+                              <MapPin className="h-3 w-3" />
+                            </a>
+                          </Button>
+                        )}
+                      </>
+                    )}
+                    {compareMode && (
                       <Button
                         size="sm"
                         className="flex-1"
-                        onClick={() => {
-                          if (video.storageUrl) {
-                            setPlayerSrc(video.storageUrl);
-                            setPlayerAnnotatedSrc(video.annotatedVideoUrl || "");
-                            setPlayerCategoryVideos(video.categoryVideos || {});
-                            if (video.categoryVideos) {
-                              const firstCat = Object.keys(video.categoryVideos).sort()[0];
-                              if (firstCat) {
-                                setActiveCategory(firstCat);
-                                setPlayerAnnotatedSrc(video.categoryVideos[firstCat]);
-                              }
-                            }
-                            setShowPlayer(true);
-                          }
-                        }}
-                        disabled={!video.storageUrl}
+                        variant={selectedForCompare.includes(video.id) ? "default" : "outline"}
+                        onClick={() => toggleCompareSelection(video.id)}
+                        disabled={!selectedForCompare.includes(video.id) && selectedForCompare.length >= 2}
                       >
-                        <Play className="h-3 w-3 mr-1" />
-                        {video.storageUrl ? "Watch" : "No Video"}
+                        {selectedForCompare.includes(video.id) ? "Selected" : "Select"}
                       </Button>
-                      <Button size="sm" variant="outline" asChild disabled={!video.storageUrl}>
-                        <a href={video.storageUrl} download>
-                          <Download className="h-3 w-3" />
-                        </a>
-                      </Button>
-                      {video.gpxFileUrl && (
-                        <Button size="sm" variant="outline" asChild>
-                          <a href={`/gis?id=${video.routeId}`} title="View on GIS">
-                            <MapPin className="h-3 w-3" />
-                          </a>
-                        </Button>
-                      )}
-                    </>
-                  )}
-                  {compareMode && (
-                    <Button
-                      size="sm"
-                      className="flex-1"
-                      variant={selectedForCompare.includes(video.id) ? "default" : "outline"}
-                      onClick={() => toggleCompareSelection(video.id)}
-                      disabled={!selectedForCompare.includes(video.id) && selectedForCompare.length >= 2}
-                    >
-                      {selectedForCompare.includes(video.id) ? "Selected" : "Select"}
-                    </Button>
-                  )}
+                    )}
+                  </div>
                 </div>
-              </div>
-            </Card>
-          ))}
-        </div>
+              </Card>
+            ))}
+          </div>
+        )}
 
-        {filteredVideos.length === 0 && (
+        {!loading && filteredVideos.length === 0 && (
           <Card className="p-16 text-center shadow-elevated border-0 gradient-card">
             <div className="inline-flex p-6 rounded-full bg-primary/10 mb-4">
               <VideoIcon className="h-16 w-16 text-primary" />
