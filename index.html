@@ -25,6 +25,29 @@
   <meta name="twitter:title" content="RoadSight AI - By GBDG">
   <meta property="og:description" content="AI-powered road asset inventory and condition survey platform for GBDG Qatar.">
   <meta name="twitter:description" content="AI-powered road asset inventory and condition survey platform for GBDG Qatar.">
+  <script>
+    (function() {
+      try {
+        const theme = localStorage.getItem('theme');
+        const supportDarkMode = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        if (theme === 'dark' || (theme === 'system' && supportDarkMode) || (!theme && supportDarkMode)) {
+          document.documentElement.classList.add('dark');
+        }
+      } catch (e) {}
+    })();
+  </script>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      min-height: 100vh;
+      background: linear-gradient(to bottom right, #eff6ff, #e0e7ff);
+      transition: background 0.3s ease;
+    }
+    .dark body {
+      background: linear-gradient(to bottom right, #111827, #1f2937);
+    }
+  </style>
 </head>
 
   <body>
