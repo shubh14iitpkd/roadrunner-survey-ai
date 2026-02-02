@@ -284,7 +284,7 @@ export default function SurveyUpload() {
     <div className="space-y-6">
       {/* Hero Header */}
       <div className="relative overflow-hidden gradient-primary p-8 shadow-elevated">
-        <div className="absolute inset-0 bg-primary"></div>
+        <div className="absolute inset-0 page-header dark:bg-primary"></div>
         <div className="relative flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <div>
             <h1 className="text-4xl font-bold mb-2 text-white drop-shadow-lg">

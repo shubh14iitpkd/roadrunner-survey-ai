@@ -180,7 +180,7 @@ export default function VideoLibrary() {
     <div className="space-y-6">
       {/* Hero Header */}
       <div className="relative overflow-hidden gradient-primary p-8 shadow-elevated">
-        <div className="absolute inset-0 bg-primary"></div>
+        <div className="absolute inset-0 page-header dark:bg-primary"></div>
         <div className="relative flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <div>
             <div className="flex items-center gap-3 mb-2">

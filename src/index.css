@@ -218,6 +218,11 @@ All colors MUST be HSL.
   }
 }
 
+.page-header {
+  background-color: #0192d0;
+  opacity: 0.8;
+}
+
 @layer utilities {
   .animate-smooth {
     transition: all 0.3s cubic-bezier(0.2, 0.9, 0.3, 1);
@@ -298,3 +303,4 @@ All colors MUST be HSL.
 .ask-ai-markdown-container li {
   margin-bottom: 5px;
 }
+
