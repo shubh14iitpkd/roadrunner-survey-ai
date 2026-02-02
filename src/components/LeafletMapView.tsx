@@ -8,6 +8,7 @@ import markerIcon2x from 'leaflet/dist/images/marker-icon-2x.png';
 import markerIcon from 'leaflet/dist/images/marker-icon.png';
 import markerShadow from 'leaflet/dist/images/marker-shadow.png';
 import FramePopupContent from "@/components/FramePopupContent";
+import { Button } from "@/components/ui/button";
 import { createRoot, Root } from "react-dom/client";
 delete (L.Icon.Default.prototype as any)._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -101,6 +102,17 @@ async function fetchAndParseGpx(url: string): Promise<ParsedGpxData | null> {
     return null;
   }
 }
+
+const PopupLoader = () => (
+  <div className="flex flex-col items-center justify-center p-12 min-h-[300px] w-full">
+    <div className="relative w-16 h-16">
+      <div className="absolute top-0 left-0 w-full h-full border-4 border-primary/20 rounded-full"></div>
+      <div className="absolute top-0 left-0 w-full h-full border-4 border-primary border-t-transparent dark:text-muted-foreground rounded-full animate-spin"></div>
+    </div>
+    <div className="mt-4 text-primary dark:text-primary-foreground font-medium animate-pulse">Loading frame data...</div>
+    <div className="mt-1 text-xs text-muted-foreground">Fetching detections and coordinates</div>
+  </div>
+);
 
 export default function LeafletMapView({ selectedRoadNames = [], roads = [], selectedAssetTypes = [] }: LeafletMapViewProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -362,6 +374,25 @@ export default function LeafletMapView({ selectedRoadNames = [], roads = [], sel
         // Add popup on click with frame image
         circleMarker.on('click', async () => {
           const baseUrl = API_BASE;
+          const popupId = `popup-root-${Date.now()}`;
+
+          // 1. Open popup immediately with a loader
+          const popupContainer = L.popup({
+            maxWidth: 780,
+            minWidth: 750,
+            className: 'custom-popup',
+          })
+            .setLatLng(latLng)
+            .setContent(`<div id="${popupId}"></div>`)
+            .openOn(mapRef.current!);
+
+          // Render loader immediately
+          const popupElement = document.getElementById(popupId);
+          if (popupElement) {
+            const root = createRoot(popupElement);
+            popupRootRef.current = root;
+            root.render(<PopupLoader />);
+          }
 
           try {
             // Use the pre-associated frame number for the API call
@@ -371,13 +402,13 @@ export default function LeafletMapView({ selectedRoadNames = [], roads = [], sel
               // Check cache first to avoid redundant API calls
               const cacheKey = `${t.videoId}-${frameToShow.frame_number}`;
               let frameData = frameDataCacheRef.current.get(cacheKey);
-              // console.log(`Frame data for ${cacheKey}:`, frameData);
+
               if (!frameData) {
-                // Fetch frame data using frame_number (guaranteed to be valid)
+                // Fetch frame data
                 frameData = await api.videos.getFrameWithDetections(
                   t.videoId,
-                  undefined, // no timestamp
-                  frameToShow.frame_number // use frame_number directly
+                  undefined,
+                  frameToShow.frame_number
                 );
 
                 let flatDetections: any[] = Object.values(frameData.detections).flat();
@@ -386,25 +417,14 @@ export default function LeafletMapView({ selectedRoadNames = [], roads = [], sel
                 // Cache for future use
                 frameDataCacheRef.current.set(cacheKey, frameData);
                 console.log(`Cached frame data for ${cacheKey}`);
-                // console.log(`Frame data for ${cacheKey}:`, frameData);
               } else {
                 console.log(`Using cached frame data for ${cacheKey}`);
-              }
-
-              // Unmount previous root BEFORE opening new popup to avoid conflicts
-              if (popupRootRef.current) {
-                try {
-                  popupRootRef.current.unmount();
-                  popupRootRef.current = null;
-                } catch (e) {
-                  // Ignore unmount errors
-                }
               }
 
               // Get the GPX point data for this index
               const gpxPoint = t.points[index];
 
-              // Open custom React popup
+              // Update the popup state (if still needed elsewhere)
               setPopupState({
                 isOpen: true,
                 frameData: {
@@ -412,7 +432,6 @@ export default function LeafletMapView({ selectedRoadNames = [], roads = [], sel
                   videoId: t.videoId,
                   timestamp: frameToShow.timestamp.toFixed(1),
                   baseUrl,
-                  // GPX point data
                   gpxLatitude: gpxPoint?.lat,
                   gpxLongitude: gpxPoint?.lng,
                   gpxTimestamp: gpxPoint?.timestamp,
@@ -422,62 +441,53 @@ export default function LeafletMapView({ selectedRoadNames = [], roads = [], sel
                 totalPoints: t.path.length,
               });
 
-              // Generate unique ID to avoid DOM conflicts between popups
-              const popupId = `popup-root-${Date.now()}`;
-
-              // Create a custom Leaflet popup with a container
-              const popupContainer = L.popup({
-                maxWidth: 780,
-                minWidth: 750,
-                className: 'custom-popup',
-              })
-                .setLatLng(latLng)
-                .setContent(`<div id="${popupId}"></div>`)
-                .openOn(mapRef.current!);
-
-              const renderPopupContent = (retries = 20, delay = 30) => {
-                const popupElement = document.getElementById(popupId);
-                if (popupElement) {
-                  const root = createRoot(popupElement);
-                  popupRootRef.current = root;
-                  root.render(
-                    <FramePopupContent
-                      frameData={{
-                        ...frameData,
-                        videoId: t.videoId,
-                        timestamp: frameToShow.timestamp.toFixed(1),
-                        baseUrl,
-                        // GPX point data
-                        gpxLatitude: gpxPoint?.lat,
-                        gpxLongitude: gpxPoint?.lng,
-                        gpxTimestamp: gpxPoint?.timestamp,
-                      }}
-                      trackTitle={t.title}
-                      pointIndex={index}
-                      totalPoints={t.path.length}
-                      onClose={() => {
-                        if (mapRef.current) {
-                          mapRef.current.closePopup();
-                        }
-                        if (popupRootRef.current) {
-                          popupRootRef.current.unmount();
-                          popupRootRef.current = null;
-                        }
-                      }}
-                    />
-                  );
-                } else if (retries > 0) {
-                  console.log("Retrying popup render...", retries);
-                  setTimeout(() => renderPopupContent(retries - 1, delay), delay);
-                } else {
-                  console.warn(`Popup element #${popupId} not found after retries`);
-                }
-              };
-
-              renderPopupContent();
+              // Replace loader with actual content
+              if (popupRootRef.current) {
+                popupRootRef.current.render(
+                  <FramePopupContent
+                    frameData={{
+                      ...frameData,
+                      videoId: t.videoId,
+                      timestamp: frameToShow.timestamp.toFixed(1),
+                      baseUrl,
+                      gpxLatitude: gpxPoint?.lat,
+                      gpxLongitude: gpxPoint?.lng,
+                      gpxTimestamp: gpxPoint?.timestamp,
+                    }}
+                    trackTitle={t.title}
+                    pointIndex={index}
+                    totalPoints={t.path.length}
+                    onClose={() => {
+                      if (mapRef.current) {
+                        mapRef.current.closePopup();
+                      }
+                      if (popupRootRef.current) {
+                        popupRootRef.current.unmount();
+                        popupRootRef.current = null;
+                      }
+                    }}
+                  />
+                );
+              }
             } // end if (frameToShow)
           } catch (err) {
             console.error('Error loading video frame:', err);
+            if (popupRootRef.current) {
+              popupRootRef.current.render(
+                <div className="p-12 text-center">
+                  <div className="text-destructive font-semibold">Error Loading Frame</div>
+                  <div className="text-sm text-muted-foreground mt-2">Could not retrieve frame data from server.</div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="mt-4"
+                    onClick={() => mapRef.current?.closePopup()}
+                  >
+                    Close
+                  </Button>
+                </div>
+              );
+            }
           }
         });
 
