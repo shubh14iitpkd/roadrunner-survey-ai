@@ -10,6 +10,7 @@ import { useNavigate } from "react-router-dom";
 import LeafletMapView from "@/components/LeafletMapView";
 import { api } from "@/lib/api";
 import { isDemoVideo, loadDemoData, convertToAssets, ANNOTATION_CATEGORIES } from "@/services/demoDataService";
+import { Skeleton } from "@/components/ui/skeleton";
 
 // Custom tooltip component for charts that adapts to dark mode
 const CustomTooltip = ({ active, payload, label }: any) => {
@@ -365,21 +366,43 @@ export default function Dashboard() {
               </div>
               <h3 className="font-bold text-lg sm:text-xl">Assets by Category</h3>
             </div>
-            <ResponsiveContainer width="100%" height={280}>
-              <BarChart data={categoryChartData}>
-                <CartesianGrid strokeDasharray="3 3" opacity={0.1} />
-                <XAxis
-                  dataKey="category"
-                  angle={-45}
-                  textAnchor="end"
-                  height={80}
-                  tick={{ fontSize: 10, fill: "hsl(var(--chart-axis))" }}
-                />
-                <YAxis tick={{ fontSize: 11, fill: "hsl(var(--chart-axis))" }} />
-                <Tooltip cursor={false} content={<CustomTooltip />} />
-                <Bar dataKey="count" fill="hsl(var(--primary))" radius={[8, 8, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
+            {loading ? (
+              <div className="space-y-4 h-[280px] flex flex-col justify-end">
+                <div className="flex items-end justify-between gap-4 h-full px-2">
+                  <Skeleton className="w-[10%] h-[30%] bg-primary/10 rounded-t-lg" />
+                  <Skeleton className="w-[10%] h-[60%] bg-primary/10 rounded-t-lg" />
+                  <Skeleton className="w-[10%] h-[45%] bg-primary/10 rounded-t-lg" />
+                  <Skeleton className="w-[10%] h-[90%] bg-primary/10 rounded-t-lg" />
+                  <Skeleton className="w-[10%] h-[55%] bg-primary/10 rounded-t-lg" />
+                  <Skeleton className="w-[10%] h-[75%] bg-primary/10 rounded-t-lg" />
+                  <Skeleton className="w-[10%] h-[40%] bg-primary/10 rounded-t-lg" />
+                  <Skeleton className="w-[10%] h-[85%] bg-primary/10 rounded-t-lg" />
+                </div>
+                <div className="flex justify-between px-2 pb-2">
+                  <Skeleton className="h-3 w-12" />
+                  <Skeleton className="h-3 w-12" />
+                  <Skeleton className="h-3 w-12" />
+                  <Skeleton className="h-3 w-12" />
+                  <Skeleton className="h-3 w-12" />
+                </div>
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height={280}>
+                <BarChart data={categoryChartData}>
+                  <CartesianGrid strokeDasharray="3 3" opacity={0.1} />
+                  <XAxis
+                    dataKey="category"
+                    angle={-45}
+                    textAnchor="end"
+                    height={80}
+                    tick={{ fontSize: 10, fill: "hsl(var(--chart-axis))" }}
+                  />
+                  <YAxis tick={{ fontSize: 11, fill: "hsl(var(--chart-axis))" }} />
+                  <Tooltip cursor={false} content={<CustomTooltip />} />
+                  <Bar dataKey="count" fill="hsl(var(--primary))" radius={[8, 8, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            )}
           </Card>
 
           {/* Categories with Most Anomalies */}
