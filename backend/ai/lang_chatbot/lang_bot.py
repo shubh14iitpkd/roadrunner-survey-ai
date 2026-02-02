@@ -203,7 +203,38 @@ if __name__ == "__main__":
         # "How many road markings are present?",
         # "How many routes we have surveyed?",
         # "Which asset category has most defects?",
-        "Tell me about route 258",
+        # "Tell me about route 258",
+        "List all asset types under the Directional Signage category.",
+        "What category does a Traffic Signal Feeder Pillar belong to?",
+        "Identify whether Road Studs fall under Pavement or ITS.",
+        "Which category does Animal Fence come under?",
+        "Is a Footbridge considered a Structure or Other Infrastructure Asset?",
+        "What are the possible condition labels applicable to Road Marking Line?",
+        "Are Street Sign and Traffic Sign the same asset type?",
+        "What is an asset in the context of road and highway infrastructure?",
+        "List all asset categories available in the inventory.",
+        "Under which asset category does Directional Signage fall?",
+        "Identify the asset category for:CCTV, Guardrail, Kerb, Tunnel",
+        "Is Street Sign a standalone category or an asset type?",
+        "What asset type does Traffic Bollard belong to?",
+        "Differentiate between Asset Category and Asset Type.",
+        "How many asset categories are present in the inventory?",
+        "Name three asset types under Pavement.",
+        "Name three asset types under ITS.",
+        ### ----------- INTERMEDIATE ----------- ###
+        "List all asset types under Directional Signage.",
+        "List all asset types under Roadway Lighting.",
+        "Which asset types come under Structures?",
+        "Identify all asset types under ITS.",
+        "List all asset types included in Other Infrastructure Assets.",
+        "Is Traffic Signal an ITS asset or Directional Signage asset?",
+        "Which category does Vehicle Restraint System belong to?",
+        "Are Street Light Feeder Pillar and ITS Feeder Pillar the same asset type?",
+        "Does Road Marking have multiple asset representations? If yes, name them.",
+        "Which asset types are part of junction-related infrastructure?",
+        "Differentiate between Overpass OP and Overpass OV."
+        ### ----------- ADVANCED ----------- ###
+        
     ]
     
     print("--- Running test queries ---\n")
