@@ -1,3 +1,4 @@
+from utils.gpx_helpers import parse_gpx, interpolate_gpx
 import time
 import os
 import json
@@ -15,7 +16,7 @@ from bson import ObjectId
 import subprocess
 from concurrent.futures import Executor, ThreadPoolExecutor, as_completed
 
-# from deep_sort_realtime.deepsort_tracker import DeepSort
+from deep_sort_realtime.deepsort_tracker import DeepSort
 
 
 class SageMakerVideoProcessor:
@@ -70,7 +71,14 @@ class SageMakerVideoProcessor:
 
         self.has_gpu = self._check_gpu_availability()
         self.chunk_size = int(self.config.get("chunk_size", "500"))
-        # self.tracker = DeepSort(max_age=30, n_init=3, nms_max_overlap=0.9)
+
+        self.tracker = DeepSort(
+            max_age=30,
+            n_init=3,
+            embedder="mobilenet",
+            max_iou_distance=0.7,
+            nms_max_overlap=1,
+        )
 
         print(f"[SAGEMAKER] Initialized with endpoint: {self.endpoint_name}")
         print(f"[SAGEMAKER] Region: {self.region}")
@@ -203,6 +211,7 @@ class SageMakerVideoProcessor:
         route_id: int = None,
         survey_id: str = None,
         db=None,
+        gpx_path: str = None,
         progress_callback: callable = None,
     ) -> Dict:
         """
@@ -274,12 +283,23 @@ class SageMakerVideoProcessor:
         except Exception as e:
             print(f"[SAGEMAKER] Error starting FFmpeg: {e}")
             raise
+        
+        gpx_data = {}
+        if gpx_path:
+            gpx_path = Path(gpx_path)
+            if not gpx_path.exists():
+                print(f"[SAGEMAKER] GPX file does not exist: {gpx_path}")
+            gpx_parsed = parse_gpx(gpx_path)
+            gpx_data = interpolate_gpx(total_frames, fps, gpx_parsed, frame_interval=self.frame_interval, time_offset=0)
+            print("[SAGEMAKER] GPX data extracted successfully", len(gpx_data))
 
         # Processing state
         processed_count = 0
         detections_list = []
         frame_metadata = []
-
+        all_assets = []
+        # lat_set = set()
+        # lon_set = set()
         try:
             with ThreadPoolExecutor(max_workers=self.max_concurrency) as executor:
                 # Process video in chunks
@@ -356,6 +376,95 @@ class SageMakerVideoProcessor:
                                     "detections": detections,
                                 }
                             )
+                            # track assets
+                            formatted_detections = []
+                            for det in detections:
+                                box = det["box"]
+                                w, h = box[2] - box[0], box[3] - box[1]
+                                formatted_detections.append(
+                                    (
+                                        [box[0], box[1], w, h],
+                                        det["confidence"],
+                                        det["class_name"],
+                                    )
+                                )
+
+                            tracks = self.tracker.update_tracks(
+                                formatted_detections, frame=frame
+                            )
+
+                            for track in tracks:
+                                if not track.is_confirmed():
+                                    continue
+
+                                track_id = track.track_id
+                                class_name = track.get_det_class()
+                                # ltrb_box = track.to_ltrb()
+                                if db is not None:
+                                    exists = db.assets.find_one(
+                                        {
+                                            "track_id": track_id,
+                                            "video_id": video_id,
+                                        }
+                                    )
+                                    if exists:
+                                        continue
+                                # returns the confidence of the latest YOLO detection for this track
+                                confidence = track.get_det_conf()
+                                if confidence is None:
+                                    continue
+
+                                confidence = float(confidence)
+                                # remove in production
+                                all_assets.append(
+                                    {
+                                        "track_id": track_id,
+                                        "asset_type": class_name,
+                                        "type": class_name,
+                                        "confidence": confidence,
+                                        "condition": (
+                                            "damaged" if confidence < 0.3 else "good"
+                                        ),
+                                        "frame_number": frame_num,
+                                        "timestamp": timestamp,
+                                        "video_id": video_id,
+                                        "survey_id": survey_id,
+                                        "route_id": route_id,
+                                        "location": {
+                                            "type": "Point",
+                                            "coordinates": [gpx_data[frame_num]["lon"], gpx_data[frame_num]["lat"]]
+                                        } if gpx_data and gpx_data.get(frame_num) else None,
+                                        "created_at": datetime.utcnow().isoformat(),
+                                    }
+                                )
+                                # lat_set.add(gpx_data[frame_num]["lat"])
+                                # lon_set.add(gpx_data[frame_num]["lon"])
+                                if db is not None:
+                                    db.assets.insert_one(
+                                        {
+                                            "track_id": track_id,
+                                            "asset_type": class_name,
+                                            "type": class_name,
+                                            "confidence": confidence,
+                                            "condition": (
+                                                "damaged"
+                                                if confidence < 0.3
+                                                else "good"
+                                            ),
+                                            "frame_number": frame_num,
+                                            "timestamp": timestamp,
+                                            "video_id": video_id,
+                                            "survey_id": survey_id,
+                                            "route_id": route_id,
+                                            "location": {
+                                                "type": "Point",
+                                                "coordinates": [gpx_data[frame_num]["lon"], gpx_data[frame_num]["lat"]]
+                                            } if gpx_data and gpx_data.get(frame_num) else None,
+                                            "created_at": datetime.utcnow().isoformat(),
+                                        }
+                                    )
+                                # if confidence is None or confidence < 0.5:
+                                #     continue
 
                             # Store frame in MongoDB if db connection provided
                             if db is not None:
@@ -367,6 +476,10 @@ class SageMakerVideoProcessor:
                                     "timestamp": timestamp,
                                     "detections": detections,
                                     "detections_count": len(detections),
+                                    "location": {
+                                            "type": "Point",
+                                            "coordinates": [gpx_data[frame_num]["lon"], gpx_data[frame_num]["lat"]]
+                                    } if gpx_data and gpx_data.get(frame_num) else None,
                                     "created_at": datetime.utcnow().isoformat(),
                                 }
                                 try:
@@ -419,11 +532,18 @@ class SageMakerVideoProcessor:
         with open(metadata_path, "w") as f:
             json.dump(frame_metadata, f, indent=2)
 
+        # remove in production
+        assets_path = metadata_dir / f"{video_id}_assets.json"
+        with open(assets_path, "w") as f:
+            json.dump(all_assets, f, indent=2)
+
         print(f"[SAGEMAKER] Processing complete!")
         print(f"[SAGEMAKER] Processed {processed_count} inference frames")
         print(f"[SAGEMAKER] Annotated video: {output_video_path}")
         # print(f"[SAGEMAKER] Frames saved to: {frames_dir}")
-
+        # print(lat_set)
+        # print(lon_set)
+        exit(1)
         return {
             "video_id": video_id,
             "total_frames": total_frames,
