@@ -19,12 +19,12 @@ import { useEffect, useState } from "react";
 export default function Settings() {
   const { toast } = useToast();
   const { user } = useAuth();
-  const { theme, setTheme } = useTheme();
+  const { theme, setTheme, resolvedTheme } = useTheme();
 
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [organization, setOrganization] = useState("");
-  const [darkMode, setDarkMode] = useState(false);
+  const [darkMode, setDarkMode] = useState(resolvedTheme === "dark");
 
   useEffect(() => {
     if (user) {
@@ -36,8 +36,8 @@ export default function Settings() {
   }, [user]);
 
   useEffect(() => {
-    setDarkMode(theme === "dark");
-  }, [theme]);
+    setDarkMode(resolvedTheme === "dark");
+  }, [resolvedTheme]);
 
   const handleSave = () => {
     // Apply dark mode setting
