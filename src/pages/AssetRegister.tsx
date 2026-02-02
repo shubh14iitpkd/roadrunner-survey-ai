@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import {
   Search, MapPin, TrendingUp, CheckCircle, AlertTriangle,
   FileText, ArrowLeft, Calendar, User, Layers, Map, Package, BarChart3,
-  ChevronLeft, ChevronRight
+  ChevronLeft, ChevronRight, Loader2
 } from "lucide-react";
 import { Link, useSearchParams } from "react-router-dom";
 import {
@@ -82,6 +82,7 @@ export default function AssetRegister() {
   const [filterCategory, setFilterCategory] = useState<string>("all");
   const [filterCondition, setFilterCondition] = useState<string>("all");
   const [currentPage, setCurrentPage] = useState(1);
+  const [loadingSurveyId, setLoadingSurveyId] = useState<string | null>(null);
   const itemsPerPage = 50;
 
   // Reset page when filters or detail assets change
@@ -207,6 +208,7 @@ export default function AssetRegister() {
 
   const loadSurveyAssets = async (surveyId: string) => {
     try {
+      setLoadingSurveyId(surveyId);
       // Get videos for this survey
       const videosResp = await api.videos.list({ survey_id: surveyId });
       const videos = videosResp?.items || [];
@@ -280,6 +282,8 @@ export default function AssetRegister() {
       setIsDetailDialogOpen(true);
     } catch (err: any) {
       toast.error("Failed to load assets: " + (err?.message || "Unknown error"));
+    } finally {
+      setLoadingSurveyId(null);
     }
   };
 
@@ -493,13 +497,19 @@ export default function AssetRegister() {
                           <Button
                             variant="link"
                             className="font-mono font-bold text-primary hover:text-primary/80 p-0"
+                            disabled={loadingSurveyId === road.surveyId}
                             onClick={(e) => {
                               e.preventDefault();
                               e.stopPropagation();
                               loadSurveyAssets(road.surveyId!);
                             }}
                           >
-                            #{road.route_id}
+                            {loadingSurveyId === road.surveyId ? (
+                              <Loader2 className="h-4 w-4 animate-spin mr-1" />
+                            ) : (
+                              "#"
+                            )}
+                            {road.route_id}
                           </Button>
                         ) : (
                           <span className="font-mono font-bold text-muted-foreground">#{road.route_id}</span>
@@ -551,15 +561,20 @@ export default function AssetRegister() {
                           {road.surveyId ? (
                             <Button
                               size="sm"
+                              disabled={loadingSurveyId === road.surveyId}
                               onClick={(e) => {
                                 e.preventDefault();
                                 e.stopPropagation();
                                 loadSurveyAssets(road.surveyId!);
                               }}
-                              className="h-9 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white shadow-md"
+                              className="h-9 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white shadow-md min-w-[90px]"
                             >
-                              <BarChart3 className="h-3 w-3 mr-2" />
-                              Details
+                              {loadingSurveyId === road.surveyId ? (
+                                <Loader2 className="h-3 w-3 mr-2 animate-spin" />
+                              ) : (
+                                <BarChart3 className="h-3 w-3 mr-2" />
+                              )}
+                              {loadingSurveyId === road.surveyId ? "Loading..." : "Details"}
                             </Button>
                           ) : (
                             <Button
