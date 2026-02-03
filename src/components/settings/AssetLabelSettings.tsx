@@ -1,6 +1,5 @@
-import { useEffect, useState } from "react";
-import { api } from "@/lib/api";
-import { useAuth } from "@/contexts/AuthContext";
+import { useState } from "react";
+import { useLabelMap } from "@/contexts/LabelMapContext";
 import { useToast } from "@/hooks/use-toast";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -15,50 +14,14 @@ import {
 import { Pencil, Check, X, Tag, Search, AlertCircle } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 
-interface ResolvedItem {
-  category_id?: string;
-  asset_id?: string;
-  display_name: string;
-  original_display_name: string;
-}
-
-interface ResolvedMap {
-  categories: Record<string, ResolvedItem>;
-  labels: Record<string, ResolvedItem>;
-}
-
 export default function AssetLabelSettings() {
-  const { user } = useAuth();
+  const { data, loading, updateCategoryLabel, updateAssetLabel } = useLabelMap();
   const { toast } = useToast();
 
-  const [loading, setLoading] = useState(true);
-  const [data, setData] = useState<ResolvedMap | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
   const [saving, setSaving] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
-
-  useEffect(() => {
-    if (!user?.id) return;
-
-    async function fetchData() {
-      try {
-        const result = await api.user.getResolvedLabelMap(user!.id);
-        setData(result);
-      } catch (err) {
-        console.error("Failed to fetch labels:", err);
-        toast({
-          title: "Error",
-          description: "Failed to load asset labels",
-          variant: "destructive",
-        });
-      } finally {
-        setLoading(false);
-      }
-    }
-
-    fetchData();
-  }, [user?.id, toast]);
 
   const handleEdit = (id: string, currentValue: string) => {
     setEditingId(id);
@@ -71,26 +34,12 @@ export default function AssetLabelSettings() {
   };
 
   const handleSaveCategory = async (categoryId: string) => {
-    if (!user?.id || !editValue.trim()) return;
+    if (!editValue.trim()) return;
 
     setSaving(true);
     try {
-      await api.user.updateCategoryPreference(user.id, categoryId, editValue.trim());
+      await updateCategoryLabel(categoryId, editValue.trim());
       
-      setData((prev) => {
-        if (!prev) return prev;
-        return {
-          ...prev,
-          categories: {
-            ...prev.categories,
-            [categoryId]: {
-              ...prev.categories[categoryId],
-              display_name: editValue.trim(),
-            },
-          },
-        };
-      });
-
       toast({
         title: "Saved",
         description: "Category name updated successfully",
@@ -109,25 +58,11 @@ export default function AssetLabelSettings() {
   };
 
   const handleSaveLabel = async (assetId: string) => {
-    if (!user?.id || !editValue.trim()) return;
+    if (!editValue.trim()) return;
 
     setSaving(true);
     try {
-      await api.user.updateLabelPreference(user.id, assetId, editValue.trim());
-
-      setData((prev) => {
-        if (!prev) return prev;
-        return {
-          ...prev,
-          labels: {
-            ...prev.labels,
-            [assetId]: {
-              ...prev.labels[assetId],
-              display_name: editValue.trim(),
-            },
-          },
-        };
-      });
+      await updateAssetLabel(assetId, editValue.trim());
 
       toast({
         title: "Saved",
@@ -192,7 +127,7 @@ export default function AssetLabelSettings() {
             return (
               <div
                 key={id}
-                className={`group flex items-center justify-between p-3 rounded-lg border bg-card transition-all duration-200 hover:shadow-sm hover:border-primary ${isEditing ? 'ring-2 ring-primary/20 border-primary' : ''}`}
+                className={`group flex items-center justify-between p-3 rounded-lg border bg-card transition-all duration-200 hover:shadow-sm hover:border-primary/20 ${isEditing ? 'ring-2 ring-primary/20 border-primary' : ''}`}
               >
                 {isEditing ? (
                   <div className="flex items-center gap-2 flex-1 animate-in fade-in zoom-in-95 duration-200">
@@ -230,7 +165,7 @@ export default function AssetLabelSettings() {
                     <div className="flex flex-col min-w-0">
                       <span className="font-medium text-sm truncate">{cat.display_name}</span>
                       {cat.display_name !== cat.original_display_name && (
-                        <span className="text-sm text-muted-foreground truncate">
+                        <span className="text-xs text-muted-foreground truncate">
                           Default: {cat.original_display_name}
                         </span>
                       )}
@@ -328,7 +263,7 @@ export default function AssetLabelSettings() {
                             <div className="flex items-center gap-2">
                               <span className="font-medium text-sm">{label.display_name}</span>
                               {label.display_name !== label.original_display_name && (
-                                <Badge variant="outline" className="text-sm h-5 px-1.5 font-normal text-muted-foreground">
+                                <Badge variant="outline" className="text-xs h-5 px-1.5 font-normal text-muted-foreground">
                                   Default: {label.original_display_name}
                                 </Badge>
                               )}

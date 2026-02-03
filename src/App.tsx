@@ -8,6 +8,7 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { ThemeProvider } from "next-themes";
 import { AuthProvider } from "./contexts/AuthContext";
 import { UploadProvider } from "./contexts/UploadContext";
+import { LabelMapProvider } from "./contexts/LabelMapContext";
 import Layout from "./components/Layout";
 import ProtectedRoute from "./components/ProtectedRoute";
 
@@ -39,6 +40,7 @@ const App = () => (
           }}
         >
           <AuthProvider>
+            <LabelMapProvider>
             <Suspense fallback={<PageLoader />}>
               <Routes>
                 {/* Public routes */}
@@ -69,6 +71,7 @@ const App = () => (
                 />
               </Routes>
             </Suspense>
+            </LabelMapProvider>
           </AuthProvider>
         </BrowserRouter>
       </TooltipProvider>
