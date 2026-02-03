@@ -110,6 +110,7 @@ def get_resolved_map(user_id: str):
 		cid = cat["category_id"]
 		resolved_cats[cid] = {
 			"category_id": cid,
+			"original_display_name": cat["display_name"],
 			"display_name": cat_override.get(cid, {}).get("display_name") or cat["display_name"]
 		}
 		
@@ -118,6 +119,7 @@ def get_resolved_map(user_id: str):
 		aid = l["asset_id"]
 		resolved_labels[aid] = {
 			"asset_id": aid,
+			"original_display_name": l["display_name"],
 			"display_name": labels_override.get(aid, {}).get("display_name") or l["display_name"]
 		}
 

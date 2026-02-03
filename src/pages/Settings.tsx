@@ -1,5 +1,6 @@
 import { Card } from "@/components/ui/card";
-import { Settings as SettingsIcon, User, Bell, Lock } from "lucide-react";
+import { Settings as SettingsIcon, User, Bell, Lock, Tag } from "lucide-react";
+import AssetLabelSettings from "@/components/settings/AssetLabelSettings";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
@@ -229,6 +230,26 @@ export default function Settings() {
                 </div>
                 <Button onClick={handleSave} className="mt-4">Save Changes</Button>
               </div>
+            </AccordionContent>
+          </Card>
+        </AccordionItem>
+
+        <AccordionItem value="asset-labels" className="border-0">
+          <Card className="card-shadow">
+            <AccordionTrigger className="px-6 py-4 hover:no-underline">
+              <div className="flex items-center gap-3">
+                <Tag className="h-5 w-5 dark:text-foreground text-primary" />
+                <div className="text-left">
+                  <h2 className="font-semibold text-lg">Asset Labels</h2>
+                  <p className="text-sm text-muted-foreground font-normal">
+                    Customize display names for assets and categories
+                  </p>
+                </div>
+              </div>
+            </AccordionTrigger>
+            <AccordionContent className="px-6 pb-6">
+              <Separator className="mb-6" />
+              <AssetLabelSettings />
             </AccordionContent>
           </Card>
         </AccordionItem>

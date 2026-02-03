@@ -183,6 +183,13 @@ export const api = {
 		topAnomalyRoads: () => apiFetch("/api/dashboard/tables/top-anomaly-roads"),
 		recentSurveys: () => apiFetch("/api/dashboard/recent-surveys"),
 	},
+	user: {
+		getResolvedLabelMap: (userId: string) => apiFetch(`/api/assets/${userId}/resolved-map`),
+		updateLabelPreference: (userId: string, assetId: string, displayName: string) =>
+			apiFetch(`/api/users/${userId}/preferences/label`, { method: "PUT", body: JSON.stringify({ asset_id: assetId, display_name: displayName }) }),
+		updateCategoryPreference: (userId: string, categoryId: string, displayName: string) =>
+			apiFetch(`/api/users/${userId}/preferences/category`, { method: "PUT", body: JSON.stringify({ category_id: categoryId, display_name: displayName }) }),
+	},
 	frames: {
 		list: (params?: { video_id?: string; survey_id?: string; route_id?: number; has_detections?: boolean; limit?: number; offset?: number }) => {
 			const qs = new URLSearchParams();
