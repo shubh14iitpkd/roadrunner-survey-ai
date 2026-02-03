@@ -91,3 +91,37 @@ def update_asset(asset_id: str):
 		return jsonify({"error": "not found"}), 404
 	return jsonify({"ok": True})
 
+@assets_bp.get("/<user_id>/resolved-map")
+def get_resolved_map(user_id: str):
+	db = get_db()
+	system_cats = list(db.system_asset_categories.find())
+	system_labels = list(db.system_asset_labels.find())
+
+	try:
+		prefs = db.user_preferences.find_one({"user_id": ObjectId(user_id)}) or {}
+	except:
+		prefs = {}
+	
+	labels_override = prefs.get("label_overrides", {})
+	cat_override = prefs.get("category_overrides", {})
+
+	resolved_cats = {}
+	for cat in system_cats:
+		cid = cat["category_id"]
+		resolved_cats[cid] = {
+			"category_id": cid,
+			"display_name": cat_override.get(cid, {}).get("display_name") or cat["display_name"]
+		}
+		
+	resolved_labels = {}
+	for l in system_labels:
+		aid = l["asset_id"]
+		resolved_labels[aid] = {
+			"asset_id": aid,
+			"display_name": labels_override.get(aid, {}).get("display_name") or l["display_name"]
+		}
+
+	return {
+		"categories": resolved_cats,
+		"labels": resolved_labels
+	}

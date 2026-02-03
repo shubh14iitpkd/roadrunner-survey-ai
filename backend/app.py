@@ -37,6 +37,7 @@ def create_app() -> Flask:
 	from ai.routes import ai_bp
 	from tiles.routes import tiles_bp
 	from frames.routes import frames_bp
+	from user.routes import user_bp
 
 	app.register_blueprint(auth_bp, url_prefix="/api/auth")
 	app.register_blueprint(roads_bp, url_prefix="/api/roads")
@@ -49,6 +50,7 @@ def create_app() -> Flask:
 	app.register_blueprint(ai_bp, url_prefix="/api/ai")
 	app.register_blueprint(tiles_bp, url_prefix="/api/tiles")
 	app.register_blueprint(frames_bp, url_prefix="/api/frames")
+	app.register_blueprint(user_bp, url_prefix="/api/users")
 
 	# Handle OPTIONS requests globally (CORS preflight)
 	@app.before_request
