@@ -4,6 +4,8 @@
  * Maps Label Studio annotations + GPX data to detection markers
  */
 
+import { ResolvedMap } from "@/contexts/LabelMapContext";
+
 // Demo video names mapping
 export const DEMO_VIDEOS = {
   '2025_0817_115147_F': {
@@ -28,12 +30,21 @@ export const DEMO_VIDEOS = {
 
 // Annotation file categories - each file maps to a specific asset category
 export const ANNOTATION_CATEGORIES = {
-  OIA: 'OIA',
-  ITS: 'ITS',
-  ROADWAY_LIGHTING: 'Roadway Lighting',
-  STRUCTURES: 'Structures',
-  DIRECTIONAL_SIGNAGE: 'Directional Signage',
-  CORRIDOR_PAVEMENT: 'Corridor & Pavement',
+  OIA: 'oia',
+  ITS: 'its',
+  ROADWAY_LIGHTING: 'roadway_lighting',
+  STRUCTURES: 'structures',
+  DIRECTIONAL_SIGNAGE: 'directional_signage',
+  CORRIDOR_PAVEMENT: 'pavement',
+};
+
+export const getCategoryName = (category: string, labelMapData: ResolvedMap) => {
+  const cats = Object.values(labelMapData?.categories);
+  // if (!cats) return category;
+  for (const cat of cats) {
+    if (cat?.default_name == category) return cat?.display_name || category;
+  }
+  return category;
 };
 
 const ANNOTATION_FILES = [
@@ -340,39 +351,79 @@ export async function getAllDemoData(): Promise<Map<string, ProcessedVideoData>>
 }
 
 // Convert processed data to the format expected by the existing components
-export function convertToFrameDetections(data: ProcessedVideoData, routeId: number) {
-  return data.detections.map((d, index) => ({
-    _id: `demo_${routeId}_${index}`,
-    route_id: routeId,
-    timestamp: d.timestamp,
-    latitude: d.lat,
-    longitude: d.lon,
-    frame_number: d.frame,
-    detections: [{
-      class_name: d.className,
-      confidence: d.confidence,
-      bbox: [d.bbox.x, d.bbox.y, d.bbox.width, d.bbox.height],
-      condition: d.condition,
-      category: d.category,
-    }],
-  }));
+export function convertToFrameDetections(data: ProcessedVideoData, routeId: number, labelMapData?: any) {
+  return data.detections.map((d, index) => {
+    let assetId = '';
+    let categoryId = '';
+
+    if (labelMapData?.labels) {
+      const labelEntry = Object.entries(labelMapData.labels).find(
+        ([, labelData]: [string, any]) =>
+          labelData.default_name === d.className ||
+          labelData.original_display_name === d.className
+      );
+
+      if (labelEntry) {
+        assetId = labelEntry[0];
+        categoryId = (labelEntry[1] as any).category_id;
+      }
+    }
+
+    return {
+      _id: `demo_${routeId}_${index}`,
+      route_id: routeId,
+      timestamp: d.timestamp,
+      latitude: d.lat,
+      longitude: d.lon,
+      frame_number: d.frame,
+      detections: [{
+        asset_id: assetId,
+        category_id: categoryId,
+        class_name: d.className,
+        confidence: d.confidence,
+        bbox: [d.bbox.x, d.bbox.y, d.bbox.width, d.bbox.height],
+        condition: d.condition,
+        category: d.category,
+      }],
+    };
+  });
 }
 
 // Convert to asset format for AssetRegister
-export function convertToAssets(data: ProcessedVideoData, routeId: number, surveyId: string) {
-  return data.detections.map((d, index) => ({
-    _id: `demo_asset_${routeId}_${index}`,
-    route_id: routeId,
-    survey_id: surveyId,
-    asset_type: d.className,    // The specific asset label (e.g., "Guardrail", "Light Pole")
-    category: d.category,       // The annotation category (e.g., "OIA", "ITS", "Roadway Lighting")
-    type: d.className,
-    condition: d.condition,
-    confidence: d.confidence,
-    lat: d.lat,
-    lng: d.lon,
-    detected_at: new Date().toISOString(),
-    image_url: undefined,
-    description: `${d.className} - ${d.condition} condition`,
-  }));
+export function convertToAssets(data: ProcessedVideoData, routeId: number, surveyId: string, labelMapData?: any) {
+  return data.detections.map((d, index) => {
+    let assetId = '';
+    let categoryId = '';
+
+    if (labelMapData?.labels) {
+      const labelEntry = Object.entries(labelMapData.labels).find(
+        ([, labelData]: [string, any]) =>
+          labelData.default_name === d.className ||
+          labelData.original_display_name === d.className
+      );
+
+      if (labelEntry) {
+        assetId = labelEntry[0];
+        categoryId = (labelEntry[1] as any).category_id;
+      }
+    }
+
+    return {
+      _id: `demo_asset_${routeId}_${index}`,
+      route_id: routeId,
+      survey_id: surveyId,
+      asset_id: assetId,      // NEW: Include asset_id from label map
+      category_id: categoryId, // NEW: Include category_id from label map
+      asset_type: d.className,    // The specific asset label (e.g., "Guardrail", "Light Pole")
+      category: d.category,       // The annotation category (e.g., "OIA", "ITS", "Roadway Lighting")
+      type: d.className,
+      condition: d.condition,
+      confidence: d.confidence,
+      lat: d.lat,
+      lng: d.lon,
+      detected_at: new Date().toISOString(),
+      image_url: undefined,
+      description: `${d.className} - ${d.condition} condition`,
+    };
+  });
 }

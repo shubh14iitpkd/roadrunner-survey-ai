@@ -5,6 +5,7 @@ import { useAuth } from "./AuthContext";
 interface ResolvedItem {
   category_id?: string;
   asset_id?: string;
+  default_name: string;
   display_name: string;
   original_display_name: string;
 }

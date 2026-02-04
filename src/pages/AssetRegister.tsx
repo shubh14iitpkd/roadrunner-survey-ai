@@ -27,10 +27,13 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { isDemoVideo, loadDemoData, convertToAssets, ANNOTATION_CATEGORIES } from "@/services/demoDataService";
+import { isDemoVideo, loadDemoData, convertToAssets, ANNOTATION_CATEGORIES, getCategoryName } from "@/services/demoDataService";
+import { useLabelMap } from "@/contexts/LabelMapContext";
 
 interface Asset {
   _id: string;
+  asset_id?: string;
+  category_id?: string;
   route_id: number;
   survey_id: string;
   category: string;          // Annotation category: OIA, ITS, Roadway Lighting, etc.
@@ -84,6 +87,7 @@ export default function AssetRegister() {
   const [currentPage, setCurrentPage] = useState(1);
   const [loadingSurveyId, setLoadingSurveyId] = useState<string | null>(null);
   const itemsPerPage = 50;
+  const { data: labelMapData } = useLabelMap();
 
   // Reset page when filters or detail assets change
   useEffect(() => {
@@ -186,7 +190,7 @@ export default function AssetRegister() {
           try {
             const demoData = await loadDemoData(demoKey);
             if (demoData) {
-              const demoAssets = convertToAssets(demoData, video.route_id || 0, surveyId);
+              const demoAssets = convertToAssets(demoData, video.route_id || 0, surveyId, labelMapData);
               allAssets.push(...demoAssets as Asset[]);
             }
           } catch (err) {
@@ -235,7 +239,7 @@ export default function AssetRegister() {
           const demoData = await loadDemoData(demoKey);
 
           if (demoData) {
-            const demoAssets = convertToAssets(demoData, video.route_id || 0, surveyId);
+            const demoAssets = convertToAssets(demoData, video.route_id || 0, surveyId, labelMapData);
             allAssets.push(...demoAssets as Asset[]);
             console.log(`Loaded ${demoAssets.length} demo assets for ${demoKey}`);
           }
@@ -660,7 +664,7 @@ export default function AssetRegister() {
                         const count = detailAssets.filter(a => a.category === category).length;
                         return (
                           <TabsTrigger key={category} value={category} className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
-                            {category}
+                            {getCategoryName(category, labelMapData)}
                             <Badge variant="secondary" className="ml-2 text-xs">{count}</Badge>
                           </TabsTrigger>
                         );
@@ -686,8 +690,12 @@ export default function AssetRegister() {
                   // Calculate stats by type
                   const typeStats = assetTypes.map(type => {
                     const typeAssets = filteredAssets.filter(a => (a.asset_type || a.type || a.category) === type);
+                    // Get asset_id from the first asset of this type
+                    const assetId = typeAssets[0]?.asset_id;
+
                     return {
                       type,
+                      asset_id: assetId,
                       total: typeAssets.length,
                       good: typeAssets.filter(a => a.condition?.toLowerCase() === 'good').length,
                       damaged: typeAssets.filter(a => a.condition?.toLowerCase() === 'damaged').length,
@@ -748,10 +756,14 @@ export default function AssetRegister() {
 
                         {typeStats.length > 0 ? (
                           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                            {typeStats.map(stat => (
+                            {typeStats.map(stat => {
+                              // Resolve display name for the asset type
+                              const displayName = (labelMapData?.labels?.[stat.asset_id]?.display_name) || stat.type;
+                              
+                              return (
                               <Card key={stat.type} className="p-4 bg-muted/20 hover:bg-muted/40 transition-colors">
                                 <div className="flex items-center justify-between mb-3">
-                                  <h4 className="font-semibold text-sm truncate flex-1" title={stat.type}>{stat.type}</h4>
+                                  <h4 className="font-semibold text-sm truncate flex-1" title={displayName}>{displayName}</h4>
                                   <Badge variant="secondary" className="ml-2 font-bold">{stat.total}</Badge>
                                 </div>
 
@@ -788,7 +800,8 @@ export default function AssetRegister() {
                                   </span>
                                 </div>
                               </Card>
-                            ))}
+                            )
+                          })}
                           </div>
                         ) : (
                           <p className="text-muted-foreground text-center py-8">No assets found for the selected filters</p>
@@ -833,7 +846,9 @@ export default function AssetRegister() {
                                 const paginatedAssets = filteredAssets.slice(startIndex, startIndex + itemsPerPage);
 
                                 return paginatedAssets.map((asset) => {
-                                  const assetType = asset.asset_type || asset.type || 'Unknown';
+                                  const assetId = asset.asset_id;
+                                  const assetType = (assetId && labelMapData?.labels?.[assetId]?.display_name) || asset.asset_type || asset.type || 'Unknown';
+                                  
                                   return (
                                     <tr key={asset._id} className="border-b hover:bg-primary/5 transition-colors">
                                       <td className="p-3">
@@ -843,7 +858,7 @@ export default function AssetRegister() {
                                       </td>
                                       <td className="p-3">
                                         <Badge variant="outline" className="text-xs bg-primary/5">
-                                          {asset.category}
+                                          {(asset.category_id && labelMapData?.categories?.[asset.category_id]?.display_name) || asset.category}
                                         </Badge>
                                       </td>
                                       <td className="p-3">

@@ -11,6 +11,7 @@ import LeafletMapView from "@/components/LeafletMapView";
 import { api } from "@/lib/api";
 import { isDemoVideo, loadDemoData, convertToAssets, ANNOTATION_CATEGORIES } from "@/services/demoDataService";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useLabelMap } from "@/contexts/LabelMapContext";
 
 // Custom tooltip component for charts that adapts to dark mode
 const CustomTooltip = ({ active, payload, label }: any) => {
@@ -36,6 +37,7 @@ export default function Dashboard() {
   const [roads, setRoads] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
+  const { data: labelMapData } = useLabelMap();
 
   // Dashboard data state
   const [kpis, setKpis] = useState<any>({
@@ -121,7 +123,7 @@ export default function Dashboard() {
             try {
               const demoData = await loadDemoData(demoKey);
               if (demoData) {
-                const demoAssets = convertToAssets(demoData, video.route_id || 0, surveyId);
+                const demoAssets = convertToAssets(demoData, video.route_id || 0, surveyId, labelMapData);
                 allAssets.push(...demoAssets);
               }
             } catch (err) {
@@ -147,8 +149,12 @@ export default function Dashboard() {
         // Build category chart data from demo assets
         const categoryCount: Record<string, number> = {};
         allAssets.forEach(a => {
-          const cat = a.category || 'Unknown';
-          categoryCount[cat] = (categoryCount[cat] || 0) + 1;
+          let catName = a.category || 'Unknown';
+          // Use category display name from labelMap if category_id exists
+          if (a.category_id && labelMapData?.categories?.[a.category_id]) {
+            catName = labelMapData.categories[a.category_id].display_name;
+          }
+          categoryCount[catName] = (categoryCount[catName] || 0) + 1;
         });
         const chartData = Object.entries(categoryCount)
           .map(([category, count]) => ({ category, count }))
@@ -166,9 +172,12 @@ export default function Dashboard() {
 
         // Anomalies by category
         const anomalyCount: Record<string, number> = {};
-        allAssets.filter(a => a.condition?.toLowerCase() === 'poor').forEach(a => {
-          const cat = a.category || 'Unknown';
-          anomalyCount[cat] = (anomalyCount[cat] || 0) + 1;
+        allAssets.filter(a => a.condition?.toLowerCase() === 'damaged').forEach(a => {
+          let catName = a.category || 'Unknown';
+          if (a.category_id && labelMapData?.categories?.[a.category_id]) {
+            catName = labelMapData.categories[a.category_id].display_name;
+          }
+          anomalyCount[catName] = (anomalyCount[catName] || 0) + 1;
         });
         const anomalyData = Object.entries(anomalyCount)
           .map(([category, count]) => ({ category, count }))
@@ -178,7 +187,7 @@ export default function Dashboard() {
 
         // Top anomaly roads
         const anomalyByRoute: Record<number, number> = {};
-        allAssets.filter(a => a.condition?.toLowerCase() === 'poor').forEach(a => {
+        allAssets.filter(a => a.condition?.toLowerCase() === 'damaged').forEach(a => {
           anomalyByRoute[a.route_id] = (anomalyByRoute[a.route_id] || 0) + 1;
         });
         const topRoads = Object.entries(anomalyByRoute)
