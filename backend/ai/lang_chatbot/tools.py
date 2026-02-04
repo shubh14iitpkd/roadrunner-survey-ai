@@ -48,7 +48,7 @@ def get_db():
 # Format: {cache_key: {"data": {...}, "timestamp": float}}
 _resolved_map_cache = {}
 # CACHE_TTL_SECONDS = 120  # 2 minutes
-CACHE_TTL_SECONDS = 10
+CACHE_TTL_SECONDS = 120
 
 
 def clear_resolved_map_cache(user_id: str = None):
