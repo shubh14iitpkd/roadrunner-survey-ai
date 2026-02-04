@@ -9,12 +9,12 @@ interface ResolvedItem {
   original_display_name: string;
 }
 
-interface ResolvedMap {
+export interface ResolvedMap {
   categories: Record<string, ResolvedItem>;
   labels: Record<string, ResolvedItem>;
 }
 
-interface LabelMapContextType {
+export interface LabelMapContextType {
   data: ResolvedMap | null;
   loading: boolean;
   error: Error | null;

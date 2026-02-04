@@ -8,9 +8,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { ResolvedMap, useLabelMap } from '@/contexts/LabelMapContext';
 
 interface Detection {
   class_name: string;
+  asset_id: string;
   confidence: number;
   // Box can be array format: [x1, y1, x2, y2]
   box?: number[];
@@ -57,10 +59,13 @@ interface FramePopupContentProps {
   };
   trackTitle: string;
   pointIndex: number;
+  labelMapData: ResolvedMap;
   totalPoints: number;
   onClose: () => void;
 }
-function normalizeClassName(input) {
+
+// Fallback function to normalize class names if context data is not available
+function normalizeClassName(input: string): string {
   if (typeof input !== "string") return "";
 
   // Remove AssetCondition and anything after it
@@ -78,6 +83,7 @@ export default function FramePopupContent({
   trackTitle,
   pointIndex,
   totalPoints,
+  labelMapData,
   onClose,
 }: FramePopupContentProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -85,6 +91,18 @@ export default function FramePopupContent({
   const [selectedClass, setSelectedClass] = useState<string | null>(null);
   const [showLabels, setShowLabels] = useState(true);
   const [colorMap, setColorMap] = useState<Record<string, string>>({});
+  
+
+
+  // Helper function to get display name from context or fallback to normalized name
+  const getDisplayName = (assetId: string, className: string): string => {
+    // Try to get custom display name from context
+    if (labelMapData?.labels?.[assetId]) {
+      return labelMapData.labels[assetId].display_name;
+    }
+    // Fallback to normalized class name
+    return normalizeClassName(className);
+  };
 
   // Generate consistent colors for each class
   useEffect(() => {
@@ -140,8 +158,7 @@ export default function FramePopupContent({
       // Draw label background
       if (showLabels) {
         ctx.fillStyle = color;
-        // const label = `${normalizeClassName(d.class_name)} (${(d.confidence * 100).toFixed(0)}%)`;
-        const label = `${normalizeClassName(d.class_name)}`;
+        const label = getDisplayName(d.asset_id, d.class_name);
         const textMetrics = ctx.measureText(label);
         ctx.fillRect(x, y - 20, textMetrics.width + 12, 20);
 
@@ -248,24 +265,30 @@ export default function FramePopupContent({
                 All ({frameData.detections?.length || 0})
               </div>
             </SelectItem>
-            {uniqueClasses.map((className) => (
-              <SelectItem key={className} value={className}>
-                <div className="flex items-center gap-2">
-                  <div
-                    style={{
-                      width: '8px',
-                      height: '8px',
-                      borderRadius: '50%',
-                      backgroundColor: colorMap[className],
-                      flexShrink: 0,
-                    }}
-                  />
-                  <span>
-                    {normalizeClassName(className)} ({classCount?.[className] || 0})
-                  </span>
-                </div>
-              </SelectItem>
-            ))}
+            {uniqueClasses.map((className) => {
+              // Find the first detection with this class name to get the asset_id
+              const detection = frameData.detections?.find(d => d.class_name === className);
+              const displayName = detection ? getDisplayName(detection.asset_id, className) : normalizeClassName(className);
+              
+              return (
+                <SelectItem key={className} value={className}>
+                  <div className="flex items-center gap-2">
+                    <div
+                      style={{
+                        width: '8px',
+                        height: '8px',
+                        borderRadius: '50%',
+                        backgroundColor: colorMap[className],
+                        flexShrink: 0,
+                      }}
+                    />
+                    <span>
+                      {displayName} ({classCount?.[className] || 0})
+                    </span>
+                  </div>
+                </SelectItem>
+              );
+            })}
           </SelectContent>
         </Select>
       </div>

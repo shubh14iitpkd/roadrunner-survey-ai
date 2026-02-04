@@ -10,6 +10,7 @@ import markerShadow from 'leaflet/dist/images/marker-shadow.png';
 import FramePopupContent from "@/components/FramePopupContent";
 import { Button } from "@/components/ui/button";
 import { createRoot, Root } from "react-dom/client";
+import { useLabelMap } from "@/contexts/LabelMapContext";
 delete (L.Icon.Default.prototype as any)._getIconUrl;
 L.Icon.Default.mergeOptions({
   iconUrl: markerIcon,
@@ -122,6 +123,8 @@ export default function LeafletMapView({ selectedRoadNames = [], roads = [], sel
   const [tracks, setTracks] = useState<GpxTrack[]>([]);
   const [videoFramesMap, setVideoFramesMap] = useState<Map<string, VideoFramesData>>(new Map());
   const [fetchingFrames, setFetchingFrames] = useState(false);
+  const { data: labelMapData } = useLabelMap();
+
   const frameDataCacheRef = useRef<Map<string, any>>(new Map());
   const canvasRendererRef = useRef<L.Canvas | null>(null);
   const popupRootRef = useRef<Root | null>(null);
@@ -461,6 +464,7 @@ export default function LeafletMapView({ selectedRoadNames = [], roads = [], sel
                       gpxTimestamp: gpxPoint?.timestamp,
                     }}
                     trackTitle={t.title}
+                    labelMapData={labelMapData}
                     pointIndex={index}
                     totalPoints={t.path.length}
                     onClose={() => {
