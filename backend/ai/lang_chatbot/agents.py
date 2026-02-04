@@ -11,6 +11,7 @@ from langchain_core.messages import SystemMessage
 from ai.lang_chatbot.models import get_gemini_model
 from ai.lang_chatbot.tools import ALL_TOOLS
 from ai.lang_chatbot.mongo_tools import FRAME_TOOLS
+from ai.lang_chatbot.context import set_current_user_id
 
 # Global memory saver for conversation persistence
 _memory_saver = MemorySaver()
@@ -71,6 +72,7 @@ User: "Survey status for route 214?"
 def agent_factory(
     model: str = "gemini",
     video_id: Optional[str] = None,
+    user_id: Optional[str] = None,
 ) -> object:
     """
     Create a Langchain agent with all road survey tools.
@@ -78,10 +80,14 @@ def agent_factory(
     Args:
         model: LLM model to use ("gemini")
         video_id: Optional video ID to inject into context
+        user_id: Optional user ID for applying preference overrides
     
     Returns:
         Configured agent executor
     """
+    # Set user_id in shared context for tools to access
+    set_current_user_id(user_id)
+    
     llm = None
     
     if model == "gemini":

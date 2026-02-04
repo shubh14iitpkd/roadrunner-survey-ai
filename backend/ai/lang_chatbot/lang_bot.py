@@ -20,7 +20,7 @@ class LangChatbot:
     Uses LangGraph memory for conversation persistence.
     """
     
-    def __init__(self, video_id: Optional[str] = None, route_id: Optional[int] = None, chat_id: Optional[str] = None):
+    def __init__(self, video_id: Optional[str] = None, route_id: Optional[int] = None, chat_id: Optional[str] = None, user_id: Optional[str] = None):
         """
         Initialize chatbot with optional context.
         
@@ -28,11 +28,13 @@ class LangChatbot:
             video_id: Video identifier for queries
             route_id: Route number for survey queries
             chat_id: Chat identifier for conversation memory (thread_id)
+            user_id: User identifier for applying preference overrides
         """
         self.video_id = video_id
         self.route_id = route_id
         self.chat_id = chat_id or "default_thread"
-        self.agent = agent_factory(video_id=video_id)
+        self.user_id = user_id
+        self.agent = agent_factory(video_id=video_id, user_id=user_id)
     
     def ask(self, question: str, video_id: str = None, chat_id: str = None) -> str:
         """
@@ -150,7 +152,7 @@ class LangChatbot:
     def set_video(self, video_id: str):
         """Set active video for queries"""
         self.video_id = video_id
-        self.agent = agent_factory(video_id=video_id)
+        self.agent = agent_factory(video_id=video_id, user_id=self.user_id)
     
     def set_route(self, route_id: int):
         """Set active route for queries"""

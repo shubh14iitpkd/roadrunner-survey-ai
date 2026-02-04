@@ -12,6 +12,7 @@ from bson.objectid import ObjectId
 from dotenv import load_dotenv
 
 from ai.lang_chatbot.demo_data import get_demo_loader, DemoDataLoader
+from ai.lang_chatbot.context import get_current_user_id
 
 load_dotenv()
 
@@ -37,6 +38,158 @@ def get_db():
             serverSelectionTimeoutMS=5000,
         )
     return _client[DB_NAME]
+
+
+# =============================================================================
+# RESOLVED MAP HELPERS FOR DISPLAY NAMES
+# =============================================================================
+
+# Cache for resolved map with TTL support
+# Format: {cache_key: {"data": {...}, "timestamp": float}}
+_resolved_map_cache = {}
+# CACHE_TTL_SECONDS = 120  # 2 minutes
+CACHE_TTL_SECONDS = 10
+
+
+def clear_resolved_map_cache(user_id: str = None):
+    """
+    Clear the resolved map cache.
+    
+    Args:
+        user_id: If provided, only clears cache for this user. 
+                 If None, clears the entire cache.
+    """
+    global _resolved_map_cache
+    if user_id:
+        # Clear specific user's cache
+        if user_id in _resolved_map_cache:
+            del _resolved_map_cache[user_id]
+    else:
+        # Clear entire cache
+        _resolved_map_cache = {}
+
+
+def get_resolved_map(user_id: str = None) -> dict:
+    """
+    Load system categories and labels with user overrides for display name resolution.
+    Uses caching with 2-minute TTL to avoid repeated DB queries.
+    
+    Args:
+        user_id: Optional user ID for applying preference overrides. 
+                 If not provided, uses the current user from agent context.
+    
+    Returns:
+        dict with 'categories' and 'labels' mappings
+    """
+    import time
+    
+    # Use provided user_id or get from agent context
+    if not user_id:
+        user_id = get_current_user_id()
+    
+    cache_key = user_id or "system"
+    current_time = time.time()
+    
+    # Check cache with TTL
+    if cache_key in _resolved_map_cache:
+        cache_entry = _resolved_map_cache[cache_key]
+        if current_time - cache_entry["timestamp"] < CACHE_TTL_SECONDS:
+            return cache_entry["data"]
+        # Cache expired, will refresh below
+    
+    db = get_db()
+    system_cats = list(db.system_asset_categories.find())
+    system_labels = list(db.system_asset_labels.find())
+    
+    # Load user preferences if user_id provided
+    prefs = {}
+    if user_id:
+        try:
+            prefs = db.user_preferences.find_one({"user_id": ObjectId(user_id)}) or {}
+        except:
+            prefs = {}
+    
+    labels_override = prefs.get("label_overrides", {})
+    cat_override = prefs.get("category_overrides", {})
+    
+    categories = {}
+    for cat in system_cats:
+        cid = cat["category_id"]
+        categories[cid] = {
+            "display_name": cat_override.get(cid, {}).get("display_name") or cat["display_name"],
+            "default_name": cat["default_name"]
+        }
+    
+    labels = {}
+    for l in system_labels:
+        aid = l["asset_id"]
+        labels[aid] = {
+            "display_name": labels_override.get(aid, {}).get("display_name") or l["display_name"],
+            "default_name": l["default_name"],
+            "category_id": l.get("category_id")
+        }
+    
+    result = {"categories": categories, "labels": labels}
+    _resolved_map_cache[cache_key] = {"data": result, "timestamp": current_time}
+    return result
+
+
+def get_asset_display_name(asset_id_or_class: str, resolved_map: dict = None) -> str:
+    """
+    Get display name for an asset, falling back to humanized class name.
+    
+    Args:
+        asset_id_or_class: Either an asset_id (type_asset_XX) or class name (Fence, Traffic_Sign)
+        resolved_map: Optional pre-loaded resolved map
+    
+    Returns:
+        Human-readable display name
+    """
+    if not resolved_map:
+        resolved_map = get_resolved_map()
+    
+    labels = resolved_map.get("labels", {})
+    
+    # Direct ID lookup (e.g., type_asset_98)
+    if asset_id_or_class in labels:
+        return labels[asset_id_or_class]["display_name"]
+    
+    # Try matching by default_name (e.g., Fence, Traffic_Sign)
+    for aid, data in labels.items():
+        if data.get("default_name") == asset_id_or_class:
+            return data["display_name"]
+    
+    # Fallback: humanize the class name
+    return asset_id_or_class.replace("_", " ").title()
+
+
+def get_category_display_name(category_id_or_name: str, resolved_map: dict = None) -> str:
+    """
+    Get display name for a category.
+    
+    Args:
+        category_id_or_name: Either a category_id (type_category_X) or name (OIA, ITS)
+        resolved_map: Optional pre-loaded resolved map
+    
+    Returns:
+        Human-readable display name
+    """
+    if not resolved_map:
+        resolved_map = get_resolved_map()
+    
+    categories = resolved_map.get("categories", {})
+    
+    # Direct ID lookup
+    if category_id_or_name in categories:
+        return categories[category_id_or_name]["display_name"]
+    
+    # Try matching by default_name
+    for cid, data in categories.items():
+        if data.get("default_name") == category_id_or_name:
+            return data["display_name"]
+    
+    # Fallback
+    return category_id_or_name.replace("_", " ").title()
 
 
 def _normalize_video_id(video_id: str) -> str:
@@ -141,6 +294,9 @@ def get_asset_categories(video_id: str = "") -> str:
     if not video_id:
         return context_msg or "No video available to query."
     
+    # Load resolved map for display names
+    resolved_map = get_resolved_map()
+    
     if DemoDataLoader.is_demo_video(video_id):
         # Use demo data
         loader = get_demo_loader()
@@ -154,7 +310,8 @@ def get_asset_categories(video_id: str = "") -> str:
         lines = [f"Asset Categories (Total: {total:,} assets)\n"]
         for cat, count in sorted(by_category.items(), key=lambda x: -x[1]):
             pct = round(count / total * 100, 1) if total else 0
-            lines.append(f"- {cat}: {count:,} ({pct}%)")
+            display_name = get_category_display_name(cat, resolved_map)
+            lines.append(f"- {display_name}: {count:,} ({pct}%)")
         
         return "\n".join(lines)
     else:
@@ -170,7 +327,8 @@ def get_asset_categories(video_id: str = "") -> str:
         
         lines = [f"Asset Categories (Total: {total:,} detections)\n"]
         for asset_type, count in sorted(type_dist.items(), key=lambda x: -x[1]):
-            lines.append(f"- {asset_type}: {count:,}")
+            display_name = get_asset_display_name(asset_type, resolved_map)
+            lines.append(f"- {display_name}: {count:,}")
         
         return "\n".join(lines)
 
@@ -192,6 +350,9 @@ def get_asset_list(video_id: str = "") -> str:
     if not video_id:
         return context_msg or "No video available to query."
     
+    # Load resolved map for display names
+    resolved_map = get_resolved_map()
+    
     if DemoDataLoader.is_demo_video(video_id):
         loader = get_demo_loader()
         summary = loader.get_summary_for_video(video_id)
@@ -211,7 +372,7 @@ def get_asset_list(video_id: str = "") -> str:
         lines.append("Asset Types:")
         
         for asset_type, count in sorted(by_type.items(), key=lambda x: -x[1])[:20]:
-            display = asset_type.replace("_", " ").title()
+            display = get_asset_display_name(asset_type, resolved_map)
             lines.append(f"- {display}: {count:,}")
         
         if len(by_type) > 20:
@@ -234,7 +395,8 @@ def get_asset_list(video_id: str = "") -> str:
         lines.append("Asset Types:")
         
         for asset_type, count in sorted(type_dist.items(), key=lambda x: -x[1]):
-            lines.append(f"- {asset_type}: {count:,}")
+            display = get_asset_display_name(asset_type, resolved_map)
+            lines.append(f"- {display}: {count:,}")
         
         return "\n".join(lines)
 
@@ -321,6 +483,9 @@ def get_damaged_assets(video_id: str = "") -> str:
     if not video_id:
         return context_msg or "No video available to query."
     
+    # Load resolved map for display names
+    resolved_map = get_resolved_map()
+    
     if DemoDataLoader.is_demo_video(video_id):
         loader = get_demo_loader()
         damaged = loader.get_damaged_assets_grouped(video_id)
@@ -332,7 +497,7 @@ def get_damaged_assets(video_id: str = "") -> str:
         lines = [f"Damaged Assets Requiring Attention (Total: {total:,})\n"]
         
         for item in damaged:
-            display = item["type"].replace("_", " ").title()
+            display = get_asset_display_name(item["type"], resolved_map)
             lines.append(f"- {display}: {item['count']:,}")
         
         return "\n".join(lines)
@@ -357,7 +522,8 @@ def get_damaged_assets(video_id: str = "") -> str:
         
         lines = [f"Damaged Assets (Total: {len(damaged)})\n"]
         for t, c in sorted(by_type.items(), key=lambda x: -x[1]):
-            lines.append(f"- {t}: {c}")
+            display = get_asset_display_name(t, resolved_map)
+            lines.append(f"- {display}: {c}")
         
         return "\n".join(lines)
 
@@ -381,6 +547,9 @@ def rank_assets_by_defects(video_id: str = "") -> str:
     video_id, context_msg = _resolve_video_id(video_id)
     if not video_id:
         return context_msg or "No video available to query."
+    
+    # Load resolved map for display names
+    resolved_map = get_resolved_map()
     
     if DemoDataLoader.is_demo_video(video_id):
         loader = get_demo_loader()
@@ -420,7 +589,7 @@ def rank_assets_by_defects(video_id: str = "") -> str:
         lines.append("(Higher percentage = more defects)\n")
         
         for i, r in enumerate(ranked[:15], 1):
-            display = r["type"].replace("_", " ").title()
+            display = get_asset_display_name(r["type"], resolved_map)
             lines.append(f"{i}. {display}: {r['rate']}% damaged ({r['damaged']}/{r['total']})")
         
         return "\n".join(lines)
@@ -499,6 +668,9 @@ def get_category_condition_summary(video_id: str = "") -> str:
     if not video_id:
         return context_msg or "No video available to query."
     
+    # Load resolved map for display names
+    resolved_map = get_resolved_map()
+    
     if DemoDataLoader.is_demo_video(video_id):
         loader = get_demo_loader()
         assets = loader.get_assets_by_video(video_id)
@@ -530,7 +702,8 @@ def get_category_condition_summary(video_id: str = "") -> str:
             good_pct = round(good / total * 100, 1) if total else 0
             damaged_pct = round(damaged / total * 100, 1) if total else 0
             
-            lines.append(f"\n{cat}:")
+            display_name = get_category_display_name(cat, resolved_map)
+            lines.append(f"\n{display_name}:")
             lines.append(f"  Total: {total:,} | Good: {good:,} ({good_pct}%) | Damaged: {damaged:,} ({damaged_pct}%)")
         
         return "\n".join(lines)

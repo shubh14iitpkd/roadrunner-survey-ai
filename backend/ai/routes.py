@@ -151,7 +151,7 @@ def add_message(chat_id: str):
                 print(f"[routes] Video lookup failed: {e}")
         
         # Create chatbot with video context and chat_id for memory
-        chatbot = LangChatbot(video_id=normalized_video_id, chat_id=chat_id)
+        chatbot = LangChatbot(video_id=normalized_video_id, chat_id=chat_id, user_id=user_id)
         ai_response_text = chatbot.ask(content)
 
     except Exception as e:

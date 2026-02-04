@@ -34,7 +34,7 @@ class DemoDataLoader:
     
     def _load_data(self):
         """Load preprocessed demo data from JSON file"""
-        data_path = Path(__file__).parent.parent / "demo-data" / "demo-assets-processed.json"
+        data_path = Path(__file__).parent.parent / "demo-data" / "demo-assets-processed-updated-ids.json"
         
         if not data_path.exists():
             print(f"[DemoDataLoader] Demo data not found at {data_path}")
@@ -82,8 +82,8 @@ class DemoDataLoader:
         by_condition = defaultdict(int)
         
         for a in assets:
-            by_category[a.get("category", "Unknown")] += 1
-            by_type[a.get("type", "Unknown")] += 1
+            by_category[a.get("category_id", "Unknown")] += 1
+            by_type[a.get("asset_id", "Unknown")] += 1
             by_condition[a.get("condition", "Unknown")] += 1
         
         return {
