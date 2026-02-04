@@ -164,7 +164,7 @@ export default function FramePopupContent({
 
         // Draw label text
         ctx.fillStyle = '#ffffff';
-        ctx.font = 'bold 11px Arial';
+        ctx.font = 'bold 10px Arial';
         // ctx.globalAlpha = 1;
         ctx.fillText(label, x + 3, y - 6);
       }

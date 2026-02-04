@@ -42,7 +42,7 @@ interface FrameWithDetection {
   timestamp: number;
   latitude?: number;
   longitude?: number;
-  detections: Record<string, Array<{ class_name: string; confidence: number }>>;
+  detections: Record<string, Array<{ asset_id: string; category_id: string; class_name: string; confidence: number }>>;
   detections_count: number;
 }
 
@@ -58,7 +58,8 @@ interface VideoFramesData {
 interface LeafletMapViewProps {
   selectedRoadNames?: string[];
   roads?: any[];
-  selectedAssetTypes?: string[];
+  selectedAssetTypes?: string[]; // Array of asset_id values from labelMapData
+  selectedCategories?: string[]; // Array of category_id values from labelMapData
 }
 
 interface ParsedGpxData {
@@ -115,7 +116,7 @@ const PopupLoader = () => (
   </div>
 );
 
-export default function LeafletMapView({ selectedRoadNames = [], roads = [], selectedAssetTypes = [] }: LeafletMapViewProps) {
+export default function LeafletMapView({ selectedRoadNames = [], roads = [], selectedAssetTypes = [], selectedCategories = [] }: LeafletMapViewProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<L.Map | null>(null);
   const polylinesRef = useRef<L.Polyline[]>([]);
@@ -349,21 +350,36 @@ export default function LeafletMapView({ selectedRoadNames = [], roads = [], sel
         // Get the associated frame for this point
         const associatedFrame = getFrameForPoint(index);
 
-        // Filter based on selectedAssetTypes
-        if (selectedAssetTypes.length > 0) {
-          if (!associatedFrame || !associatedFrame.detections) {
-            return; // Skip - no frame data for this point
+        // Filter based on selectedAssetTypes or selectedCategories
+        if (selectedAssetTypes.length > 0 || selectedCategories.length > 0) {
+          if (!associatedFrame || !associatedFrame.detections || !labelMapData) {
+            return; // Skip - no frame data or label map for this point
           }
 
           // Flatten detections from Record<string, Detection[]> to Detection[]
           const allDetections = Object.values(associatedFrame.detections).flat();
 
-          const hasSelectedAssetType = allDetections.some(detection =>
-            selectedAssetTypes.includes(detection.class_name)
-          );
+          // Check if any detection matches the selected filters
+          const hasMatchingDetection = allDetections.some(detection => {
+            // Find the asset_id and category_id for this detection's class_name
+          const labelEntry = Object.entries(labelMapData.labels).find(
+                ([, labelData]) => 
+                  labelData.asset_id === detection.asset_id || 
+                  labelData.category_id === labelMapData?.labels[detection.asset_id].category_id
+              );
 
-          if (!hasSelectedAssetType) {
-            return; // Skip this marker - doesn't have any of the selected asset types
+              if (!labelEntry) return false;
+
+              const [assetId, labelData] = labelEntry;
+              const categoryId = (labelData as any).category_id;
+
+              // Show marker if detection's asset_id is in selectedAssetTypes 
+              // OR if detection's category_id is in selectedCategories
+              return selectedAssetTypes.includes(assetId) || selectedCategories.includes(categoryId);
+            });
+
+          if (!hasMatchingDetection) {
+            return; // Skip this marker - no detection matches the filters
           }
         }
 
@@ -528,7 +544,7 @@ export default function LeafletMapView({ selectedRoadNames = [], roads = [], sel
 
       markersRef.current.push(startMarker as any);
     });
-  }, [tracks, selectedRoadNames, selectedAssetTypes, videoFramesMap]);
+  }, [tracks, selectedRoadNames, selectedAssetTypes, selectedCategories, videoFramesMap, labelMapData]);
 
   return (
     <div

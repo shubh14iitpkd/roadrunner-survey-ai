@@ -119,6 +119,7 @@ def get_resolved_map(user_id: str):
 		aid = l["asset_id"]
 		resolved_labels[aid] = {
 			"asset_id": aid,
+			"category_id": l.get("category_id"),  # Include category_id for tree building
 			"original_display_name": l["display_name"],
 			"display_name": labels_override.get(aid, {}).get("display_name") or l["display_name"]
 		}

@@ -38,13 +38,14 @@ import {
 import { toast } from "sonner";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { CATEGORY_ATTRIBUTES } from "@/data/categoryAttributes";
+import { useLabelMap } from "@/contexts/LabelMapContext";
 
 export default function GISView() {
   const [searchParams] = useSearchParams();
   const [selectedRoads, setSelectedRoads] = useState<string[]>([]);
   const [selectedConditions, setSelectedConditions] = useState<string[]>(["Good", "Fair", "Poor"]);
   const [selectedAssetTypes, setSelectedAssetTypes] = useState<string[]>([]);
+  const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
   const [expandedCategories, setExpandedCategories] = useState<string[]>([]);
   const [selectedAsset, setSelectedAsset] = useState<any | null>(null);
   const [isDetailDialogOpen, setIsDetailDialogOpen] = useState(false);
@@ -52,25 +53,23 @@ export default function GISView() {
   const [roadSelectorOpen, setRoadSelectorOpen] = useState(false);
   const [assetSearchQuery, setAssetSearchQuery] = useState("");
   const [roads, setRoads] = useState<any[]>([]);
-  const [categories, setCategories] = useState<any[]>([]);
   const [assets, setAssets] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+
+  // Get label map from context
+  const { data: labelMapData } = useLabelMap();
 
   // Load data from API on mount
   useEffect(() => {
     (async () => {
       try {
         setLoading(true);
-        const [roadsResp, assetsResp, categoriesResp] = await Promise.all([
+        const [roadsResp, assetsResp] = await Promise.all([
           api.roads.list(),
           api.assets.list(),
-          api.categories.list(),
         ]);
         if (roadsResp?.items) setRoads(roadsResp.items);
         if (assetsResp?.items) setAssets(assetsResp.items);
-        // TODO: This is probably not used, need to verify
-        // also, the categories endpoint is always returning an empty list
-        if (categoriesResp?.items) setCategories(categoriesResp.items);
       } catch (err: any) {
         console.error("Failed to load GIS data:", err);
         toast.error("Failed to load GIS data from database");
@@ -128,10 +127,16 @@ export default function GISView() {
 
       const matchesRoad = selectedRoads.length === 0 || selectedRoads.includes(roadName);
       const matchesCondition = selectedConditions.includes(asset.condition);
-      const matchesType = selectedAssetTypes.length === 0 || selectedAssetTypes.includes(asset.category);
-      return matchesRoad && matchesCondition && matchesType;
+      
+      // Filter by category OR asset type
+      const matchesFilter = 
+        (selectedCategories.length === 0 && selectedAssetTypes.length === 0) || // No filters
+        selectedCategories.includes(asset.category) || // Category is selected
+        selectedAssetTypes.includes(asset.asset_id); // Asset type is selected
+      
+      return matchesRoad && matchesCondition && matchesFilter;
     });
-  }, [assets, roads, selectedRoads, selectedConditions, selectedAssetTypes]);
+  }, [assets, roads, selectedRoads, selectedConditions, selectedCategories, selectedAssetTypes]);
 
   const toggleRoad = (roadName: string) => {
     setSelectedRoads(prev =>
@@ -149,34 +154,20 @@ export default function GISView() {
     );
   };
 
-  const toggleCondition = (condition: string) => {
-    setSelectedConditions(prev =>
-      prev.includes(condition)
-        ? prev.filter(c => c !== condition)
-        : [...prev, condition]
-    );
-  };
-
-  const toggleAssetType = (assetType: string) => {
-    console.log(assetType)
+  const toggleAssetType = (assetId: string) => {
     setSelectedAssetTypes(prev =>
-      prev.includes(assetType)
-        ? prev.filter(t => t !== assetType)
-        : [...prev, assetType]
+      prev.includes(assetId)
+        ? prev.filter(t => t !== assetId)
+        : [...prev, assetId]
     );
   };
 
-  const getConditionColor = (condition: string) => {
-    switch (condition) {
-      case "Good":
-        return "#10b981"; // green
-      case "Fair":
-        return "#f59e0b"; // yellow/amber
-      case "Poor":
-        return "#ef4444"; // red
-      default:
-        return "#6b7280";
-    }
+  const toggleCategoryFilter = (categoryId: string) => {
+    setSelectedCategories(prev =>
+      prev.includes(categoryId)
+        ? prev.filter(c => c !== categoryId)
+        : [...prev, categoryId]
+    );
   };
 
   const handleSubmitFeedback = () => {
@@ -190,209 +181,62 @@ export default function GISView() {
     setIsDetailDialogOpen(false);
   };
 
-  // Road network paths - SVG path definitions for different roads
-  const roadPaths = {
-    "Doha Corniche": "M 10,30 Q 30,25 50,30 T 90,35",
-    "Salwa Road": "M 5,50 L 95,55",
-    "Al Shamal Road": "M 30,5 Q 32,30 35,50 T 40,95",
-    "Lusail Expressway": "M 15,15 Q 40,20 60,25 T 90,30",
-    "Dukhan Highway": "M 10,70 Q 50,68 90,70",
-    "Al Khor Coastal Road": "M 60,10 Q 65,30 70,50 T 80,90",
-    "Orbital Highway": "M 20,80 Q 50,75 80,80",
-    "Al Rayyan Road": "M 5,40 L 95,45",
-    "C-Ring Road": "M 50,10 Q 55,50 50,90",
-    "D-Ring Road": "M 65,15 Q 68,50 65,85"
-  };
+  // Build category tree from label map context
+  const categoryTree = useMemo(() => {
+    if (!labelMapData) return [];
 
-  // Get position along a road path for an asset
-  const getPositionOnRoad = (roadName: string, assetIndex: number, totalAssets: number) => {
-    const path = roadPaths[roadName as keyof typeof roadPaths];
-    if (!path) return { x: 50, y: 50 };
+    // Group asset types by category using the category_id from label data
+    const categoriesMap = new Map<string, { categoryId: string; categoryName: string; assetTypes: Array<{ assetId: string; assetName: string }> }>();
 
-    // For simplicity, distribute assets evenly along the road
-    // In a real implementation, you'd calculate actual positions along the SVG path
-    const progress = totalAssets > 1 ? assetIndex / (totalAssets - 1) : 0.5;
+    // Process all labels (asset types) and group by their category_id
+    Object.entries(labelMapData.labels).forEach(([assetId, labelData]) => {
+      // Each label has a category_id field from the backend
+      const categoryId = (labelData as any).category_id;
+      
+      if (!categoryId) return; // Skip if no category mapping
 
-    // Simple linear interpolation for demonstration
-    // Extract start and end points from path
-    const matches = path.match(/M\s*([\d.]+),([\d.]+).*?([\d.]+),([\d.]+)/);
-    if (matches) {
-      const [, x1, y1, x2, y2] = matches.map(Number);
-      return {
-        x: x1 + (x2 - x1) * progress,
-        y: y1 + (y2 - y1) * progress
-      };
-    }
-
-    return { x: 50, y: 50 };
-  };
-
-  // Group assets by road for positioning
-  const assetsByRoad = useMemo(() => {
-    const grouped: Record<string, any[]> = {};
-    filteredAssets.forEach(asset => {
-      const road = roads.find(r => r.route_id === asset.route_id);
-      const roadName = road?.road_name || "Unknown";
-      if (!grouped[roadName]) {
-        grouped[roadName] = [];
+      if (!categoriesMap.has(categoryId)) {
+        // Find category display name from labelMapData.categories
+        const categoryData = labelMapData.categories[categoryId];
+        categoriesMap.set(categoryId, {
+          categoryId: categoryId,
+          categoryName: categoryData?.display_name || categoryId,
+          assetTypes: []
+        });
       }
-      grouped[roadName].push(asset);
-    });
-    return grouped;
-  }, [filteredAssets, roads]);
 
-  // Hardcoded asset categories
-  const uniqueAssetCategories = useMemo(() => {
-    return [
-      "DIRECTIONAL STRUCTURE",
-      "GANTRY DIRECTIONAL SIGN",
-      "POLE DIRECTIONAL SIGN",
-      "STREET SIGN",
-      "TRAFFIC SIGN",
-      "AIR QUALITY MONITORING SYSTEM (AQMS)",
-      "CLOSED CIRCUIT TELEVISION (CCTV)",
-      "DYNAMIC MESSAGE SIGN (DMS) ( ELECTRONIC SIGNBOARDS)",
-      "EMERGENCY PHONE",
-      "FIRE EXTINGUISHER",
-      "ITS ENCLOSURE",
-      "ITS FEEDER PILLAR",
-      "ITS STRUCTURE",
-      "LANE CONTROL SIGNS (LCS)",
-      "OVER-HEIGHT VEHICLE DETECTION SYSTEM (OVDS)",
-      "OVDS SPEAKER",
-      "ROAD WEATHER INFORMATION SYSTEM (RWIS)",
-      "SMALL DYNAMIC MESSAGING SIGN",
-      "TRAFFIC SIGNAL",
-      "TRAFFIC SIGNAL FEEDER PILLAR",
-      "TRAFFIC SIGNAL HEAD",
-      "TRAFFIC SIGNAL JUNCTION",
-      "VEHICLE RESTRAINT SYSTEM",
-      "ANIMAL FENCE",
-      "ANIMAL GRID",
-      "CRASH CUSHION",
-      "FENCE",
-      "GUARDRAIL",
-      "TRAFFIC BOLLARD",
-      "KERB",
-      "ROAD MARKING LINE",
-      "ROAD MARKING POINT",
-      "ROAD MARKING POLYGON",
-      "ROAD STUDS",
-      "RUMBLE STRIP",
-      "SPEED HUMPS",
-      "ACCESSWAY",
-      "CARRIAGEWAY",
-      "CENTRAL ROUNDABOUT ISLAND",
-      "FOOTPATH",
-      "JUNCTION ISLAND",
-      "MEDIAN",
-      "PARKING BAY",
-      "SEPERATOR ISLAND",
-      "SHOULDER",
-      "STREET LIGHT FEEDER PILLAR",
-      "STREET LIGHT",
-      "STREET LIGHT POLE",
-      "UNDERPASS LUMINAIRE",
-      "BRIDGE",
-      "CABLE BRIDGE",
-      "CAMEL CROSSING",
-      "CULVERT",
-      "FLYOVER",
-      "FOOTBRIDGE",
-      "MONUMENT",
-      "OVERPASS OP (ONLY PEDESTRIAN)",
-      "OVERPASS OV",
-      "PEDESTRAIN UNDERPASS",
-      "RETAINING WALL",
-      "TOLL GATE",
-      "TUNNEL",
-      "UNDERPASS",
-      "VIADUCT",
-      "Street Light",
-      "Artificial Grass",
-      "Bench",
-      "Bike Rack",
-      "Bin",
-      "Decorative Fence",
-      "Fitness Equipment",
-      "Flower Bed",
-      "Fountain",
-      "Garden",
-      "Gravel Area",
-      "Hedge",
-      "Hoarding",
-      "Interlock Area",
-      "Jogger Track",
-      "Kerbstone",
-      "Landscape Light",
-      "Natural Grass",
-      "Planter Pot",
-      "Recessed Light",
-      "Road Batter",
-      "Sand Area",
-      "Tree",
-      "Treeguard"
-    ];
-  }, []);
-
-  // Helper function to find which Asset Category an Asset Type belongs to
-  const findAssetCategoryForType = (assetType: string): { category: string; attributes: Record<string, Record<string, string>[]> } | null => {
-    for (const [categoryName, assetTypes] of Object.entries(CATEGORY_ATTRIBUTES)) {
-      if (assetTypes[assetType]) {
-        return { category: categoryName, attributes: assetTypes[assetType] };
-      }
-    }
-    return null;
-  };
-
-  // Build the hierarchical structure for display: Asset Category -> Asset Types -> Attributes -> Subtypes
-  const assetCategoryHierarchy = useMemo(() => {
-    const hierarchy: Record<string, { assetTypes: string[]; categoryData: Record<string, Record<string, Record<string, string>[]>> }> = {};
-
-    // Group Asset Types by their Asset Category
-    uniqueAssetCategories.forEach(assetType => {
-      const result = findAssetCategoryForType(assetType);
-      if (result) {
-        if (!hierarchy[result.category]) {
-          hierarchy[result.category] = {
-            assetTypes: [],
-            categoryData: {}
-          };
-        }
-        hierarchy[result.category].assetTypes.push(assetType);
-        hierarchy[result.category].categoryData[assetType] = result.attributes;
-      }
+      const category = categoriesMap.get(categoryId)!;
+      category.assetTypes.push({
+        assetId: assetId,
+        assetName: labelData.display_name
+      });
     });
 
-    return hierarchy;
-  }, [uniqueAssetCategories]);
+    return Array.from(categoriesMap.values()).sort((a, b) => a.categoryName.localeCompare(b.categoryName));
+  }, [labelMapData]);
 
   // Filter categories based on search query
-  const filteredCategories = useMemo(() => {
+  const filteredCategoryTree = useMemo(() => {
     const query = assetSearchQuery.toLowerCase().trim();
 
     if (!query) {
-      return Object.entries(assetCategoryHierarchy).map(([categoryName, data]) => ({
-        category: categoryName,
-        assetTypes: data.assetTypes,
-        categoryData: data.categoryData
-      }));
+      return categoryTree;
     }
 
     // Filter by category name or asset type name
-    return Object.entries(assetCategoryHierarchy)
-      .filter(([categoryName, data]) =>
-        categoryName.toLowerCase().includes(query) ||
-        data.assetTypes.some(type => type.toLowerCase().includes(query))
-      )
-      .map(([categoryName, data]) => ({
-        category: categoryName,
-        assetTypes: data.assetTypes.filter(type =>
-          categoryName.toLowerCase().includes(query) || type.toLowerCase().includes(query)
-        ),
-        categoryData: data.categoryData
-      }));
-  }, [assetSearchQuery, assetCategoryHierarchy]);
+    return categoryTree
+      .map(category => ({
+        ...category,
+        assetTypes: category.assetTypes.filter(assetType =>
+          category.categoryName.toLowerCase().includes(query) ||
+          assetType.assetName.toLowerCase().includes(query)
+        )
+      }))
+      .filter(category =>
+        category.categoryName.toLowerCase().includes(query) ||
+        category.assetTypes.length > 0
+      );
+  }, [assetSearchQuery, categoryTree]);
 
 
 
@@ -621,108 +465,80 @@ export default function GISView() {
 
                 {/* Categories List */}
                 <div className="space-y-2">
-                  {filteredCategories.length === 0 ? (
+                  {filteredCategoryTree.length === 0 ? (
                     <div className="text-center py-8 text-sm text-muted-foreground">
                       No asset categories found
                     </div>
                   ) : (
-                    filteredCategories.map(({ category, assetTypes, categoryData }) => {
-                      const isCategoryExpanded = expandedCategories.includes(category);
-                      // console.log(categories, categoryData, assetTypes)
+                    filteredCategoryTree.map(({ categoryId, categoryName, assetTypes }) => {
+                      const isCategoryExpanded = expandedCategories.includes(categoryId);
+                      const isCategorySelected = selectedCategories.includes(categoryId);
+                      
                       return (
-                        <Collapsible key={category} open={isCategoryExpanded} onOpenChange={() => toggleCategory(category)}>
-                          {/* Level 1: Asset Category */}
-                          <CollapsibleTrigger className="flex items-center justify-between w-full p-3 rounded-lg hover:bg-muted transition-colors border bg-card">
-                            <span className="text-sm font-semibold text-left">{category}</span>
-                            <div className="flex items-center gap-2">
-                              <Badge variant="secondary" className="text-xs font-mono">
-                                {assetTypes.length}
-                              </Badge>
-                              {isCategoryExpanded ? (
-                                <ChevronDown className="h-4 w-4 text-primary" />
-                              ) : (
-                                <ChevronRight className="h-4 w-4" />
-                              )}
-                            </div>
-                          </CollapsibleTrigger>
+                        <Collapsible 
+                          key={categoryId} 
+                          open={isCategoryExpanded} 
+                          onOpenChange={() => toggleCategory(categoryId)}
+                        >
+                          {/* Level 1: Category with checkbox */}
+                          <div className={cn(
+                            "flex items-center gap-2 p-3 rounded-lg border transition-all",
+                            isCategorySelected ? "bg-primary/10 border-primary" : "bg-card hover:bg-muted"
+                          )}>
+                            <Checkbox
+                              id={`category-${categoryId}`}
+                              checked={isCategorySelected}
+                              onCheckedChange={() => toggleCategoryFilter(categoryId)}
+                              className="mt-0.5"
+                            />
+                            <CollapsibleTrigger className="flex items-center justify-between flex-1">
+                              <label
+                                htmlFor={`category-${categoryId}`}
+                                className="text-sm font-semibold text-left cursor-pointer flex-1"
+                                onClick={(e) => e.preventDefault()}
+                              >
+                                {categoryName}
+                              </label>
+                              <div className="flex items-center gap-2">
+                                <Badge variant="secondary" className="text-xs font-mono">
+                                  {assetTypes.length}
+                                </Badge>
+                                {isCategoryExpanded ? (
+                                  <ChevronDown className="h-4 w-4 text-primary" />
+                                ) : (
+                                  <ChevronRight className="h-4 w-4" />
+                                )}
+                              </div>
+                            </CollapsibleTrigger>
+                          </div>
+                          
                           <CollapsibleContent>
-                            <div className="pl-3 pt-2 pb-2 space-y-2 bg-muted/20 rounded-b-lg">
-                              {/* Level 2: Asset Types */}
-                              {assetTypes.map((assetType) => {
-                                const assetTypeKey = `${category}-${assetType}`;
-                                const isAssetTypeExpanded = expandedCategories.includes(assetTypeKey);
-                                const attributes = categoryData[assetType] || {};
-                                const attributeCount = Object.keys(attributes).length;
-
+                            <div className="pl-3 pt-2 pb-2 space-y-1.5 bg-muted/10 rounded-b-lg border-l-2 border-primary/20 ml-3">
+                              {/* Level 2: Asset Types with checkboxes */}
+                              {assetTypes.map(({ assetId, assetName }) => {
+                                const isAssetSelected = selectedAssetTypes.includes(assetId);
+                                
                                 return (
-                                  <Collapsible key={assetType} open={isAssetTypeExpanded} onOpenChange={() => toggleCategory(assetTypeKey)}>
-                                    <CollapsibleTrigger className="flex items-center justify-between w-full p-2 rounded hover:bg-background/80 transition-colors border-l-2 border-primary/30 pl-3">
-                                      <span className="text-xs font-medium text-left">{assetType}</span>
-                                      <div className="flex items-center gap-2">
-                                        <Badge variant="outline" className="text-xs">
-                                          {attributeCount}
-                                        </Badge>
-                                        {isAssetTypeExpanded ? (
-                                          <ChevronDown className="h-3 w-3" />
-                                        ) : (
-                                          <ChevronRight className="h-3 w-3" />
-                                        )}
-                                      </div>
-                                    </CollapsibleTrigger>
-                                    <CollapsibleContent>
-                                      <div className="pl-4 pt-1 pb-1 space-y-1">
-                                        {/* Level 3: Attributes */}
-                                        {Object.entries(attributes).map(([attributeName, subtypes]) => {
-                                          const attributeKey = `${category}-${assetType}-${attributeName}`;
-                                          const isAttributeExpanded = expandedCategories.includes(attributeKey);
-                                          // console.log(attributeKey)
-                                          return (
-                                            <Collapsible key={attributeName} open={isAttributeExpanded} onOpenChange={() => toggleCategory(attributeKey)}>
-                                              <CollapsibleTrigger className="flex items-center justify-between w-full p-2 rounded hover:bg-muted/50 transition-colors">
-                                                <span className="text-xs font-medium text-left text-muted-foreground">{attributeName}</span>
-                                                <div className="flex items-center gap-2">
-                                                  <Badge variant="outline" className="text-xs bg-background">
-                                                    {subtypes.length}
-                                                  </Badge>
-                                                  {isAttributeExpanded ? (
-                                                    <ChevronDown className="h-3 w-3" />
-                                                  ) : (
-                                                    <ChevronRight className="h-3 w-3" />
-                                                  )}
-                                                </div>
-                                              </CollapsibleTrigger>
-                                              <CollapsibleContent>
-                                                <div className="pl-3 pt-1 pb-1 space-y-1">
-                                                  {/* Level 4: Subtypes (Checkboxes) */}
-                                                  {subtypes.map((subtype) => {
-                                                    // subtype is { "Display Label": "mapping_value" }
-                                                    const label = Object.keys(subtype)[0];
-                                                    const mappingValue = Object.values(subtype)[0];
-                                                    return (
-                                                      <div key={mappingValue} className="flex items-start space-x-2 py-1 px-2 rounded hover:bg-background/50 transition-colors">
-                                                        <Checkbox
-                                                          id={`subtype-${category}-${assetType}-${attributeName}-${mappingValue}`}
-                                                          checked={selectedAssetTypes.includes(mappingValue)}
-                                                          onCheckedChange={() => toggleAssetType(mappingValue)}
-                                                          className="mt-0.5"
-                                                        />
-                                                        <label
-                                                          htmlFor={`subtype-${category}-${assetType}-${attributeName}-${mappingValue}`}
-                                                          className="text-xs leading-relaxed cursor-pointer hover:text-primary transition-colors flex-1"
-                                                        >
-                                                          {label}
-                                                        </label>
-                                                      </div>
-                                                    );
-                                                  })}
-                                                </div>
-                                              </CollapsibleContent>
-                                            </Collapsible>
-                                          );
-                                        })}
-                                      </div>
-                                    </CollapsibleContent>
-                                  </Collapsible>
+                                  <div 
+                                    key={assetId}
+                                    className={cn(
+                                      "flex items-center space-x-2 p-2 rounded transition-colors",
+                                      isAssetSelected ? "bg-primary/5" : "hover:bg-background/80"
+                                    )}
+                                  >
+                                    <Checkbox
+                                      id={`asset-${assetId}`}
+                                      checked={isAssetSelected}
+                                      onCheckedChange={() => toggleAssetType(assetId)}
+                                      className="mt-0.5"
+                                    />
+                                    <label
+                                      htmlFor={`asset-${assetId}`}
+                                      className="text-xs font-medium cursor-pointer hover:text-primary transition-colors flex-1"
+                                    >
+                                      {assetName}
+                                    </label>
+                                  </div>
                                 );
                               })}
                             </div>
@@ -743,6 +559,7 @@ export default function GISView() {
                   setSelectedRoads([]);
                   setSelectedConditions(["Good", "Fair", "Poor"]);
                   setSelectedAssetTypes([]);
+                  setSelectedCategories([]);
                 }}
               >
                 Reset All Filters
@@ -752,9 +569,13 @@ export default function GISView() {
         </ScrollArea>
       </Card>
 
-      {/* Map Container - Using Leaflet (Offline capable) */}
       <div className="flex-1 relative">
-        <LeafletMapView selectedRoadNames={selectedRoads} roads={roads} selectedAssetTypes={selectedAssetTypes} />
+        <LeafletMapView 
+          selectedRoadNames={selectedRoads} 
+          roads={roads} 
+          selectedAssetTypes={selectedAssetTypes} 
+          selectedCategories={selectedCategories}
+        />
       </div>
 
       {/* Asset Detail Dialog */}
@@ -849,75 +670,6 @@ export default function GISView() {
                   <p className="text-sm">{selectedAsset.surveyorName}</p>
                 </div>
               </div>
-
-              {/* Category Attributes Section */}
-              {selectedAsset.category && (() => {
-                const assetTypeData = findAssetCategoryForType(selectedAsset.category);
-                return assetTypeData && (
-                  <div className="border-t pt-4">
-                    <h3 className="text-base font-semibold mb-3">Asset Attributes</h3>
-                    <p className="text-xs text-muted-foreground mb-3">
-                      Category: {assetTypeData.category} → Type: {selectedAsset.category}
-                    </p>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                      {Object.entries(assetTypeData.attributes).map(([attributeName, subtypes]) => (
-                        <div key={attributeName} className="space-y-2">
-                          <Label className="text-sm font-medium">
-                            {attributeName}
-                          </Label>
-                          {subtypes && subtypes.length > 0 ? (
-                            <Popover>
-                              <PopoverTrigger asChild>
-                                <Button
-                                  variant="outline"
-                                  role="combobox"
-                                  className="w-full justify-between h-9"
-                                >
-                                  <span className="text-muted-foreground text-sm">
-                                    Select {attributeName.toLowerCase()}...
-                                  </span>
-                                  <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                                </Button>
-                              </PopoverTrigger>
-                              <PopoverContent className="w-[300px] p-0" align="start">
-                                <Command>
-                                  <CommandInput placeholder={`Search ${attributeName.toLowerCase()}...`} />
-                                  <CommandEmpty>No option found.</CommandEmpty>
-                                  <CommandGroup>
-                                    <ScrollArea className="h-[200px]">
-                                      {subtypes.map((subtype: Record<string, string>) => {
-                                        // subtype is { "Display Label": "mapping_value" }
-                                        const label = Object.keys(subtype)[0];
-                                        const mappingValue = Object.values(subtype)[0];
-                                        return (
-                                          <CommandItem
-                                            key={mappingValue}
-                                            onSelect={() => {
-                                              toast.success(`Selected: ${label} (${mappingValue})`);
-                                            }}
-                                          >
-                                            <Check className="mr-2 h-4 w-4 opacity-0" />
-                                            {label}
-                                          </CommandItem>
-                                        );
-                                      })}
-                                    </ScrollArea>
-                                  </CommandGroup>
-                                </Command>
-                              </PopoverContent>
-                            </Popover>
-                          ) : (
-                            <Input
-                              placeholder={`Enter ${attributeName.toLowerCase()}`}
-                              className="h-9"
-                            />
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                );
-              })()}
 
               {/* Feedback Section */}
               <div className="border-t pt-4">
