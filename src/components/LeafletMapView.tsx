@@ -363,9 +363,8 @@ export default function LeafletMapView({ selectedRoadNames = [], roads = [], sel
           const hasMatchingDetection = allDetections.some(detection => {
             // Find the asset_id and category_id for this detection's class_name
           const labelEntry = Object.entries(labelMapData.labels).find(
-                ([, labelData]) => 
-                  labelData.asset_id === detection.asset_id || 
-                  labelData.category_id === labelMapData?.labels[detection.asset_id].category_id
+                ([assetId, labelData]) => 
+                  assetId === detection.asset_id
               );
 
               if (!labelEntry) return false;
