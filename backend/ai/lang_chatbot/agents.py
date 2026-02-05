@@ -16,7 +16,6 @@ from ai.lang_chatbot.context import set_current_user_id
 # Global memory saver for conversation persistence
 _memory_saver = MemorySaver()
 
-
 SYSTEM_PROMPT = """You are RoadSightAI, an intelligent assistant for road survey analysis.
 
 You help users understand road conditions, asset inventories, survey results, and video analysis data.

@@ -64,7 +64,8 @@ class LangChatbot:
             
             response = self.agent.invoke(
                 {"messages": [("user", full_question)]},
-                config=config  # Pass thread config for memory
+                config=config,  # Pass thread config for memory
+                debug=False
             )
             
             # Extract final answer

@@ -992,8 +992,8 @@ def get_survey_assets(route_id: int = 0) -> str:
         lines.append(f"Total Assets: {total:,} (Good: {good:,} | Damaged: {damaged:,})\n")
         lines.append("Asset Types Detected:")
         
-        for asset_type, count in sorted(by_type.items(), key=lambda x: -x[1])[:20]:
-            display = asset_type.replace("_", " ").title()
+        for asset_id, count in sorted(by_type.items(), key=lambda x: -x[1])[:20]:
+            display = get_asset_display_name(asset_id)
             lines.append(f"- {display}: {count:,}")
         
         if len(by_type) > 20:
