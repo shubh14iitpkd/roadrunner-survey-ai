@@ -354,11 +354,11 @@ export default function FramePopupContent({
                         {displayName}
                       </span>
                     </div>
-                    {typeof d.confidence === 'number' && (
+                    {/* {typeof d.confidence === 'number' && (
                       <Badge variant="secondary" className="h-4 px-1 text-xs font-normal">
                         {Math.round(d.confidence * 100)}%
                       </Badge>
-                    )}
+                    )} */}
                   </div>
                   
                   {hasLocation ? (
