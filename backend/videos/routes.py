@@ -458,7 +458,7 @@ def process_video_with_ai(video_id: str):
         search_pattern = f"*_{filename_no_ext}_annotated_compressed.mp4"
         demo_matches = list(annotated_lib_path.glob(search_pattern))
 
-    # demo_matches = []
+    demo_matches = []
     if demo_matches:
         print(
             f"[PROCESS] DEMO MODE DETECTED for {video_id}. Found {len(demo_matches)} annotated files."
@@ -668,12 +668,14 @@ def process_video_with_ai(video_id: str):
                     print(f"[PROCESS] {message} ({progress}%)")
 
                 # Process video
+                gpx_path = upload_root / gpx_file_url.lstrip("/uploads/") if gpx_file_url else None
                 result = processor.process_video(
                     video_path=original_video_path,
                     output_dir=upload_root,  # Pass upload_root directly
                     video_id=video_id,
                     route_id=route_id,  # Pass route_id for organizing frames by road
                     survey_id=survey_id,  # Pass survey_id for linking frames
+                    gpx_path=gpx_path,
                     db=mongo_db,  # Pass MongoDB connection for frame storage
                     progress_callback=update_progress,
                 )
@@ -681,9 +683,8 @@ def process_video_with_ai(video_id: str):
                 print(f"[PROCESS] Processing complete: {result}")
 
                 # Link frames to GPX data if available
-                if gpx_file_url:
+                if gpx_path:
                     try:
-                        gpx_path = upload_root / gpx_file_url.lstrip("/uploads/")
                         print(f"[PROCESS] GPX path: {gpx_path}")
                         print(f"[PROCESS] GPX exists: {gpx_path.exists()}")
                         if gpx_path.exists():

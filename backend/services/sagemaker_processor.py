@@ -15,6 +15,7 @@ from datetime import datetime
 from bson import ObjectId
 import subprocess
 from concurrent.futures import Executor, ThreadPoolExecutor, as_completed
+from services.LatLongEstimator import LatLongEstimator
 
 from deep_sort_realtime.deepsort_tracker import DeepSort
 
@@ -80,6 +81,12 @@ class SageMakerVideoProcessor:
             nms_max_overlap=1,
         )
 
+        self.lat_long_estimator = LatLongEstimator()
+        
+        # Label map for resolving class_name to asset_id and category_id
+        # Will be loaded from MongoDB when db is provided to process_video
+        self.label_map = {}
+
         print(f"[SAGEMAKER] Initialized with endpoint: {self.endpoint_name}")
         print(f"[SAGEMAKER] Region: {self.region}")
         print(f"[SAGEMAKER] Frame interval: {self.frame_interval}")
@@ -97,18 +104,44 @@ class SageMakerVideoProcessor:
             )
 
             if code == 0:
-                print(
-                    "[SAGEMAKER] Hardware Acceleration: ENABLED (NVIDIA GPU detected)"
-                )
+                print("[SAGEMAKER] Hardware Acceleration: ENABLED (NVIDIA GPU detected)")
                 return True
             else:
-                print(
-                    "[SAGEMAKER] Hardware Acceleration: DISABLED (Falling back to CPU)"
-                )
+                print("[SAGEMAKER] Hardware Acceleration: DISABLED (Falling back to CPU)")
                 return False
         except (subprocess.CalledProcessError, FileNotFoundError):
             print("[SAGEMAKER] Hardware Acceleration: DISABLED (Falling back to CPU)")
             return False
+
+    def _load_label_map(self, db) -> Dict[str, Dict[str, str]]:
+        """
+        Load the system label map from MongoDB.
+        Maps class_name (default_name) to asset_id and category_id.
+        
+        Args:
+            db: MongoDB database connection
+            
+        Returns:
+            Dict mapping class_name -> {"asset_id": str, "category_id": str}
+        """
+        if db is None:
+            return {}
+        
+        try:
+            labels = list(db.system_asset_labels.find())
+            label_map = {}
+            for label in labels:
+                default_name = label.get("default_name", "")
+                if default_name:
+                    label_map[default_name] = {
+                        "asset_id": label.get("asset_id"),
+                        "category_id": label.get("category_id")
+                    }
+            print(f"[SAGEMAKER] Loaded label map with {len(label_map)} entries")
+            return label_map
+        except Exception as e:
+            print(f"[SAGEMAKER] Warning: Failed to load label map: {e}")
+            return {}
 
     def _load_endpoint_config(self) -> Optional[str]:
         """
@@ -236,6 +269,9 @@ class SageMakerVideoProcessor:
         """
         print(f"[SAGEMAKER] Processing video: {video_path}")
         print(f"[SAGEMAKER] Route ID: {route_id}, Video ID: {video_id}")
+        
+        # Load label map for resolving class names to asset_id and category_id
+        self.label_map = self._load_label_map(db)
 
         # Chunk size for processing (configurable via environment)
         chunk_size = self.chunk_size
@@ -285,6 +321,7 @@ class SageMakerVideoProcessor:
             raise
         
         gpx_data = {}
+        print(f"[SAGEMAKER] GPX path: {gpx_path}")
         if gpx_path:
             gpx_path = Path(gpx_path)
             if not gpx_path.exists():
@@ -292,12 +329,11 @@ class SageMakerVideoProcessor:
             gpx_parsed = parse_gpx(gpx_path)
             gpx_data = interpolate_gpx(total_frames, fps, gpx_parsed, frame_interval=self.frame_interval, time_offset=0)
             print("[SAGEMAKER] GPX data extracted successfully", len(gpx_data))
-
+        print(len(gpx_data))
         # Processing state
         processed_count = 0
         detections_list = []
         frame_metadata = []
-        all_assets = []
         # lat_set = set()
         # lon_set = set()
         try:
@@ -376,22 +412,23 @@ class SageMakerVideoProcessor:
                                     "detections": detections,
                                 }
                             )
-                            # track assets
+                            # track assets and attach estimated locations
                             formatted_detections = []
+                            car_heading = self.lat_long_estimator.calculate_bearing_for_frame(frame_number=frame_num, interpolated_gpx=gpx_data, total_frames=total_frames, frame_interval=self.frame_interval)
+                            car_lon = gpx_data[frame_num]["lon"]
+                            car_lat = gpx_data[frame_num]["lat"]
                             for det in detections:
                                 box = det["box"]
                                 w, h = box[2] - box[0], box[3] - box[1]
-                                formatted_detections.append(
-                                    (
-                                        [box[0], box[1], w, h],
-                                        det["confidence"],
-                                        det["class_name"],
-                                    )
-                                )
+                                estimated = self.lat_long_estimator.estimate_location(car_lat, car_lon, car_heading, width, height, box)
+                                det["location"] = { "type": "Point", "coordinates": [estimated["lon"], estimated["lat"]]}
+                                # Add asset_id from label map
+                                class_name = det.get("class_name", "")
+                                label_info = self.label_map.get(class_name, {})
+                                det["asset_id"] = label_info.get("asset_id")
+                                formatted_detections.append(([box[0], box[1], w, h],det["confidence"],det["class_name"]))
 
-                            tracks = self.tracker.update_tracks(
-                                formatted_detections, frame=frame
-                            )
+                            tracks = self.tracker.update_tracks(formatted_detections, frame=frame)
 
                             for track in tracks:
                                 if not track.is_confirmed():
@@ -415,36 +452,19 @@ class SageMakerVideoProcessor:
                                     continue
 
                                 confidence = float(confidence)
-                                # remove in production
-                                all_assets.append(
-                                    {
-                                        "track_id": track_id,
-                                        "asset_type": class_name,
-                                        "type": class_name,
-                                        "confidence": confidence,
-                                        "condition": (
-                                            "damaged" if confidence < 0.3 else "good"
-                                        ),
-                                        "frame_number": frame_num,
-                                        "timestamp": timestamp,
-                                        "video_id": video_id,
-                                        "survey_id": survey_id,
-                                        "route_id": route_id,
-                                        "location": {
-                                            "type": "Point",
-                                            "coordinates": [gpx_data[frame_num]["lon"], gpx_data[frame_num]["lat"]]
-                                        } if gpx_data and gpx_data.get(frame_num) else None,
-                                        "created_at": datetime.utcnow().isoformat(),
-                                    }
-                                )
                                 # lat_set.add(gpx_data[frame_num]["lat"])
                                 # lon_set.add(gpx_data[frame_num]["lon"])
                                 if db is not None:
+                                    # Look up asset_id and category_id from label map
+                                    label_info = self.label_map.get(class_name, {})
+                                    
                                     db.assets.insert_one(
                                         {
                                             "track_id": track_id,
                                             "asset_type": class_name,
                                             "type": class_name,
+                                            "asset_id": label_info.get("asset_id"),
+                                            "category_id": label_info.get("category_id"),
                                             "confidence": confidence,
                                             "condition": (
                                                 "damaged"
@@ -485,9 +505,7 @@ class SageMakerVideoProcessor:
                                 try:
                                     db.frames.insert_one(frame_record)
                                 except Exception as e:
-                                    print(
-                                        f"[SAGEMAKER] Warning: Failed to store frame in MongoDB: {e}"
-                                    )
+                                    print(f"[SAGEMAKER] Warning: Failed to store frame in MongoDB: {e}")
 
                             # Write annotated frame to output video
                             try:
@@ -521,9 +539,7 @@ class SageMakerVideoProcessor:
                 ffmpeg_process.stdin.close()
                 ffmpeg_process.wait()
                 if ffmpeg_process.returncode != 0:
-                    print(
-                        f"[SAGEMAKER] FFmpeg exited with error code: {ffmpeg_process.returncode}"
-                    )
+                    print(f"[SAGEMAKER] FFmpeg exited with error code: {ffmpeg_process.returncode}")
 
         # Save frame metadata as JSON in metadata folder
         metadata_dir = output_dir / "metadata"
@@ -531,11 +547,6 @@ class SageMakerVideoProcessor:
         metadata_path = metadata_dir / f"{video_id}_frame_metadata.json"
         with open(metadata_path, "w") as f:
             json.dump(frame_metadata, f, indent=2)
-
-        # remove in production
-        assets_path = metadata_dir / f"{video_id}_assets.json"
-        with open(assets_path, "w") as f:
-            json.dump(all_assets, f, indent=2)
 
         print(f"[SAGEMAKER] Processing complete!")
         print(f"[SAGEMAKER] Processed {processed_count} inference frames")

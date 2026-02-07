@@ -66,7 +66,7 @@ def interpolate_gpx(total_frames, fps, gpx_data, frame_interval, time_offset=0):
     gps_lookup = {}
 
     # Range through the frames you actually care about
-    for frame_number in range(0, total_frames + 1, frame_interval):
+    for frame_number in range(0, total_frames + 1, 1):
         # Convert frame_number to real-world UTC time
         # frame_seconds = frame_number / fps
         # target_utc = video_start_utc + frame_seconds + time_offset
