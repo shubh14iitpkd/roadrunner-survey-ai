@@ -9,6 +9,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { ResolvedMap, useLabelMap } from '@/contexts/LabelMapContext';
+import { MapPin } from 'lucide-react';
 
 interface Detection {
   class_name: string;
@@ -20,6 +21,10 @@ interface Detection {
   bbox?: { x1: number; y1: number; x2: number; y2: number };
   // Or coordinates object
   coordinates?: { x1: number; y1: number; x2: number; y2: number };
+  location?: {
+    type: 'Point',
+    coordinates: [number, number]
+  },
 }
 
 // Helper function to normalize bounding box to [x1, y1, x2, y2] format
@@ -321,41 +326,60 @@ export default function FramePopupContent({
       </div>
 
       {/* Detection Summary */}
-      {/* {frameData.detections && frameData.detections.length > 0 && (
-        <div
-          style={{
-            background: '#f9fafb',
-            padding: '8px',
-            borderRadius: '4px',
-            fontSize: '11px',
-          }}
-        >
-          <div style={{ fontWeight: 600, marginBottom: '6px' }}>Detections:</div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px' }}>
-            {uniqueClasses.map((className) => (
-              <div key={className} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <div
-                  style={{
-                    width: '8px',
-                    height: '8px',
-                    borderRadius: '2px',
-                    backgroundColor: colorMap[className],
-                  }}
-                />
-                <span>
-                  {className}: <strong>{classCount?.[className] || 0}</strong>
-                </span>
-              </div>
-            ))}
+      {frameData.detections && frameData.detections.length > 0 && (
+        <div className="mt-3 border-t pt-2">
+          <div className="font-semibold text-xs mb-2 flex items-center justify-between">
+            <span>Detections ({frameData.detections.length})</span>
+          </div>
+          <div className="space-y-2 max-h-[150px] overflow-y-auto pr-1 custom-scrollbar">
+            {frameData.detections.map((d, i) => {
+              const displayName = getDisplayName(d.asset_id, d.class_name);
+              const color = colorMap[d.class_name] || '#888';
+              const hasLocation = d.location?.coordinates && 
+                                Array.isArray(d.location.coordinates) && 
+                                d.location.coordinates.length === 2;
+
+              return (
+                <div 
+                  key={`${d.asset_id}-${i}`} 
+                  className="bg-secondary/30 rounded p-2 text-xs border border-transparent dark:bg-secondary/40 hover:border-border transition-colors"
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <div className="flex items-center gap-2">
+                      <div 
+                        className="w-2 h-2 rounded-full flex-shrink-0"
+                        style={{ backgroundColor: color }}
+                      />
+                      <span className="font-medium text-xs truncate max-w-[200px]" title={displayName}>
+                        {displayName}
+                      </span>
+                    </div>
+                    {typeof d.confidence === 'number' && (
+                      <Badge variant="secondary" className="h-4 px-1 text-xs font-normal">
+                        {Math.round(d.confidence * 100)}%
+                      </Badge>
+                    )}
+                  </div>
+                  
+                  {hasLocation ? (
+                    <div className="pl-4 text-xs flex items-center gap-1">
+                      <MapPin className='w-3'/>
+                      <span className="font-mono">
+                        {/* GeoJSON is [lon, lat], display as Lat, Lon */}
+                        {d.location!.coordinates[1].toFixed(4)}, {d.location!.coordinates[0].toFixed(4)}
+                      </span>
+                    </div>
+                  ) : (
+                   <div className="pl-4 text-xs italic">
+                     Location unavailable
+                   </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
-
-      {frameData.detections?.length === 0 && (
-        <div style={{ textAlign: 'center', color: '#999', padding: '16px' }}>
-          No detections found in this frame
-        </div>
-      )} */}
     </div>
   );
 }
