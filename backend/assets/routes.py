@@ -13,6 +13,43 @@ assets_bp = Blueprint("assets", __name__)
 @assets_bp.get("/")
 @role_required(["admin", "surveyor", "viewer"])
 def list_assets():
+	"""
+	List assets with filters
+	---
+	tags:
+	  - Assets
+	security:
+	  - Bearer: []
+	parameters:
+	  - name: survey_id
+	    in: query
+	    type: string
+	    description: Filter by survey ID
+	  - name: route_id
+	    in: query
+	    type: integer
+	    description: Filter by route ID
+	  - name: category
+	    in: query
+	    type: string
+	    description: Filter by category
+	  - name: condition
+	    in: query
+	    type: string
+	    description: Filter by condition
+	responses:
+	  200:
+	    description: Assets retrieved successfully
+	    schema:
+	      type: object
+	      properties:
+	        items:
+	          type: array
+	          items:
+	            type: object
+	        count:
+	          type: integer
+	"""
 	query = {}
 	survey_id = request.args.get("survey_id")
 	route_id = request.args.get("route_id", type=int)
@@ -34,6 +71,25 @@ def list_assets():
 @assets_bp.get("/<asset_id>")
 @role_required(["admin", "surveyor", "viewer"])
 def get_asset(asset_id: str):
+	"""
+	Get asset details
+	---
+	tags:
+	  - Assets
+	security:
+	  - Bearer: []
+	parameters:
+	  - name: asset_id
+	    in: path
+	    type: string
+	    required: true
+	    description: The ID of the asset
+	responses:
+	  200:
+	    description: Asset details retrieved successfully
+	  404:
+	    description: Asset not found
+	"""
 	db = get_db()
 	it = db.assets.find_one({"_id": ObjectId(asset_id)})
 	if not it:
@@ -44,6 +100,32 @@ def get_asset(asset_id: str):
 @assets_bp.post("/bulk")
 @role_required(["admin", "surveyor"])
 def bulk_insert():
+	"""
+	Bulk insert or update assets
+	---
+	tags:
+	  - Assets
+	security:
+	  - Bearer: []
+	parameters:
+	  - name: body
+	    in: body
+	    required: true
+	    schema:
+	      type: object
+	      required:
+	        - assets
+	      properties:
+	        assets:
+	          type: array
+	          items:
+	            type: object
+	responses:
+	  200:
+	    description: Bulk operation successful
+	  400:
+	    description: Missing assets array
+	"""
 	body = request.get_json(silent=True) or {}
 	assets = body.get("assets", [])
 	if not isinstance(assets, list) or not assets:
@@ -84,6 +166,30 @@ def bulk_insert():
 @assets_bp.put("/<asset_id>")
 @role_required(["admin", "surveyor"])
 def update_asset(asset_id: str):
+	"""
+	Update an asset
+	---
+	tags:
+	  - Assets
+	security:
+	  - Bearer: []
+	parameters:
+	  - name: asset_id
+	    in: path
+	    type: string
+	    required: true
+	    description: The ID of the asset
+	  - name: body
+	    in: body
+	    required: true
+	    schema:
+	      type: object
+	responses:
+	  200:
+	    description: Asset updated successfully
+	  404:
+	    description: Asset not found
+	"""
 	body = request.get_json(silent=True) or {}
 	db = get_db()
 	res = db.assets.find_one_and_update({"_id": ObjectId(asset_id)}, {"$set": body})
@@ -93,6 +199,28 @@ def update_asset(asset_id: str):
 
 @assets_bp.get("/<user_id>/resolved-map")
 def get_resolved_map(user_id: str):
+	"""
+	Get resolved asset map for a user (including preferences)
+	---
+	tags:
+	  - Assets
+	parameters:
+	  - name: user_id
+	    in: path
+	    type: string
+	    required: true
+	    description: The ID of the user
+	responses:
+	  200:
+	    description: Resolved map retrieved successfully
+	    schema:
+	      type: object
+	      properties:
+	        categories:
+	          type: object
+	        labels:
+	          type: object
+	"""
 	db = get_db()
 	system_cats = list(db.system_asset_categories.find())
 	system_labels = list(db.system_asset_labels.find())

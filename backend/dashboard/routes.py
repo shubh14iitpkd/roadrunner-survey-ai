@@ -9,6 +9,36 @@ dashboard_bp = Blueprint("dashboard", __name__)
 
 @dashboard_bp.get("/kpis")
 def kpis():
+	"""
+	Get Dashboard KPIs
+	---
+	tags:
+	  - Dashboard
+	parameters:
+	  - name: timeframe
+	    in: query
+	    type: string
+	    default: week
+	    description: Timeframe for KPI calculation
+	responses:
+	  200:
+	    description: KPIs retrieved successfully
+	    schema:
+	      type: object
+	      properties:
+	        totalAssets:
+	          type: integer
+	        totalAnomalies:
+	          type: integer
+	        good:
+	          type: integer
+	        fair:
+	          type: integer
+	        poor:
+	          type: integer
+	        kmSurveyed:
+	          type: number
+	"""
 	timeframe = request.args.get("timeframe", "week")
 	db = get_db()
 	total_assets = db.assets.estimated_document_count()
@@ -32,6 +62,15 @@ def kpis():
 
 @dashboard_bp.get("/charts/assets-by-category")
 def assets_by_category():
+	"""
+	Get assets count by category
+	---
+	tags:
+	  - Dashboard
+	responses:
+	  200:
+	    description: Chart data retrieved successfully
+	"""
 	db = get_db()
 	agg = db.assets.aggregate([
 		{"$group": {"_id": "$category", "count": {"$sum": 1}}},
@@ -44,6 +83,15 @@ def assets_by_category():
 
 @dashboard_bp.get("/charts/anomalies-by-category")
 def anomalies_by_category():
+	"""
+	Get anomalies count by category
+
+	tags:
+	  - Dashboard
+	responses:
+	  200:
+	    description: Chart data retrieved successfully
+	"""
 	db = get_db()
 	agg = db.assets.aggregate([
 		{"$match": {"condition": "Poor"}},
@@ -57,6 +105,15 @@ def anomalies_by_category():
 
 @dashboard_bp.get("/tables/top-anomaly-roads")
 def top_anomaly_roads():
+	"""
+	Get top roads with anomalies
+
+	tags:
+	  - Dashboard
+	responses:
+	  200:
+	    description: Table data retrieved successfully
+	"""
 	db = get_db()
 	agg = db.assets.aggregate([
 		{"$match": {"condition": "Poor"}},
@@ -74,6 +131,15 @@ def top_anomaly_roads():
 
 @dashboard_bp.get("/recent-surveys")
 def recent_surveys():
+	"""
+	Get recent surveys list
+	---
+	tags:
+	  - Dashboard
+	responses:
+	  200:
+	    description: Recent surveys retrieved successfully
+	"""
 	db = get_db()
 	cursor = db.surveys.find().sort("survey_date", -1).limit(5)
 	items = []
@@ -92,6 +158,15 @@ def recent_surveys():
 
 @dashboard_bp.get("/monitoring/status")
 def monitoring_status():
+	"""
+	Get system monitoring status only
+
+	tags:
+	  - Dashboard
+	responses:
+	  200:
+	    description: System status retrieved successfully
+	"""
 	from services.monitoring_service import MonitoringService
 	service = MonitoringService()
 	return jsonify(service.get_full_status())
@@ -99,6 +174,15 @@ def monitoring_status():
 
 @dashboard_bp.get("/monitoring/jobs")
 def monitoring_jobs():
+	"""
+	Get active monitoring jobs
+
+	tags:
+	  - Dashboard
+	responses:
+	  200:
+	    description: Active jobs retrieved successfully
+	"""
 	from services.monitoring_service import MonitoringService
 	service = MonitoringService()
 	return jsonify({

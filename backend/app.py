@@ -1,13 +1,14 @@
 from flask import Flask, jsonify, send_from_directory
 from flask_cors import CORS
 from flask_jwt_extended import JWTManager, jwt_required, get_jwt_identity
+from flasgger import Swagger
 from dotenv import load_dotenv
 
 from config import Config
 from db import init_app_db
 
-
 def create_app() -> Flask:
+	import os
 	load_dotenv()
 	app = Flask(__name__)
 	app.config.from_object(Config())
@@ -51,7 +52,23 @@ def create_app() -> Flask:
 	app.register_blueprint(tiles_bp, url_prefix="/api/tiles")
 	app.register_blueprint(frames_bp, url_prefix="/api/frames")
 	app.register_blueprint(user_bp, url_prefix="/api/users")
-
+	
+	enable_swagger = os.environ.get("ENABLE_SWAGGER", "false") == "true"
+	app.config['SWAGGER'] = {
+		'title': 'RoadSight API',
+		'uiversion': 3,
+		'securityDefinitions': {
+        	'Bearer': {
+				'type': 'apiKey',
+				'name': 'Authorization',
+				'in': 'header',
+				'description': 'JWT Authorization header using the Bearer scheme. Example: "Authorization: Bearer {token}"'
+        	}
+    	},
+		'specs_route': '/api/docs/'
+	}
+	if enable_swagger:
+		Swagger(app)
 	# Handle OPTIONS requests globally (CORS preflight)
 	@app.before_request
 	def handle_preflight():

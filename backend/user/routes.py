@@ -7,6 +7,42 @@ user_bp = Blueprint("user", __name__)
 
 @user_bp.put("/<user_id>/preferences/category")
 def update_category_preferences(user_id: str):
+    """
+    Update user category preferences
+    ---
+    tags:
+      - User
+    security:
+      - Bearer: []
+    parameters:
+      - name: user_id
+        in: path
+        type: string
+        required: true
+        description: The ID of the user
+      - name: body
+        in: body
+        required: true
+        schema:
+          type: object
+          properties:
+            category_id:
+              type: string
+              description: The ID of the category to update
+            display_name:
+              type: string
+              description: The new display name for the category
+    responses:
+      200:
+        description: Preferences updated successfully
+        schema:
+          type: object
+          properties:
+            ok:
+              type: boolean
+      500:
+        description: Internal server error
+    """
     data = request.get_json(silent=True) or {}
     category_id = data.get("category_id")
     display_name = data.get("display_name")
@@ -27,6 +63,42 @@ def update_category_preferences(user_id: str):
 
 @user_bp.put("/<user_id>/preferences/label")
 def update_label_preferences(user_id: str):
+    """
+    Update user label preferences
+    ---
+    tags:
+      - User
+    security:
+      - Bearer: []
+    parameters:
+      - name: user_id
+        in: path
+        type: string
+        required: true
+        description: The ID of the user
+      - name: body
+        in: body
+        required: true
+        schema:
+          type: object
+          properties:
+            asset_id:
+              type: string
+              description: The ID of the asset label to update
+            display_name:
+              type: string
+              description: The new display name for the asset label
+    responses:
+      200:
+        description: Preferences updated successfully
+        schema:
+          type: object
+          properties:
+            ok:
+              type: boolean
+      500:
+        description: Internal server error
+    """
     data = request.get_json(silent=True) or {}
     asset_id = data.get("asset_id")
     display_name = data.get("display_name")

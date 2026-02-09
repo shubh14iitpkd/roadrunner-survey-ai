@@ -23,6 +23,29 @@ def current_user_id_str() -> str | None:
 @ai_bp.post("/chats")
 @jwt_required()
 def create_chat():
+    """
+    Create a new chat session
+    ---
+    tags:
+      - AI
+    security:
+      - Bearer: []
+    parameters:
+      - name: body
+        in: body
+        required: true
+        schema:
+          type: object
+          properties:
+            title:
+              type: string
+              description: Chat title
+    responses:
+      201:
+        description: Chat created successfully
+      401:
+        description: Unauthorized
+    """
     body = request.get_json(silent=True) or {}
     title = (body.get("title") or "New Chat").strip() or "New Chat"
     user_id = current_user_id_str()
@@ -45,6 +68,19 @@ def create_chat():
 @ai_bp.get("/chats")
 @jwt_required()
 def list_chats():
+    """
+    List user's chat sessions
+    ---
+    tags:
+      - AI
+    security:
+      - Bearer: []
+    responses:
+      200:
+        description: List of chats retrieved successfully
+      401:
+        description: Unauthorized
+    """
     user_id = current_user_id_str()
     if not user_id:
         return jsonify({"error": "unauthorized"}), 401
@@ -62,6 +98,27 @@ def list_chats():
 @ai_bp.get("/chats/<chat_id>/messages")
 @jwt_required()
 def list_messages(chat_id: str):
+    """
+    List messages in a chat
+    ---
+    tags:
+      - AI
+    security:
+      - Bearer: []
+    parameters:
+      - name: chat_id
+        in: path
+        type: string
+        required: true
+        description: The ID of the chat
+    responses:
+      200:
+        description: Messages retrieved successfully
+      404:
+        description: Chat not found
+      401:
+        description: Unauthorized
+    """
     user_id = current_user_id_str()
     if not user_id:
         return jsonify({"error": "unauthorized"}), 401
@@ -86,6 +143,51 @@ def list_messages(chat_id: str):
 @ai_bp.post("/chats/<chat_id>/messages")
 @jwt_required()
 def add_message(chat_id: str):
+    """
+    Send a message to the AI chatbot
+    ---
+    tags:
+      - AI
+    description: Handle user message and generate AI response using LangChatbot
+    security:
+      - Bearer: []
+    parameters:
+      - name: chat_id
+        in: path
+        type: string
+        required: true
+        description: The ID of the chat
+      - name: body
+        in: body
+        required: true
+        schema:
+          type: object
+          required:
+            - content
+          properties:
+            content:
+              type: string
+              description: The user's message
+            video_id:
+              type: string
+              description: Optional ID of the video being discussed from
+    responses:
+      201:
+        description: Message sent and response received
+        schema:
+          type: object
+          properties:
+            user_message:
+              type: object
+            assistant_message:
+              type: object
+      400:
+        description: Content is required
+      401:
+        description: Unauthorized
+      404:
+        description: Chat not found
+    """
     """Handle user message and generate AI response using LangChatbot"""
     body = request.get_json(silent=True) or {}
     content = body.get("content")
@@ -187,6 +289,27 @@ def add_message(chat_id: str):
 @ai_bp.delete("/chats/<chat_id>")
 @jwt_required()
 def delete_chat(chat_id: str):
+    """
+    Delete a chat session
+    ---
+    tags:
+      - AI
+    security:
+      - Bearer: []
+    parameters:
+      - name: chat_id
+        in: path
+        type: string
+        required: true
+        description: The ID of the chat
+    responses:
+      200:
+        description: Chat deleted successfully
+      404:
+        description: Chat not found
+      401:
+        description: Unauthorized
+    """
     user_id = current_user_id_str()
     if not user_id:
         return jsonify({"error": "unauthorized"}), 401

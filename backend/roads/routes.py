@@ -11,6 +11,39 @@ roads_bp = Blueprint("roads", __name__)
 @roads_bp.get("/")
 @role_required(["admin", "surveyor", "viewer"])
 def list_roads():
+	"""
+	List all roads
+	---
+	tags:
+	  - Roads
+	security:
+	  - Bearer: []
+	parameters:
+	  - name: search
+	    in: query
+	    type: string
+	    description: Search term for road name
+	  - name: type
+	    in: query
+	    type: string
+	    description: Filter by road type
+	  - name: side
+	    in: query
+	    type: string
+	    description: Filter by road side
+	responses:
+	  200:
+	    description: List of roads retrieved successfully
+	    schema:
+	      type: object
+	      properties:
+	        items:
+	          type: array
+	          items:
+	            type: object
+	        count:
+	          type: integer
+	"""
 	query = {}
 	search = request.args.get("search")
 	road_type = request.args.get("type")
@@ -46,6 +79,25 @@ def list_roads():
 @roads_bp.get("/<int:route_id>")
 @role_required(["admin", "surveyor", "viewer"])
 def get_road(route_id: int):
+	"""
+	Get details of a specific road
+	---
+	tags:
+	  - Roads
+	security:
+	  - Bearer: []
+	parameters:
+	  - name: route_id
+	    in: path
+	    type: integer
+	    required: true
+	    description: The route ID of the road
+	responses:
+	  200:
+	    description: Road details retrieved successfully
+	  404:
+	    description: Road not found
+	"""
 	db = get_db()
 	road = db.roads.find_one({"route_id": route_id})
 	if not road:
@@ -56,6 +108,43 @@ def get_road(route_id: int):
 @roads_bp.post("/")
 @role_required(["admin", "surveyor"])
 def create_road():
+	"""
+	Create a new road
+	---
+	tags:
+	  - Roads
+	security:
+	  - Bearer: []
+	parameters:
+	  - name: body
+	    in: body
+	    required: true
+	    schema:
+	      type: object
+	      required:
+	        - road_name
+	        - estimated_distance_km
+	        - road_type
+	        - road_side
+	      properties:
+	        road_name:
+	          type: string
+	        start_point_name:
+	          type: string
+	        end_point_name:
+	          type: string
+	        estimated_distance_km:
+	          type: number
+	        road_type:
+	          type: string
+	        road_side:
+	          type: string
+	responses:
+	  201:
+	    description: Road created successfully
+	  400:
+	    description: Missing required fields
+	"""
 	body = request.get_json(silent=True) or {}
 	required = ["road_name", "estimated_distance_km", "road_type", "road_side"]
 	missing = [k for k in required if body.get(k) in (None, "")]
@@ -88,6 +177,30 @@ def create_road():
 @roads_bp.put("/<int:route_id>")
 @role_required(["admin", "surveyor"])
 def update_road(route_id: int):
+	"""
+	Update a road
+	---
+	tags:
+	  - Roads
+	security:
+	  - Bearer: []
+	parameters:
+	  - name: route_id
+	    in: path
+	    type: integer
+	    required: true
+	    description: The route ID of the road
+	  - name: body
+	    in: body
+	    required: true
+	    schema:
+	      type: object
+	responses:
+	  200:
+	    description: Road updated successfully
+	  404:
+	    description: Road not found
+	"""
 	body = request.get_json(silent=True) or {}
 	db = get_db()
 	res = db.roads.find_one_and_update({"route_id": route_id}, {"$set": {**body, "updated_at": get_now_iso()}})
@@ -99,6 +212,25 @@ def update_road(route_id: int):
 @roads_bp.delete("/<int:route_id>")
 @role_required(["admin"])
 def delete_road(route_id: int):
+	"""
+	Delete a road
+	---
+	tags:
+	  - Roads
+	security:
+	  - Bearer: []
+	parameters:
+	  - name: route_id
+	    in: path
+	    type: integer
+	    required: true
+	    description: The route ID of the road
+	responses:
+	  200:
+	    description: Road deleted successfully
+	  404:
+	    description: Road not found
+	"""
 	db = get_db()
 	res = db.roads.delete_one({"route_id": route_id})
 	if not res.deleted_count:

@@ -12,6 +12,57 @@ frames_bp = Blueprint("frames", __name__)
 @role_required(["admin", "surveyor", "viewer"])
 def list_frames():
     """
+    List frames with optional filters
+    ---
+    tags:
+      - Frames
+    security:
+      - Bearer: []
+    parameters:
+      - name: video_id
+        in: query
+        type: string
+        description: Filter by video ID
+      - name: survey_id
+        in: query
+        type: string
+        description: Filter by survey ID
+      - name: route_id
+        in: query
+        type: integer
+        description: Filter by route ID
+      - name: has_detections
+        in: query
+        type: boolean
+        description: Filter for frames with detections only
+      - name: limit
+        in: query
+        type: integer
+        default: 100
+        description: Number of results
+      - name: offset
+        in: query
+        type: integer
+        default: 0
+        description: Pagination offset
+    responses:
+      200:
+        description: List of frames retrieved successfully
+        schema:
+          type: object
+          properties:
+            items:
+              type: array
+              items:
+                type: object
+            total:
+              type: integer
+            limit:
+              type: integer
+            offset:
+              type: integer
+    """
+    """
     List frames with optional filters.
     Query parameters:
     - video_id: Filter by video
@@ -67,6 +118,27 @@ def list_frames():
 @frames_bp.get("/<frame_id>")
 @role_required(["admin", "surveyor", "viewer"])
 def get_frame(frame_id: str):
+    """
+    Get a specific frame by ID
+    ---
+    tags:
+      - Frames
+    security:
+      - Bearer: []
+    parameters:
+      - name: frame_id
+        in: path
+        type: string
+        required: true
+        description: The ID of the frame
+    responses:
+      200:
+        description: Frame details retrieved successfully
+      404:
+        description: Frame not found
+      400:
+        description: Invalid request
+    """
     """Get a specific frame by ID."""
     db = get_db()
 
@@ -86,6 +158,23 @@ def get_frame(frame_id: str):
 @frames_bp.get("/video/<video_id>")
 @role_required(["admin", "surveyor", "viewer"])
 def get_video_frames(video_id: str):
+    """
+    Get all frames for a specific video
+    ---
+    tags:
+      - Frames
+    security:
+      - Bearer: []
+    parameters:
+      - name: video_id
+        in: path
+        type: string
+        required: true
+        description: The ID of the video
+    responses:
+      200:
+        description: Video frames retrieved successfully
+    """
     """Get all frames for a specific video."""
     db = get_db()
 
@@ -104,6 +193,31 @@ def get_video_frames(video_id: str):
 @frames_bp.get("/route/<int:route_id>")
 @role_required(["admin", "surveyor", "viewer"])
 def get_route_frames(route_id: int):
+    """
+    Get all frames for a specific route
+    ---
+    tags:
+      - Frames
+    security:
+      - Bearer: []
+    parameters:
+      - name: route_id
+        in: path
+        type: integer
+        required: true
+        description: The ID of the route
+      - name: limit
+        in: query
+        type: integer
+        default: 100
+      - name: offset
+        in: query
+        type: integer
+        default: 0
+    responses:
+      200:
+        description: Route frames retrieved successfully
+    """
     """Get all frames for a specific route."""
     db = get_db()
 
@@ -128,6 +242,28 @@ def get_route_frames(route_id: int):
 @frames_bp.get("/with-detections")
 @role_required(["admin", "surveyor", "viewer"])
 def get_frames_with_detections():
+    """
+    Get frames that have detections
+    ---
+    tags:
+      - Frames
+    security:
+      - Bearer: []
+    parameters:
+      - name: route_id
+        in: query
+        type: integer
+      - name: video_id
+        in: query
+        type: string
+      - name: limit
+        in: query
+        type: integer
+        default: 50
+    responses:
+      200:
+        description: Frames with detections retrieved successfully
+    """
     """Get frames that have detections."""
     db = get_db()
 
@@ -155,6 +291,23 @@ def get_frames_with_detections():
 @frames_bp.get("/stats/video/<video_id>")
 @role_required(["admin", "surveyor", "viewer"])
 def get_video_frame_stats(video_id: str):
+    """
+    Get statistics about frames for a video
+    ---
+    tags:
+      - Frames
+    security:
+      - Bearer: []
+    parameters:
+      - name: video_id
+        in: path
+        type: string
+        required: true
+        description: The ID of the video
+    responses:
+      200:
+        description: Frame statistics retrieved successfully
+    """
     """Get statistics about frames for a video."""
     db = get_db()
 

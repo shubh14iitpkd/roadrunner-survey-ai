@@ -18,6 +18,43 @@ auth_bp = Blueprint("auth", __name__)
 
 @auth_bp.post("/signup")
 def signup():
+	"""
+	User signup
+	---
+	tags:
+	  - Auth
+	parameters:
+	  - name: body
+	    in: body
+	    required: true
+	    schema:
+	      type: object
+	      required:
+	        - email
+	        - password
+	      properties:
+	        name:
+	          type: string
+	        email:
+	          type: string
+	        password:
+	          type: string
+	        role:
+	          type: string
+	        first_name:
+	          type: string
+	        last_name:
+	          type: string
+	        organisation:
+	          type: string
+	responses:
+	  201:
+	    description: User created successfully
+	  400:
+	    description: Missing email or password
+	  409:
+	    description: Email already registered
+	"""
 	body = request.get_json(silent=True) or {}
 	name = (body.get("name") or "").strip()
 	email_raw = (body.get("email") or "").strip()
@@ -81,6 +118,33 @@ def signup():
 
 @auth_bp.post("/login")
 def login():
+	"""
+	User login
+	---
+	tags:
+	  - Auth
+	parameters:
+	  - name: body
+	    in: body
+	    required: true
+	    schema:
+	      type: object
+	      required:
+	        - email
+	        - password
+	      properties:
+	        email:
+	          type: string
+	        password:
+	          type: string
+	responses:
+	  200:
+	    description: Login successful
+	  400:
+	    description: Missing email or password
+	  401:
+	    description: Invalid credentials
+	"""
 	body = request.get_json(silent=True) or {}
 	email_raw = (body.get("email") or "").strip()
 	email = email_raw.lower()
@@ -122,6 +186,22 @@ def login():
 @auth_bp.post("/refresh")
 @jwt_required(refresh=True)
 def refresh():
+	"""
+	Refresh access token
+	---
+	tags:
+	  - Auth
+	security:
+	  - Bearer: []
+	responses:
+	  200:
+	    description: Token refreshed successfully
+	    schema:
+	      type: object
+	      properties:
+	        access_token:
+	          type: string
+	"""
 	current_identity = get_jwt_identity()
 	access_token = create_access_token(identity=current_identity, expires_delta=timedelta(hours=12))
 	return jsonify({"access_token": access_token})
@@ -130,6 +210,21 @@ def refresh():
 @auth_bp.get("/me")
 @jwt_required()
 def me():
+	"""
+	Get current user profile
+	---
+	tags:
+	  - Auth
+	security:
+	  - Bearer: []
+	responses:
+	  200:
+	    description: User profile retrieved successfully
+	  401:
+	    description: Unauthorized
+	  404:
+	    description: User not found
+	"""
 	identity = get_jwt_identity() or ""
 	if not identity:
 		return jsonify({"error": "unauthorized"}), 401

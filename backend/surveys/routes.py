@@ -14,6 +14,40 @@ surveys_bp = Blueprint("surveys", __name__)
 @surveys_bp.get("/")
 @role_required(["admin", "surveyor", "viewer"])
 def list_surveys():
+    """
+    List surveys
+    ---
+    tags:
+      - Surveys
+    security:
+      - Bearer: []
+    parameters:
+      - name: route_id
+        in: query
+        type: integer
+        description: Filter by route ID
+      - name: status
+        in: query
+        type: string
+        description: Filter by status
+      - name: latest_only
+        in: query
+        type: boolean
+        default: true
+        description: Filter by latest version only
+    responses:
+      200:
+        description: List of surveys retrieved successfully
+        schema:
+          type: object
+          properties:
+            items:
+              type: array
+              items:
+                type: object
+            count:
+              type: integer
+    """
     query = {}
     route_id = request.args.get("route_id", type=int)
     status = request.args.get("status")
@@ -33,6 +67,25 @@ def list_surveys():
 @surveys_bp.get("/<survey_id>")
 @role_required(["admin", "surveyor", "viewer"])
 def get_survey(survey_id: str):
+    """
+    Get survey details
+    ---
+    tags:
+      - Surveys
+    security:
+      - Bearer: []
+    parameters:
+      - name: survey_id
+        in: path
+        type: string
+        required: true
+        description: The ID of the survey
+    responses:
+      200:
+        description: Survey details retrieved successfully
+      404:
+        description: Survey not found
+    """
     db = get_db()
     s = db.surveys.find_one({"_id": ObjectId(survey_id)})
     if not s:
@@ -42,6 +95,43 @@ def get_survey(survey_id: str):
 @surveys_bp.post("/")
 @role_required(["admin", "surveyor"])
 def create_survey():
+    """
+    Create a new survey
+    ---
+    tags:
+      - Surveys
+    security:
+      - Bearer: []
+    parameters:
+      - name: body
+        in: body
+        required: true
+        schema:
+          type: object
+          required:
+            - route_id
+            - survey_date
+            - surveyor_name
+          properties:
+            route_id:
+              type: integer
+            survey_date:
+              type: string
+              format: date
+            surveyor_name:
+              type: string
+            status:
+              type: string
+            totals:
+              type: object
+            gpx_file_url:
+              type: string
+    responses:
+      201:
+        description: Survey created successfully
+      400:
+        description: Missing required fields
+    """
     body = request.get_json(silent=True) or {}
     required = ["route_id", "survey_date", "surveyor_name"]
     missing = [k for k in required if body.get(k) in (None, "")]
@@ -89,6 +179,30 @@ def create_survey():
 @surveys_bp.put("/<survey_id>")
 @role_required(["admin", "surveyor"])
 def update_survey(survey_id: str):
+    """
+    Update a survey
+    ---
+    tags:
+      - Surveys
+    security:
+      - Bearer: []
+    parameters:
+      - name: survey_id
+        in: path
+        type: string
+        required: true
+        description: The ID of the survey
+      - name: body
+        in: body
+        required: true
+        schema:
+          type: object
+    responses:
+      200:
+        description: Survey updated successfully
+      404:
+        description: Survey not found
+    """
     body = request.get_json(silent=True) or {}
     db = get_db()
     res = db.surveys.find_one_and_update(
@@ -102,6 +216,37 @@ def update_survey(survey_id: str):
 @surveys_bp.post("/<survey_id>/attach-gpx")
 @role_required(["admin", "surveyor"])
 def attach_gpx(survey_id: str):
+    """
+    Attach GPX file to a survey
+    ---
+    tags:
+      - Surveys
+    security:
+      - Bearer: []
+    parameters:
+      - name: survey_id
+        in: path
+        type: string
+        required: true
+        description: The ID of the survey
+      - name: body
+        in: body
+        required: true
+        schema:
+          type: object
+          required:
+            - gpx_file_url
+          properties:
+            gpx_file_url:
+              type: string
+    responses:
+      200:
+        description: GPX attached successfully
+      400:
+        description: Missing gpx_file_url
+      404:
+        description: Survey not found
+    """
     body = request.get_json(silent=True) or {}
     url = body.get("gpx_file_url")
     if not url:
@@ -119,6 +264,32 @@ def attach_gpx(survey_id: str):
 @surveys_bp.get("/route/<int:route_id>/history")
 @role_required(["admin", "surveyor", "viewer"])
 def get_survey_history(route_id: int):
+    """
+    Get all survey versions for a specific route
+    ---
+    tags:
+      - Surveys
+    security:
+      - Bearer: []
+    parameters:
+      - name: route_id
+        in: path
+        type: integer
+        required: true
+        description: The ID of the route
+    responses:
+      200:
+        description: Survey history retrieved successfully
+        schema:
+          type: object
+          properties:
+            items:
+              type: array
+            count:
+              type: integer
+            route_id:
+              type: integer
+    """
     """Get all survey versions for a specific route"""
     db = get_db()
     surveys = list(db.surveys.find({"route_id": route_id}).sort("survey_version", DESCENDING))
@@ -127,6 +298,40 @@ def get_survey_history(route_id: int):
 @surveys_bp.delete("/<survey_id>")
 @role_required(["admin", "surveyor"])
 def delete_survey(survey_id: str):
+    """
+    Delete a survey and all associated videos/frames
+    ---
+    tags:
+      - Surveys
+    security:
+      - Bearer: []
+    description: |
+      Delete a survey and all associated videos/frames.
+      For videos from video_library, only DB entries are deleted (files preserved).
+      For uploaded videos, both DB entries and files are deleted.
+    parameters:
+      - name: survey_id
+        in: path
+        type: string
+        required: true
+        description: The ID of the survey
+    responses:
+      200:
+        description: Survey deleted successfully
+        schema:
+          type: object
+          properties:
+            ok:
+              type: boolean
+            deleted_videos:
+              type: integer
+            deleted_files:
+              type: integer
+            preserved_library_files:
+              type: integer
+      404:
+        description: Survey not found
+    """
     """Delete a survey and all associated videos/frames.
     
     For videos from video_library, only DB entries are deleted (files preserved).

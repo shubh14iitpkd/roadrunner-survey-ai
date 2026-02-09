@@ -39,7 +39,42 @@ def get_tile_db_connection():
 @tiles_bp.get("/info")
 def get_tile_info():
     """
-    Get information about available tiles (zoom levels, bounds, etc.)
+    Get information about available tiles
+
+    tags:
+      - Tiles
+    description: Returns zoom levels, tile counts, and bounds from the tile database
+    responses:
+      200:
+        description: Tile information retrieved successfully
+        schema:
+          type: object
+          properties:
+            min_zoom:
+              type: integer
+            max_zoom:
+              type: integer
+            zoom_levels:
+              type: array
+              items:
+                type: object
+                properties:
+                  zoom:
+                    type: integer
+                  tile_count:
+                    type: integer
+                  bounds:
+                    type: object
+            total_tiles:
+              type: integer
+            database_path:
+              type: string
+            database_exists:
+              type: boolean
+      404:
+        description: Tile database not found or empty
+      500:
+        description: Internal server error
     """
     conn = get_tile_db_connection()
     if not conn:
@@ -97,11 +132,39 @@ def get_tile_info():
 @tiles_bp.get("/<int:z>/<int:x>/<int:y>.png")
 def get_tile(z: int, x: int, y: int):
     """
-    Serve a map tile from the SQLite database.
-    URL format: /tiles/{z}/{x}/{y}.png
+    Serve a map tile
 
-    MOBAC SQLite format stores tiles in TMS (Tile Map Service) format,
-    which has Y-axis inverted compared to standard XYZ format used by Leaflet.
+    tags:
+      - Tiles
+    description: Serve a map tile from the SQLite database (TMS format)
+    parameters:
+      - name: z
+        in: path
+        type: integer
+        required: true
+        description: Zoom level
+      - name: x
+        in: path
+        type: integer
+        required: true
+        description: X coordinate
+      - name: y
+        in: path
+        type: integer
+        required: true
+        description: Y coordinate (TMS format)
+    responses:
+      200:
+        description: Tile image served successfully
+        content:
+          image/png:
+            schema:
+              type: string
+              format: binary
+      404:
+        description: Tile not found
+      500:
+        description: Internal server error
     """
     conn = get_tile_db_connection()
     if not conn:
@@ -143,7 +206,26 @@ def get_tile(z: int, x: int, y: int):
 @tiles_bp.get("/")
 def tiles_home():
     """
-    Simple endpoint to check if tiles service is available
+    Check availability of tiles service
+
+    tags:
+      - Tiles
+    responses:
+      200:
+        description: Tiles service is available
+        schema:
+          type: object
+          properties:
+            status:
+              type: string
+            message:
+              type: string
+            database_path:
+              type: string
+            endpoints:
+              type: object
+      404:
+        description: Tile database not found
     """
     conn = get_tile_db_connection()
     if not conn:

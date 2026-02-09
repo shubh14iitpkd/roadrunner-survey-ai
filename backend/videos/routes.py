@@ -14,6 +14,7 @@ import cv2
 import io
 from PIL import Image
 from flask_jwt_extended import jwt_required
+from flasgger import swag_from
 
 from db import get_db
 from utils.ids import get_now_iso
@@ -32,6 +33,39 @@ aws_session = boto3.Session(region_name=config.AWS_REGION)
 @videos_bp.get("/")
 @role_required(["admin", "surveyor", "viewer"])
 def list_videos():
+    """
+    List all videos
+    ---
+    tags:
+      - Videos
+    security:
+      - Bearer: []
+    parameters:
+      - name: route_id
+        in: query
+        type: integer
+        description: Filter by route ID
+      - name: survey_id
+        in: query
+        type: string
+        description: Filter by survey ID
+      - name: status
+        in: query
+        type: string
+        description: Filter by video status
+    responses:
+      200:
+        description: List of videos retrieved successfully
+        schema:
+          type: object
+          properties:
+            items:
+              type: array
+              items:
+                type: object
+            count:
+              type: integer
+    """
     query = {}
     route_id = request.args.get("route_id", type=int)
     survey_id = request.args.get("survey_id")
@@ -57,6 +91,27 @@ def list_videos():
 @videos_bp.get("/<video_id>")
 @role_required(["admin", "surveyor", "viewer"])
 def get_video(video_id: str):
+    """
+    Get a specific video by ID
+    ---
+    tags:
+      - Videos
+    security:
+      - Bearer: []
+    parameters:
+      - name: video_id
+        in: path
+        type: string
+        required: true
+        description: The ID of the video
+    responses:
+      200:
+        description: Video details retrieved successfully
+      404:
+        description: Video not found
+      400:
+        description: Invalid video ID format
+    """
     db = get_db()
 
     try:
@@ -74,6 +129,51 @@ def get_video(video_id: str):
 @videos_bp.post("/")
 @role_required(["admin", "surveyor"])
 def create_video():
+    """
+    Create a new video entry
+    ---
+    tags:
+      - Videos
+    security:
+      - Bearer: []
+    parameters:
+      - name: body
+        in: body
+        required: true
+        schema:
+          type: object
+          required:
+            - route_id
+            - title
+          properties:
+            route_id:
+              type: integer
+            title:
+              type: string
+            survey_id:
+              type: string
+            storage_url:
+              type: string
+            thumbnail_url:
+              type: string
+            gpx_file_url:
+              type: string
+            size_bytes:
+              type: integer
+            duration_seconds:
+              type: number
+            status:
+              type: string
+            progress:
+              type: number
+            eta:
+              type: string
+    responses:
+      201:
+        description: Video created successfully
+      400:
+        description: Missing required fields
+    """
     body = request.get_json(silent=True) or {}
     required = ["route_id", "title"]
     missing = [k for k in required if body.get(k) in (None, "")]
@@ -141,6 +241,43 @@ def create_video():
 @videos_bp.put("/<video_id>/status")
 @role_required(["admin", "surveyor"])
 def update_status(video_id: str):
+    """
+    Update video status
+    ---
+    tags:
+      - Videos
+    security:
+      - Bearer: []
+    parameters:
+      - name: video_id
+        in: path
+        type: string
+        required: true
+        description: The ID of the video
+      - name: body
+        in: body
+        required: true
+        schema:
+          type: object
+          properties:
+            status:
+              type: string
+            progress:
+              type: number
+            eta:
+              type: string
+            storage_url:
+              type: string
+            thumbnail_url:
+              type: string
+    responses:
+      200:
+        description: Status updated successfully
+      400:
+        description: No valid fields provided
+      404:
+        description: Video not found
+    """
     body = request.get_json(silent=True) or {}
     allowed = {"status", "progress", "eta", "storage_url", "thumbnail_url"}
     update = {k: v for k, v in body.items() if k in allowed}
@@ -160,6 +297,49 @@ def update_status(video_id: str):
 @videos_bp.post("/upload")
 @jwt_required()
 def upload_direct():
+    """
+    Direct video upload
+    ---
+    tags:
+      - Videos
+    security:
+      - Bearer: []
+    consumes:
+      - multipart/form-data
+    parameters:
+      - name: file
+        in: formData
+        type: file
+        required: true
+        description: The video file to upload
+      - name: video_id
+        in: formData
+        type: string
+        description: Optional video ID to update existing record
+      - name: survey_id
+        in: formData
+        type: string
+        description: Survey ID (required if creating new video)
+      - name: route_id
+        in: formData
+        type: integer
+        description: Route ID (required if creating new video)
+      - name: title
+        in: formData
+        type: string
+        description: Video title
+    responses:
+      200:
+        description: Video uploaded successfully (updated existing)
+      201:
+        description: Video uploaded successfully (created new)
+      400:
+        description: Missing file or required fields
+      404:
+        description: Video ID not found
+      500:
+        description: Upload failed
+    """
     # Expect multipart form with fields: video_id (optional), survey_id, route_id, title, file
     print(f"[UPLOAD] Upload request received")
     print(f"[UPLOAD] Files: {list(request.files.keys())}")
@@ -322,14 +502,61 @@ def upload_direct():
 
 
 @videos_bp.post("/presign")
+@swag_from(None)
 @role_required(["admin", "surveyor"])
 def presign():
+
+    """
+    swagger: false
+    Get presigned URL for upload
+
+    tags:
+      - Videos
+    security:
+      - Bearer: []
+    responses:
+      200:
+        description: Presigned URL generated
+        schema:
+          type: object
+          properties:
+            url:
+              type: string
+            fields:
+              type: object
+    """
     return jsonify({"url": "https://example-presigned-url", "fields": {}})
 
 
 @videos_bp.post("/gpx-upload")
 @role_required(["admin", "surveyor"])
 def upload_gpx():
+    """
+    Upload GPX file for a video
+    ---
+    tags:
+      - Videos
+    security:
+      - Bearer: []
+    consumes:
+      - multipart/form-data
+    parameters:
+      - name: file
+        in: formData
+        type: file
+        required: true
+        description: The GPX file
+      - name: video_id
+        in: formData
+        type: string
+        required: true
+        description: The ID of the video
+    responses:
+      200:
+        description: GPX uploaded successfully
+      400:
+        description: Missing file or video_id
+    """
     # Expect multipart form with fields: video_id, file
     if "file" not in request.files:
         return jsonify({"error": "file is reqfuired"}), 400
@@ -371,6 +598,32 @@ def upload_gpx():
 @videos_bp.post("/thumbnail-upload")
 @role_required(["admin", "surveyor"])
 def upload_thumbnail():
+    """
+    Upload thumbnail for a video
+    ---
+    tags:
+      - Videos
+    security:
+      - Bearer: []
+    consumes:
+      - multipart/form-data
+    parameters:
+      - name: file
+        in: formData
+        type: file
+        required: true
+        description: The thumbnail image file
+      - name: video_id
+        in: formData
+        type: string
+        required: true
+        description: The ID of the video
+    responses:
+      200:
+        description: Thumbnail uploaded successfully
+      400:
+        description: Missing file or video_id
+    """
     # Expect multipart form with fields: video_id, file
     if "file" not in request.files:
         return jsonify({"error": "file is required"}), 400
@@ -413,10 +666,27 @@ def upload_thumbnail():
 @role_required(["admin", "surveyor"])
 def process_video_with_ai(video_id: str):
     """
-    Process video with SageMaker endpoint - extracts frames, runs inference, creates annotated video
-    This endpoint is non-blocking - processing happens in background thread
+    Process video with AI
+    ---
+    tags:
+      - Videos
+    security:
+      - Bearer: []
+    description: Extracts frames, runs inference, creates annotated video. Non-blocking.
+    parameters:
+      - name: video_id
+        in: path
+        type: string
+        required: true
+        description: The ID of the video to process
+    responses:
+      200:
+        description: Video processing started
+      404:
+        description: Video not found
+      400:
+        description: Video file not uploaded yet or Processing error
     """
-    print("HIT")
     import threading
     from pathlib import Path
     import glob
