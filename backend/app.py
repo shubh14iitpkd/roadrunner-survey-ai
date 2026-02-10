@@ -57,6 +57,15 @@ def create_app() -> Flask:
 	app.config['SWAGGER'] = {
 		'title': 'RoadSight API',
 		'uiversion': 3,
+		'specs': [
+			{
+				'endpoint': 'apispec',
+				'route': '/api/docs/swagger.json',
+				'rule_filter': lambda rule: True,
+				'model_filter': lambda tag: True,
+			}
+    	],
+    	'static_url_path': '/flasgger_static',
 		'securityDefinitions': {
         	'Bearer': {
 				'type': 'apiKey',
@@ -68,7 +77,9 @@ def create_app() -> Flask:
 		'specs_route': '/api/docs/'
 	}
 	if enable_swagger:
-		Swagger(app)
+		Swagger(app, template={
+			"swagger": "2.0"
+		})
 	# Handle OPTIONS requests globally (CORS preflight)
 	@app.before_request
 	def handle_preflight():

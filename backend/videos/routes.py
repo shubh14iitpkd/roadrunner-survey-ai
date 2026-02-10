@@ -728,7 +728,7 @@ def process_video_with_ai(video_id: str):
         search_pattern = f"*_{filename_no_ext}_annotated_compressed.mp4"
         demo_matches = list(annotated_lib_path.glob(search_pattern))
 
-    demo_matches = []
+    # demo_matches = []
     if demo_matches:
         print(
             f"[PROCESS] DEMO MODE DETECTED for {video_id}. Found {len(demo_matches)} annotated files."
