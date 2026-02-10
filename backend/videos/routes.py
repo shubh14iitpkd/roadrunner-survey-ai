@@ -1,4 +1,5 @@
-from services.MultiEndpointSageMaker import MultiEndpointSageMaker
+# from services.MultiEndpointSageMaker import MultiEndpointSageMaker
+from services.local_processor import LocalVideoProcessor
 import pymongo
 import os
 import time
@@ -845,23 +846,23 @@ def process_video_with_ai(video_id: str):
         )
 
     # Initialize processor and check health FIRST (Synchronous check)
-    from services.sagemaker_processor import SageMakerVideoProcessor
+    # from services.sagemaker_processor import SageMakerVideoProcessor
 
-    processor = SageMakerVideoProcessor()
-    is_healthy, error_msg = processor.check_endpoint_health()
+    # processor = SageMakerVideoProcessor()
+    # is_healthy, error_msg = processor.check_endpoint_health()
 
     # processor = MultiEndpointSageMaker()
     # processor.check_endpoints_health()
 
-    if not is_healthy:
-        return (
-            jsonify(
-                {
-                    "error": f"SageMaker Error: {error_msg}. Processing aborted to prevent local overload."
-                }
-            ),
-            400,
-        )
+    # if not is_healthy:
+    #     return (
+    #         jsonify(
+    #             {
+    #                 "error": f"SageMaker Error: {error_msg}. Processing aborted to prevent local overload."
+    #             }
+    #         ),
+    #         400,
+    #     )
 
     # Update status to processing
     db.videos.update_one(
@@ -921,7 +922,7 @@ def process_video_with_ai(video_id: str):
                 print(f"[PROCESS] Starting SageMaker processing for video {video_id}")
 
                 # Initialize SageMaker processor
-                processor = SageMakerVideoProcessor()  # MultiEndpointSageMaker()
+                processor = LocalVideoProcessor() # SageMakerVideoProcessor()  # MultiEndpointSageMaker()
 
                 # Get MongoDB client directly (not using get_db() to avoid Flask context issues in callback)
                 from pymongo import MongoClient
@@ -952,74 +953,6 @@ def process_video_with_ai(video_id: str):
 
                 print(f"[PROCESS] Processing complete: {result}")
 
-                # Link frames to GPX data if available
-                if gpx_path:
-                    try:
-                        print(f"[PROCESS] GPX path: {gpx_path}")
-                        print(f"[PROCESS] GPX exists: {gpx_path.exists()}")
-                        if gpx_path.exists():
-                            # Parse GPX file
-                            import xml.etree.ElementTree as ET
-
-                            tree = ET.parse(str(gpx_path))
-                            root = tree.getroot()
-
-                            # Extract GPX points with timestamps
-                            ns = {"gpx": "http://www.topografix.com/GPX/1/1"}
-                            gpx_data = []
-                            for idx, trkpt in enumerate(
-                                root.findall(".//gpx:trkpt", ns)
-                                or root.findall(".//trkpt")
-                            ):
-                                lat = float(trkpt.get("lat", 0))
-                                lon = float(trkpt.get("lon", 0))
-                                ele = trkpt.find("gpx:ele", ns) or trkpt.find("ele")
-                                altitude = (
-                                    float(ele.text)
-                                    if ele is not None and ele.text
-                                    else None
-                                )
-
-                                # Estimate timestamp based on position if not available
-                                timestamp = (
-                                    idx
-                                    / len(
-                                        list(
-                                            root.findall(".//gpx:trkpt", ns)
-                                            or root.findall(".//trkpt")
-                                        )
-                                    )
-                                    * result["duration"]
-                                )
-
-                                gpx_data.append(
-                                    {
-                                        "timestamp": timestamp,
-                                        "lat": lat,
-                                        "lon": lon,
-                                        "altitude": altitude,
-                                    }
-                                )
-
-                            # Link frames to GPX
-                            metadata_path = (
-                                output_dirs["metadata"]
-                                / f"{video_id}_frame_metadata.json"
-                            )
-                            linked_frames = processor.link_frames_to_gpx(
-                                metadata_path, gpx_data, video_id=video_id, db=mongo_db
-                            )
-
-                            # Save linked metadata
-                            with open(metadata_path, "w") as f:
-                                json.dump(linked_frames, f, indent=2)
-
-                            print(
-                                f"[PROCESS] Linked {len(linked_frames)} frames to GPX data"
-                            )
-                    except Exception as e:
-                        print(f"[PROCESS] Warning: Could not link GPX data: {e}")
-
                 # Update video record with results
                 # Build paths from result - paths from processor already include 'uploads/' prefix
                 # So we just need to add leading '/' if not present
@@ -1038,22 +971,22 @@ def process_video_with_ai(video_id: str):
                         f"uploads/annotated_videos/{video_id}_annotated.mp4",
                     )
                 )
-                frames_directory = normalize_path(
-                    result.get(
-                        "frames_directory",
-                        (
-                            f"uploads/frames/route_{route_id}/{video_id}"
-                            if route_id
-                            else f"uploads/frames/{video_id}"
-                        ),
-                    )
-                )
-                frame_metadata_url = normalize_path(
-                    result.get(
-                        "frame_metadata_path",
-                        f"uploads/metadata/{video_id}_frame_metadata.json",
-                    )
-                )
+                # frames_directory = normalize_path(
+                #     result.get(
+                #         "frames_directory",
+                #         (
+                #             f"uploads/frames/route_{route_id}/{video_id}"
+                #             if route_id
+                #             else f"uploads/frames/{video_id}"
+                #         ),
+                #     )
+                # )
+                # frame_metadata_url = normalize_path(
+                #     result.get(
+                #         "frame_metadata_path",
+                #         f"uploads/metadata/{video_id}_frame_metadata.json",
+                #     )
+                # )
 
                 mongo_db.videos.update_one(
                     {"_id": ObjectId(video_id)},
@@ -1062,8 +995,8 @@ def process_video_with_ai(video_id: str):
                             "status": "completed",
                             "progress": 100,
                             "annotated_video_url": annotated_video_url,
-                            "frames_directory": frames_directory,
-                            "frame_metadata_url": frame_metadata_url,
+                            # "frames_directory": frames_directory,
+                            # "frame_metadata_url": frame_metadata_url,
                             "total_detections": result.get("total_detections", 0),
                             "detections_summary": result.get("detections_summary", {}),
                             "processed_frames": result.get("processed_frames", 0),
@@ -1440,55 +1373,29 @@ def get_video_frame(video_id: str):
 @role_required(["admin", "surveyor", "viewer"])
 def get_video_metadata(video_id: str):
     """
-    Fetch the frame metadata JSON file for a specific video.
-    This contains all detections for each frame with timestamps and coordinates.
+    Fetch detected assets for a specific video from the assets collection.
     """
-    import json
-
     db = get_db()
     video = db.videos.find_one({"_id": ObjectId(video_id)})
 
     if not video:
         return jsonify({"error": "Video not found"}), 404
 
-    # Check if video has metadata URL
-    metadata_url = video.get("frame_metadata_url")
-    if not metadata_url:
-        return jsonify({"error": "No metadata available for this video"}), 404
+    assets = list(db.assets.find({"video_id": video_id}).sort("frame_number", 1))
 
-    # Get the metadata file path
-    upload_root = Path(
-        os.getenv("UPLOAD_DIR", Path(__file__).resolve().parents[1] / "uploads")
-    )
+    if not assets:
+        return jsonify({"error": "No assets found for this video"}), 404
 
-    # Handle the path - could be /uploads/metadata/... or uploads/metadata/...
-    filename = metadata_url.replace("/uploads/", "").lstrip("/")
-    metadata_path = upload_root / filename
-
-    print(f"[METADATA] Looking for: {metadata_path}")
-
-    if not metadata_path.exists():
-        return jsonify({"error": "Metadata file not found on server"}), 404
-
-    try:
-        # Read and return the metadata JSON
-        with open(metadata_path, "r") as f:
-            metadata = json.load(f)
-
-        return jsonify(
+    return Response(
+        json_util.dumps(
             {
                 "video_id": video_id,
-                "metadata": metadata,
-                "total_frames": len(metadata),
-                "detections_count": sum(
-                    len(frame.get("detections", [])) for frame in metadata
-                ),
+                "assets": assets,
+                "total_assets": len(assets),
             }
-        )
-
-    except Exception as e:
-        print(f"Error reading metadata file {metadata_path}: {e}")
-        return jsonify({"error": f"Failed to read metadata: {str(e)}"}), 500
+        ),
+        mimetype="application/json",
+    )
 
 
 @videos_bp.get("/library")

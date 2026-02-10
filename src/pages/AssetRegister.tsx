@@ -196,8 +196,38 @@ export default function AssetRegister() {
           } catch (err) {
             console.warn(`Failed to load demo data for ${demoKey}:`, err);
           }
+        } else if (!demoKey) {
+          // For non-demo videos, load assets from backend for KPI aggregation
+          const videoId = typeof video._id === 'object' && video._id.$oid
+            ? video._id.$oid
+            : String(video._id);
+          try {
+            const resp = await api.videos.getMetadata(videoId);
+            const videoAssets = resp?.assets || [];
+            videoAssets.forEach((asset: any) => {
+              const assetOid = typeof asset._id === 'object' && asset._id.$oid
+                ? asset._id.$oid
+                : String(asset._id);
+              allAssets.push({
+                _id: assetOid,
+                asset_id: asset.asset_id,
+                category_id: asset.category_id,
+                route_id: asset.route_id || video.route_id || 0,
+                survey_id: surveyId,
+                category: labelMapData?.categories?.[asset.category_id]?.default_name || asset.asset_type || 'Unknown',
+                asset_type: asset.asset_type,
+                type: asset.type || asset.asset_type,
+                condition: asset.condition || 'unknown',
+                confidence: asset.confidence,
+                lat: asset.location?.coordinates?.[1],
+                lng: asset.location?.coordinates?.[0],
+                detected_at: asset.created_at || video.created_at || new Date().toISOString(),
+              });
+            });
+          } catch (err) {
+            // Silently skip videos without assets
+          }
         }
-        // For non-demo videos, we could try to load metadata here too if needed
       }
 
       setAssets(allAssets);
@@ -246,31 +276,33 @@ export default function AssetRegister() {
           continue;
         }
 
-        // For non-demo videos, try to load from metadata
+        // For non-demo videos, load assets from backend
         try {
           const metadataResp = await api.videos.getMetadata(videoId);
-          const metadata = metadataResp?.metadata || [];
+          const assets = metadataResp?.assets || [];
 
-          // Convert metadata frames to assets
-          metadata.forEach((frame: any) => {
-            if (frame.detections && Array.isArray(frame.detections)) {
-              frame.detections.forEach((detection: any, index: number) => {
-                allAssets.push({
-                  _id: `${videoId}_frame${frame.frame_number}_det${index}`,
-                  route_id: video.route_id || 0,
-                  survey_id: surveyId,
-                  category: detection.class_name || 'Unknown',
-                  type: detection.class_name || 'Unknown',
-                  condition: detection.confidence > 0.8 ? 'good' : 'damaged',
-                  confidence: detection.confidence,
-                  lat: frame.lat,
-                  lng: frame.lon,
-                  detected_at: video.created_at || new Date().toISOString(),
-                  image_url: frame.frame_path,
-                  description: `${detection.class_name} detected with ${(detection.confidence * 100).toFixed(0)}% confidence at timestamp ${frame.timestamp.toFixed(1)}s`
-                });
-              });
-            }
+          // Map asset documents directly
+          assets.forEach((asset: any) => {
+            const assetOid = typeof asset._id === 'object' && asset._id.$oid
+              ? asset._id.$oid
+              : String(asset._id);
+
+            allAssets.push({
+              _id: assetOid,
+              asset_id: asset.asset_id,
+              category_id: asset.category_id,
+              route_id: asset.route_id || video.route_id || 0,
+              survey_id: surveyId,
+              category: labelMapData?.categories?.[asset.category_id]?.default_name || asset.asset_type || 'Unknown',
+              asset_type: asset.asset_type,
+              type: asset.type || asset.asset_type,
+              condition: asset.condition || 'unknown',
+              confidence: asset.confidence,
+              lat: asset.location?.coordinates?.[1],
+              lng: asset.location?.coordinates?.[0],
+              detected_at: asset.created_at || video.created_at || new Date().toISOString(),
+              description: `${asset.asset_type} detected with ${((asset.confidence || 0) * 100).toFixed(0)}% confidence at timestamp ${(asset.timestamp || 0).toFixed(1)}s`
+            });
           });
         } catch (metaErr: any) {
           console.warn(`No metadata for video ${videoId}:`, metaErr.message);
@@ -354,7 +386,7 @@ export default function AssetRegister() {
   };
 
   // Get unique categories for filter
-  const categories = Array.from(new Set(assets.map(a => a.category).filter(Boolean)));
+  // const categories = Array.from(new Set(assets.map(a => a.category).filter(Boolean)));
 
   return (
     <div className="space-y-6">
@@ -389,7 +421,7 @@ export default function AssetRegister() {
             <div className="flex items-start justify-between">
               <div className="space-y-2">
                 <p className="text-sm font-semibold text-purple-600 dark:text-purple-400 uppercase tracking-wide">Total Assets</p>
-                <p className="text-5xl font-bold bg-gradient-to-br from-purple-600 to-purple-400 bg-clip-text text-transparent">{totalAssets.toLocaleString("en-US")}</p>
+                <p className="text-5xl font-bold bg-gradient-to-br from-purple-600 to-purple-400 bg-clip-text text-transparent">{assets?.length?.toLocaleString("en-US")}</p>
                 <p className="text-xs font-medium text-muted-foreground">AI Detected</p>
               </div>
               <div className="p-4 rounded-2xl bg-gradient-to-br from-purple-500 to-purple-600 shadow-lg">
@@ -660,6 +692,19 @@ export default function AssetRegister() {
                     </TabsTrigger>
                     {Object.values(ANNOTATION_CATEGORIES)
                       .filter(category => detailAssets.some(a => a.category === category))
+                      .map(category => {
+                        const count = detailAssets.filter(a => a.category === category).length;
+                        return (
+                          <TabsTrigger key={category} value={category} className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
+                            {getCategoryName(category, labelMapData)}
+                            <Badge variant="secondary" className="ml-2 text-xs">{count}</Badge>
+                          </TabsTrigger>
+                        );
+                      })
+                    }
+                    {/* Dynamic tabs for categories not in ANNOTATION_CATEGORIES (e.g. from non-demo assets) */}
+                    {Array.from(new Set(detailAssets.map(a => a.category).filter(Boolean)))
+                      .filter(cat => !Object.values(ANNOTATION_CATEGORIES).includes(cat))
                       .map(category => {
                         const count = detailAssets.filter(a => a.category === category).length;
                         return (
