@@ -9,7 +9,6 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { useNavigate } from "react-router-dom";
 import LeafletMapView from "@/components/LeafletMapView";
 import { api } from "@/lib/api";
-import { isDemoVideo, loadDemoData, convertToAssets, ANNOTATION_CATEGORIES } from "@/services/demoDataService";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useLabelMap } from "@/contexts/LabelMapContext";
 
@@ -52,152 +51,36 @@ export default function Dashboard() {
   const [topAnomalyRoads, setTopAnomalyRoads] = useState<any[]>([]);
   const [recentSurveys, setRecentSurveys] = useState<any[]>([]);
 
-  // Load all dashboard data
+  // Load all dashboard data from backend
   useEffect(() => {
     (async () => {
       try {
         setLoading(true);
 
-        // Load videos, surveys, and roads to calculate metrics from demo data (like AssetRegister)
-        const [roadsResp, videosResp, surveysResp, recentSurveysResp] = await Promise.all([
+        const [roadsResp, kpisResp, categoryResp, recentSurveysResp] = await Promise.all([
           api.roads.list(),
-          api.videos.list(),
-          api.Surveys.list({ latest_only: true }),
+          api.dashboard.kpis(timePeriod),
+          api.dashboard.assetsByCategory(),
           api.dashboard.recentSurveys(),
         ]);
 
-        const roads = roadsResp?.items || [];
-        const videos = (videosResp?.items || []) as any[];
-        const surveys = (surveysResp?.items || []) as any[];
-
         if (roadsResp?.items) setRoads(roadsResp.items);
 
-        // Normalize survey IDs
-        const normalizedSurveys = surveys.map((survey: any) => ({
-          ...survey,
-          _id: typeof survey._id === 'object' && survey._id.$oid
-            ? survey._id.$oid
-            : String(survey._id)
-        }));
-
-        // Group videos by survey_id
-        const videosBySurveyMap: Record<string, any[]> = {};
-        videos.forEach((video: any) => {
-          const surveyId = typeof video.survey_id === 'object' && video.survey_id.$oid
-            ? video.survey_id.$oid
-            : String(video.survey_id || '');
-          if (!videosBySurveyMap[surveyId]) videosBySurveyMap[surveyId] = [];
-          videosBySurveyMap[surveyId].push(video);
-        });
-
-        // Get surveys that have videos
-        const surveysWithVideos = normalizedSurveys.filter((survey: any) =>
-          videosBySurveyMap[survey._id]?.length > 0
-        );
-
-        // Get the latest survey per route
-        const latestSurveyByRoute: Record<number, any> = {};
-        surveysWithVideos.forEach((survey: any) => {
-          const routeId = survey.route_id;
-          if (!latestSurveyByRoute[routeId] ||
-            new Date(survey.survey_date) > new Date(latestSurveyByRoute[routeId].survey_date)) {
-            latestSurveyByRoute[routeId] = survey;
-          }
-        });
-        const latestSurveyIds = new Set(Object.values(latestSurveyByRoute).map(s => s._id));
-
-        // Load demo data for videos from latest surveys only
-        const allAssets: any[] = [];
-        const processedDemoKeys = new Set<string>();
-
-        for (const video of videos) {
-          const surveyId = typeof video.survey_id === 'object' && video.survey_id.$oid
-            ? video.survey_id.$oid
-            : String(video.survey_id || '');
-
-          if (!latestSurveyIds.has(surveyId)) continue;
-
-          const demoKey = isDemoVideo(video.title || '');
-          if (demoKey && !processedDemoKeys.has(demoKey)) {
-            processedDemoKeys.add(demoKey);
-            try {
-              const demoData = await loadDemoData(demoKey);
-              if (demoData) {
-                const demoAssets = convertToAssets(demoData, video.route_id || 0, surveyId, labelMapData);
-                allAssets.push(...demoAssets);
-              }
-            } catch (err) {
-              console.warn(`Failed to load demo data for ${demoKey}:`, err);
-            }
-          }
+        // KPIs directly from backend
+        if (kpisResp) {
+          setKpis(kpisResp);
         }
 
-        // Calculate KPIs from loaded demo assets
-        const totalAssets = allAssets.length;
-        const good = allAssets.filter(a => a.condition?.toLowerCase() === 'good').length;
-        const damaged = allAssets.filter(a => a.condition?.toLowerCase() === 'damaged').length;
-        const kmSurveyed = roads.reduce((sum: number, r: any) => sum + (r.estimated_distance_km || 0), 0);
-
-        setKpis({
-          totalAssets,
-          totalAnomalies: damaged,
-          good,
-          damaged,
-          kmSurveyed: Math.round(kmSurveyed * 10) / 10,
+        // Category chart data — resolve category_id to display names
+        const rawCategoryData = categoryResp?.items || [];
+        const resolvedChartData = rawCategoryData.map((item: any) => {
+          const categoryId = item.category;
+          const displayName = labelMapData?.categories?.[categoryId]?.display_name
+            || labelMapData?.categories?.[categoryId]?.default_name
+            || categoryId || 'Unknown';
+          return { category: displayName, count: item.count };
         });
-
-        // Build category chart data from demo assets
-        const categoryCount: Record<string, number> = {};
-        allAssets.forEach(a => {
-          let catName = a.category || 'Unknown';
-          // Use category display name from labelMap if category_id exists
-          if (a.category_id && labelMapData?.categories?.[a.category_id]) {
-            catName = labelMapData.categories[a.category_id].display_name;
-          }
-          categoryCount[catName] = (categoryCount[catName] || 0) + 1;
-        });
-        const chartData = Object.entries(categoryCount)
-          .map(([category, count]) => ({ category, count }))
-          .sort((a, b) => b.count - a.count)
-          .slice(0, 10);
-
-        if (chartData.length > 0) {
-          setCategoryChartData(chartData);
-        } else {
-          // Demo fallback if no data
-          setCategoryChartData([
-            { category: "No Data", count: 0 },
-          ]);
-        }
-
-        // Anomalies by category
-        const anomalyCount: Record<string, number> = {};
-        allAssets.filter(a => a.condition?.toLowerCase() === 'damaged').forEach(a => {
-          let catName = a.category || 'Unknown';
-          if (a.category_id && labelMapData?.categories?.[a.category_id]) {
-            catName = labelMapData.categories[a.category_id].display_name;
-          }
-          anomalyCount[catName] = (anomalyCount[catName] || 0) + 1;
-        });
-        const anomalyData = Object.entries(anomalyCount)
-          .map(([category, count]) => ({ category, count }))
-          .sort((a, b) => b.count - a.count)
-          .slice(0, 10);
-        setTopAnomalyCategories(anomalyData);
-
-        // Top anomaly roads
-        const anomalyByRoute: Record<number, number> = {};
-        allAssets.filter(a => a.condition?.toLowerCase() === 'damaged').forEach(a => {
-          anomalyByRoute[a.route_id] = (anomalyByRoute[a.route_id] || 0) + 1;
-        });
-        const topRoads = Object.entries(anomalyByRoute)
-          .map(([routeId, count]) => {
-            const road = roads.find((r: any) => r.route_id === Number(routeId));
-            return { road: road?.road_name || `Route ${routeId}`, count };
-          })
-          .sort((a, b) => b.count - a.count)
-          .slice(0, 5);
-        setTopAnomalyRoads(topRoads);
+        setCategoryChartData(resolvedChartData.length > 0 ? resolvedChartData : [{ category: "No Data", count: 0 }]);
 
         // Recent surveys from API
         if (recentSurveysResp?.items && recentSurveysResp.items.length > 0) {
@@ -211,7 +94,7 @@ export default function Dashboard() {
         setLoading(false);
       }
     })();
-  }, [timePeriod]);
+  }, [timePeriod, labelMapData]);
 
   // Calculate health data from actual KPIs
   const totalAssets = kpis.totalAssets || 1; // Avoid division by zero

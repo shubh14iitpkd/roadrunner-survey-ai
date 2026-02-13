@@ -7,11 +7,16 @@ DEMO_VIDEOS = {
 }
 
 
+def get_video_key(video_url):
+    if not video_url:
+        return None
+    return os.path.splitext(os.path.basename(video_url))[0]
+
 def is_demo(video_file=None, video_url=None):
     if not video_url:
         if not video_file:
             return False
         video_url = video_file.get("storage_url")
 
-    basename = os.path.splitext(os.path.basename(video_url))[0]
+    basename = get_video_key(video_url)
     return basename in DEMO_VIDEOS
