@@ -234,6 +234,7 @@ def extract_asset_info(result_item, video_name, interpolated_gpx, fps, labels_ma
         "route_id": ROUTE_ID,
         "time": time_val,
         "confidence": confidence,
+        "condition": "good" if confidence  >= 0.2 else "damaged",
         "box": {
             "x": first_frame.get("x", 0),
             "y": first_frame.get("y", 0),

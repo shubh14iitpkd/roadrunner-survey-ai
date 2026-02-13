@@ -142,7 +142,7 @@ class LocalVideoProcessor:
             print(f"[LOCAL] Warning: Failed to load label map: {e}")
             return {}
 
-    def _load_endpoint_config(self) -> Optional[str]:
+    def _load_endpoint_config(self):
         """
         Load endpoint configuration from endpoint_config.json if it exists.
 
@@ -240,10 +240,10 @@ class LocalVideoProcessor:
         video_path: Path,
         output_dir: Path,
         video_id: str,
-        route_id: int = None,
-        survey_id: str = None,
+        route_id: int | None = None,
+        survey_id: str | None = None,
         db=None,
-        gpx_path: str = None,
+        gpx_path: str | None = None,
         progress_callback: callable = None,
     ) -> Dict:
         """
@@ -333,8 +333,9 @@ class LocalVideoProcessor:
         processed_count = 0
         detections_list = []
         frame_metadata = []
-        # lat_set = set()
-        # lon_set = set()
+        assets_detected = []
+        summary = { "good": 0, "damaged": 0, "total_assets": 0 }
+
         try:
             with ThreadPoolExecutor(max_workers=self.max_concurrency) as executor:
                 # Process video in chunks
@@ -456,8 +457,16 @@ class LocalVideoProcessor:
                                 if db is not None:
                                     # Look up asset_id and category_id from label map
                                     label_info = self.label_map.get(class_name, {})
+                                    condition = (
+                                                "damaged"
+                                                if confidence < 0.3
+                                                else "good"
+                                            )
                                     
-                                    db.assets.insert_one(
+                                    summary[condition] += 1
+                                    summary["total_assets"] += 1
+
+                                    assets_detected.append(
                                         {
                                             "track_id": track_id,
                                             "asset_type": class_name,
@@ -465,11 +474,7 @@ class LocalVideoProcessor:
                                             "asset_id": label_info.get("asset_id"),
                                             "category_id": label_info.get("category_id"),
                                             "confidence": confidence,
-                                            "condition": (
-                                                "damaged"
-                                                if confidence < 0.3
-                                                else "good"
-                                            ),
+                                            "condition": condition,
                                             "frame_number": frame_num,
                                             "timestamp": timestamp,
                                             "video_id": video_id,
@@ -531,7 +536,9 @@ class LocalVideoProcessor:
 
                     # Free memory for this chunk
                     del chunk_frames, futures, inference_results
-
+            
+            # Insert all assets into MongoDB
+            db.assets.insert_many(assets_detected)
         finally:
             cap.release()
             if "ffmpeg_process" in locals():
@@ -540,19 +547,11 @@ class LocalVideoProcessor:
                 if ffmpeg_process.returncode != 0:
                     print(f"[LOCAL] FFmpeg exited with error code: {ffmpeg_process.returncode}")
 
-        # Save frame metadata as JSON in metadata folder
-        metadata_dir = output_dir / "metadata"
-        metadata_dir.mkdir(parents=True, exist_ok=True)
-        metadata_path = metadata_dir / f"{video_id}_frame_metadata.json"
-        with open(metadata_path, "w") as f:
-            json.dump(frame_metadata, f, indent=2)
 
         print(f"[LOCAL] Processing complete!")
         print(f"[LOCAL] Processed {processed_count} inference frames")
         print(f"[LOCAL] Annotated video: {output_video_path}")
-        # print(f"[LOCAL] Frames saved to: {frames_dir}")
-        # print(lat_set)
-        # print(lon_set)
+
         return {
             "video_id": video_id,
             "total_frames": total_frames,
@@ -564,8 +563,9 @@ class LocalVideoProcessor:
             "annotated_video_path": str(
                 output_video_path.relative_to(output_dir.parent)
             ),
+            "assets_summary": summary,
             # "frames_directory": str(frames_dir.relative_to(output_dir.parent)),
-            "frame_metadata_path": str(metadata_path.relative_to(output_dir.parent)),
+            # "frame_metadata_path": str(metadata_path.relative_to(output_dir.parent)),
             "total_detections": len(detections_list),
             "detections_summary": self._summarize_detections(detections_list),
         }
@@ -726,78 +726,6 @@ class LocalVideoProcessor:
             class_name = det.get("class_name", "unknown")
             summary[class_name] = summary.get(class_name, 0) + 1
         return summary
-
-    def link_frames_to_gpx(
-        self,
-        frame_metadata_path: Path,
-        gpx_data: List[Dict],
-        video_id: str = "",
-        db=None,
-    ) -> List[Dict]:
-        """
-        Link video frames to GPX coordinates based on timestamps.
-
-        Args:
-            frame_metadata_path: Path to frame metadata JSON
-            gpx_data: List of GPX points with timestamps
-            video_id: Video ID to update frames in MongoDB
-            db: MongoDB database connection
-
-        Returns:
-            List of frames with linked GPS coordinates
-        """
-        print(f"[LOCAL] Linking frames to GPX data")
-
-        # Load frame metadata
-        with open(frame_metadata_path, "r") as f:
-            frames = json.load(f)
-
-        # Link each frame to nearest GPX point
-        linked_frames = []
-        for frame in frames:
-            timestamp = frame["timestamp"]
-
-            # Find closest GPX point by timestamp
-            closest_gpx = min(
-                gpx_data, key=lambda p: abs(p.get("timestamp", 0) - timestamp)
-            )
-
-            linked_frame = {
-                **frame,
-                "lat": closest_gpx.get("lat"),
-                "lon": closest_gpx.get("lon"),
-                "altitude": closest_gpx.get("altitude"),
-                "gpx_timestamp": closest_gpx.get("timestamp"),
-            }
-            linked_frames.append(linked_frame)
-
-            # Update frame in MongoDB with GPS coordinates if db provided
-            if db is not None and video_id:
-                try:
-                    db.frames.update_one(
-                        {"video_id": video_id, "frame_number": frame["frame_number"]},
-                        {
-                            "$set": {
-                                "location": {
-                                    "type": "Point",
-                                    "coordinates": [
-                                        closest_gpx.get("lon"),
-                                        closest_gpx.get("lat"),
-                                    ],
-                                },
-                                "altitude": closest_gpx.get("altitude"),
-                                "gpx_timestamp": closest_gpx.get("timestamp"),
-                                "updated_at": datetime.utcnow().isoformat(),
-                            }
-                        },
-                    )
-                except Exception as e:
-                    print(
-                        f"[LOCAL] Warning: Failed to update frame GPS in MongoDB: {e}"
-                    )
-
-        print(f"[LOCAL] Linked {len(linked_frames)} frames to GPS coordinates")
-        return linked_frames
 
     def _mock_detections(self) -> List[Dict]:
         """Return mock detections for testing without SageMaker (YOLO format)."""

@@ -762,8 +762,8 @@ def process_video_with_ai(video_id: str):
                     mongo_db = mongo_client[app.config["MONGO_DB_NAME"]]
 
                     # Simulate progress
-                    for i in range(1, 101, 7):
-                        time.sleep(2.3)
+                    for i in range(1, 101, 10):
+                        time.sleep(0.5)
                         print(f"[PROCESS] Updating progress to {i}%")
                         mongo_db.videos.update_one(
                             {"_id": ObjectId(video_id)},
@@ -824,6 +824,39 @@ def process_video_with_ai(video_id: str):
 
                     print(f"[PROCESS] Demo processing complete for {video_id}")
 
+                    # Calculate aggregates
+                    try:
+                        if filename_no_ext:
+                            print(f"[PROCESS] Aggregating assets for demo video key: {filename_no_ext}")
+                            pipeline = [
+                                {"$match": {"video_key": filename_no_ext}},
+                                {"$group": {
+                                    "_id": None,
+                                    "total_assets": {"$sum": 1},
+                                    "good": {"$sum": {"$cond": [{"$eq": ["$condition", "good"]}, 1, 0]}},
+                                    "damaged": {"$sum": {"$cond": [{"$eq": ["$condition", "damaged"]}, 1, 0]}}
+                                }}
+                            ]
+                            
+                            agg_res = list(mongo_db.assets.aggregate(pipeline))
+                            totals = {"total_assets": 0, "good": 0, "damaged": 0}
+                            
+                            if agg_res:
+                                res = agg_res[0]
+                                totals["total_assets"] = res.get("total_assets", 0)
+                                totals["good"] = res.get("good", 0)
+                                totals["damaged"] = res.get("damaged", 0)
+                                
+                            print(f"[PROCESS] Calculated totals for survey {survey_id}: {totals}")
+
+                            if survey_id:
+                                mongo_db.surveys.update_one(
+                                    {"_id": ObjectId(survey_id)},
+                                    {"$set": {"totals": totals}}
+                                )
+                    except Exception as agge:
+                        print(f"[PROCESS] Error calculating demo aggregates: {agge}")
+
                 except Exception as e:
                     print(f"Error in demo processing: {e}")
                     import traceback
@@ -837,7 +870,7 @@ def process_video_with_ai(video_id: str):
             jsonify(
                 {
                     "ok": True,
-                    "message": "Video processing started (DEMO MODE)",
+                    "message": "Video processing started",
                     "video_id": video_id,
                     "status": "processing",
                 }
@@ -902,8 +935,8 @@ def process_video_with_ai(video_id: str):
                 output_dirs = {
                     "original_videos": upload_root / "original_videos",
                     "annotated_videos": upload_root / "annotated_videos",
-                    "frames": upload_root / "frames",
-                    "metadata": upload_root / "metadata",
+                    # "frames": upload_root / "frames",
+                    # "metadata": upload_root / "metadata",
                 }
                 for dir_path in output_dirs.values():
                     dir_path.mkdir(parents=True, exist_ok=True)
@@ -987,7 +1020,6 @@ def process_video_with_ai(video_id: str):
                 #         f"uploads/metadata/{video_id}_frame_metadata.json",
                 #     )
                 # )
-
                 mongo_db.videos.update_one(
                     {"_id": ObjectId(video_id)},
                     {
@@ -1005,6 +1037,14 @@ def process_video_with_ai(video_id: str):
                     },
                 )
 
+                mongo_db.surveys.update_one(
+                    {"_id": ObjectId(survey_id)},
+                    {
+                        "$set": {
+                            "totals": result.get("assets_summary", {"good": 0, "damaged": 0, "total_assets": 0})
+                        }
+                    },
+                )
                 print(f"[PROCESS] Video {video_id} processing completed successfully")
 
             except Exception as e:

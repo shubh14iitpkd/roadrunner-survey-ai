@@ -167,7 +167,7 @@ def create_survey():
         "survey_version": survey_version,
         "is_latest": is_latest,
         "status": body.get("status", "uploaded"),
-        "totals": body.get("totals", {"total_assets": 0, "good": 0, "fair": 0, "poor": 0}),
+        "totals": body.get("totals", {"total_assets": 0, "good": 0, "damaged": 0}),
         "gpx_file_url": body.get("gpx_file_url"),
         "created_at": get_now_iso(),
         "updated_at": get_now_iso(),
