@@ -24,3 +24,6 @@ def extract_gpx(video_path, fmt_file=fmt_file):
     except Exception as e:
         print(f"Error: {e}")
         return None
+
+if __name__ == "__main__":
+    extract_gpx("R2.mp4")

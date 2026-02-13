@@ -67,3 +67,6 @@ ENV/
 cleanup.sh
 **/endpoint_config*
 **/test_sagemaker_local.py
+**/all_assets_extracted.json
+# ignore model files
+**/*.pt 
