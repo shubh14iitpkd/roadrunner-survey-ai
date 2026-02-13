@@ -765,12 +765,6 @@ export default function SurveyUpload() {
                                   <span className="text-[10px] font-medium text-primary">{video.progress}%</span>
                                 </div>
                               )}
-                              {/* Show detection count for completed demo videos */}
-                              {video.status === "completed" && video.backendId && demoDataCache.has(video.backendId) && (
-                                <span className="text-[10px] text-green-600 dark:text-green-400">
-                                  {demoDataCache.get(video.backendId)?.totalDetections.toLocaleString()} detections
-                                </span>
-                              )}
                             </div>
                           </td>
 

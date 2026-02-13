@@ -569,7 +569,7 @@ export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                 toast.info(`Loading pre-processed AI data for ${video.name}...`);
 
                 // Simulate processing time for demo effect
-                const progressSteps = [3, 7, 16, 24, 33, 38, 41, 44, 49, 52, 56, 58, 61, 65, 71, 74, 78, 82, 86, 90, 93, 96, 99, 100];
+                const progressSteps = [3, 7, 16, 24, 33, 38, 41, 44, 49, 52, 56, 58, 61, 65, 71, 74, 78, 82, 86, 90, 93, 96, 99];
                 for (let i = 0; i < progressSteps.length; i++) {
                     await new Promise(resolve => setTimeout(resolve, 800));
                     setVideos((prev) =>
@@ -579,40 +579,17 @@ export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                     );
                 }
 
-                // Load demo data
-                const demoData = await loadDemoData(demoKey);
+                setVideos((prev) =>
+                    prev.map((v) =>
+                        v.id === videoId ? { ...v, status: "completed" as VideoStatus, progress: 100 } : v
+                    )
+                );
 
-                if (demoData) {
-                    // Cache the demo data for use in Maps and Reports
-                    demoDataCache.set(video.backendId, demoData);
-
-                    // Convert to assets and store (for reports)
-                    const assets = convertToAssets(demoData, video.routeId, video.surveyId || '');
-
-                    // Try to bulk insert assets to backend
-                    try {
-                        await api.assets.bulkInsert(assets);
-                        console.log(`Inserted ${assets.length} demo assets for route ${video.routeId}`);
-                    } catch (err) {
-                        console.warn('Could not insert demo assets to backend (may already exist):', err);
-                    }
-
-                    toast.success(`AI processing completed for ${video.name}! Found ${demoData.totalDetections} detections.`);
-
-                    setVideos((prev) =>
-                        prev.map((v) =>
-                            v.id === videoId ? { ...v, status: "completed" as VideoStatus, progress: 100 } : v
-                        )
-                    );
-
-                    // Also update backend status
-                    try {
-                        await api.videos.updateStatus(video.backendId, { status: "completed", progress: 100 });
-                    } catch (err) {
-                        console.warn('Could not update backend status:', err);
-                    }
-                } else {
-                    throw new Error('Failed to load demo data');
+                // Also update backend status
+                try {
+                    await api.videos.updateStatus(video.backendId, { status: "completed", progress: 100 });
+                } catch (err) {
+                    console.warn('Could not update backend status:', err);
                 }
             } catch (error: any) {
                 console.error("Error processing demo video:", error);
