@@ -1,11 +1,11 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
   Search, MapPin, TrendingUp, CheckCircle, AlertTriangle,
-  FileText, ArrowLeft, Calendar, User, Layers, Map, Package, BarChart3,
+  FileText, ArrowLeft, Calendar, User, Layers, Map as MapIcon, Package, BarChart3,
   ChevronLeft, ChevronRight, Loader2
 } from "lucide-react";
 import { Link, useSearchParams } from "react-router-dom";
@@ -27,25 +27,24 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { isDemoVideo, loadDemoData, convertToAssets, ANNOTATION_CATEGORIES, getCategoryName } from "@/services/demoDataService";
 import { useLabelMap } from "@/contexts/LabelMapContext";
 
 interface Asset {
   _id: string;
   asset_id?: string;
   category_id?: string;
-  route_id: number;
-  survey_id: string;
-  category: string;          // Annotation category: OIA, ITS, Roadway Lighting, etc.
-  asset_type?: string;       // The specific asset label (e.g., "Guardrail")
+  asset_type?: string;
   type?: string;
   condition: string;
   confidence?: number;
-  lat?: number;
-  lng?: number;
-  detected_at: string;
-  image_url?: string;
-  description?: string;
+  route_id?: number;
+  survey_id?: string;
+  video_id?: string;
+  video_key?: string;
+  frame_number?: number;
+  timestamp?: number;
+  time?: number;
+  location?: { type: string; coordinates: [number, number] };
 }
 
 interface Survey {
@@ -75,7 +74,6 @@ export default function AssetRegister() {
 
   const [searchQuery, setSearchQuery] = useState("");
   const [loading, setLoading] = useState(true);
-  const [assets, setAssets] = useState<Asset[]>([]);
   const [surveys, setSurveys] = useState<Survey[]>([]);
   const [roads, setRoads] = useState<Road[]>([]);
   const [selectedSurveyId, setSelectedSurveyId] = useState<string | null>(null);
@@ -117,8 +115,7 @@ export default function AssetRegister() {
   const loadData = async () => {
     try {
       setLoading(true);
-      const [videosResp, surveysResp, roadsResp] = await Promise.all([
-        api.videos.list(),
+      const [surveysResp, roadsResp] = await Promise.all([
         api.Surveys.list({ latest_only: true }),
         api.roads.list(),
       ]);
@@ -131,107 +128,7 @@ export default function AssetRegister() {
           : String(survey._id)
       }));
 
-      // Get videos and group by survey_id
-      const videos = (videosResp?.items || []) as any[];
-      const videosBySurveyMap: Record<string, any[]> = {};
-      const videosByRouteMap: Record<number, any[]> = {};
-
-      videos.forEach((video: any) => {
-        const surveyId = typeof video.survey_id === 'object' && video.survey_id.$oid
-          ? video.survey_id.$oid
-          : String(video.survey_id || '');
-
-        if (!videosBySurveyMap[surveyId]) videosBySurveyMap[surveyId] = [];
-        videosBySurveyMap[surveyId].push(video);
-
-        const routeId = video.route_id;
-        if (routeId) {
-          if (!videosByRouteMap[routeId]) videosByRouteMap[routeId] = [];
-          videosByRouteMap[routeId].push(video);
-        }
-      });
-
-      // Filter surveys to only those that have videos
-      const surveysWithVideos = normalizedSurveys.filter((survey: any) =>
-        videosBySurveyMap[survey._id]?.length > 0
-      );
-
-      // Get the latest survey per route (for KPI counting)
-      const latestSurveyByRoute: Record<number, any> = {};
-      surveysWithVideos.forEach((survey: any) => {
-        const routeId = survey.route_id;
-        if (!latestSurveyByRoute[routeId] ||
-          new Date(survey.survey_date) > new Date(latestSurveyByRoute[routeId].survey_date)) {
-          latestSurveyByRoute[routeId] = survey;
-        }
-      });
-
-      // Create a set of latest survey IDs for quick lookup
-      const latestSurveyIds = new Set(Object.values(latestSurveyByRoute).map(s => s._id));
-
-      // Pre-load demo data ONLY for videos belonging to the latest survey per route
-      const allAssets: Asset[] = [];
-      const processedDemoKeys = new Set<string>(); // Avoid duplicate demo data loading
-
-      for (const video of videos) {
-        const surveyId = typeof video.survey_id === 'object' && video.survey_id.$oid
-          ? video.survey_id.$oid
-          : String(video.survey_id || '');
-
-        // Only process videos from the latest survey for each route
-        if (!latestSurveyIds.has(surveyId)) {
-          continue;
-        }
-
-        const demoKey = isDemoVideo(video.title || '');
-        if (demoKey && !processedDemoKeys.has(demoKey)) {
-          processedDemoKeys.add(demoKey); // Mark as processed to avoid duplicates
-
-          try {
-            const demoData = await loadDemoData(demoKey);
-            if (demoData) {
-              const demoAssets = convertToAssets(demoData, video.route_id || 0, surveyId, labelMapData);
-              allAssets.push(...demoAssets as Asset[]);
-            }
-          } catch (err) {
-            console.warn(`Failed to load demo data for ${demoKey}:`, err);
-          }
-        } else if (!demoKey) {
-          // For non-demo videos, load assets from backend for KPI aggregation
-          const videoId = typeof video._id === 'object' && video._id.$oid
-            ? video._id.$oid
-            : String(video._id);
-          try {
-            const resp = await api.videos.getMetadata(videoId);
-            const videoAssets = resp?.assets || [];
-            videoAssets.forEach((asset: any) => {
-              const assetOid = typeof asset._id === 'object' && asset._id.$oid
-                ? asset._id.$oid
-                : String(asset._id);
-              allAssets.push({
-                _id: assetOid,
-                asset_id: asset.asset_id,
-                category_id: asset.category_id,
-                route_id: asset.route_id || video.route_id || 0,
-                survey_id: surveyId,
-                category: labelMapData?.categories?.[asset.category_id]?.default_name || asset.asset_type || 'Unknown',
-                asset_type: asset.asset_type,
-                type: asset.type || asset.asset_type,
-                condition: asset.condition || 'unknown',
-                confidence: asset.confidence,
-                lat: asset.location?.coordinates?.[1],
-                lng: asset.location?.coordinates?.[0],
-                detected_at: asset.created_at || video.created_at || new Date().toISOString(),
-              });
-            });
-          } catch (err) {
-            // Silently skip videos without assets
-          }
-        }
-      }
-
-      setAssets(allAssets);
-      setSurveys(surveysWithVideos);
+      setSurveys(normalizedSurveys);
       setRoads(roadsResp?.items || []);
     } catch (err: any) {
       toast.error("Failed to load data: " + (err?.message || "Unknown error"));
@@ -243,78 +140,23 @@ export default function AssetRegister() {
   const loadSurveyAssets = async (surveyId: string) => {
     try {
       setLoadingSurveyId(surveyId);
-      // Get videos for this survey
-      const videosResp = await api.videos.list({ survey_id: surveyId });
-      const videos = videosResp?.items || [];
 
-      if (videos.length === 0) {
-        toast.error("No videos found for this survey");
-        return;
-      }
+      const resp = await api.assets.list({ survey_id: surveyId });
+      const items: Asset[] = (resp?.items || []).map((asset: any) => ({
+        ...asset,
+        _id: typeof asset._id === 'object' && asset._id.$oid
+          ? asset._id.$oid
+          : String(asset._id),
+      }));
 
-      // Fetch assets for all videos
-      const allAssets: Asset[] = [];
-
-      for (const video of videos) {
-        const videoId = typeof video._id === 'object' && video._id.$oid
-          ? video._id.$oid
-          : String(video._id);
-
-        // Check if this is a demo video
-        const demoKey = isDemoVideo(video.title || '');
-
-        if (demoKey) {
-          // For demo videos, load data directly from JSON files
-          console.log(`Loading demo data for video ${videoId} (key: ${demoKey})`);
-          const demoData = await loadDemoData(demoKey);
-
-          if (demoData) {
-            const demoAssets = convertToAssets(demoData, video.route_id || 0, surveyId, labelMapData);
-            allAssets.push(...demoAssets as Asset[]);
-            console.log(`Loaded ${demoAssets.length} demo assets for ${demoKey}`);
-          }
-          continue;
-        }
-
-        // For non-demo videos, load assets from backend
-        try {
-          const metadataResp = await api.videos.getMetadata(videoId);
-          const assets = metadataResp?.assets || [];
-
-          // Map asset documents directly
-          assets.forEach((asset: any) => {
-            const assetOid = typeof asset._id === 'object' && asset._id.$oid
-              ? asset._id.$oid
-              : String(asset._id);
-
-            allAssets.push({
-              _id: assetOid,
-              asset_id: asset.asset_id,
-              category_id: asset.category_id,
-              route_id: asset.route_id || video.route_id || 0,
-              survey_id: surveyId,
-              category: labelMapData?.categories?.[asset.category_id]?.default_name || asset.asset_type || 'Unknown',
-              asset_type: asset.asset_type,
-              type: asset.type || asset.asset_type,
-              condition: asset.condition || 'unknown',
-              confidence: asset.confidence,
-              lat: asset.location?.coordinates?.[1],
-              lng: asset.location?.coordinates?.[0],
-              detected_at: asset.created_at || video.created_at || new Date().toISOString(),
-              description: `${asset.asset_type} detected with ${((asset.confidence || 0) * 100).toFixed(0)}% confidence at timestamp ${(asset.timestamp || 0).toFixed(1)}s`
-            });
-          });
-        } catch (metaErr: any) {
-          console.warn(`No metadata for video ${videoId}:`, metaErr.message);
-        }
-      }
-
-      if (allAssets.length === 0) {
+      if (items.length === 0) {
         toast.info("No AI detections found for this survey. Process the video with AI first.");
       }
 
-      setDetailAssets(allAssets);
+      setDetailAssets(items);
       setSelectedSurveyId(surveyId);
+      setFilterCategory("all");
+      setFilterCondition("all");
       setIsDetailDialogOpen(true);
     } catch (err: any) {
       toast.error("Failed to load assets: " + (err?.message || "Unknown error"));
@@ -362,13 +204,13 @@ export default function AssetRegister() {
     return matchesSearch;
   });
 
-  // Calculate KPIs - based on pre-loaded assets
+  // Calculate KPIs from survey totals
   const totalRoads = roads.length;
-  const surveyedRoads = enrichedRoads.length; // Only roads with surveys/videos
-  // Asset counts from pre-loaded demo data
-  const totalAssets = assets.length;
-  const totalGood = assets.filter(a => a.condition?.toLowerCase() === 'good').length;
-  const totalDamaged = assets.filter(a => a.condition?.toLowerCase() === 'damaged').length;
+  const surveyedRoads = enrichedRoads.length;
+  const latestSurveys = Object.values(surveyByRouteMap);
+  const totalAssets = latestSurveys.reduce((sum, s) => sum + (s.totals?.total_assets || 0), 0);
+  const totalGood = latestSurveys.reduce((sum, s) => sum + (s.totals?.good || 0), 0);
+  const totalDamaged = latestSurveys.reduce((sum, s) => sum + (s.totals?.damaged || 0), 0);
 
   const selectedSurvey = surveys.find(s => s._id === selectedSurveyId);
   const selectedRoad = roads.find(r => r.route_id === selectedSurvey?.route_id);
@@ -385,8 +227,29 @@ export default function AssetRegister() {
     }
   };
 
-  // Get unique categories for filter
-  // const categories = Array.from(new Set(assets.map(a => a.category).filter(Boolean)));
+  // Helper to resolve category display name from category_id
+  const getCategoryDisplayName = (categoryId: string) => {
+    return labelMapData?.categories?.[categoryId]?.display_name
+      || labelMapData?.categories?.[categoryId]?.default_name
+      || categoryId;
+  };
+
+  // Helper to resolve asset display name from asset_id
+  const getAssetDisplayName = (asset: Asset) => {
+    if (asset.asset_id && labelMapData?.labels?.[asset.asset_id]?.display_name) {
+      return labelMapData.labels[asset.asset_id].display_name;
+    }
+    return asset.asset_type || asset.type || 'Unknown';
+  };
+
+  // Unique category_ids from detail assets for tabs
+  const detailCategories = useMemo(() => {
+    const cats = new Set<string>();
+    detailAssets.forEach(a => {
+      if (a.category_id) cats.add(a.category_id);
+    });
+    return Array.from(cats);
+  }, [detailAssets]);
 
   return (
     <div className="space-y-6">
@@ -412,7 +275,7 @@ export default function AssetRegister() {
                 <p className="text-xs font-medium text-muted-foreground">{surveyedRoads} with surveys</p>
               </div>
               <div className="p-4 rounded-2xl bg-gradient-to-br from-blue-500 to-blue-600 shadow-lg">
-                <Map className="h-7 w-7 text-white" />
+                <MapIcon className="h-7 w-7 text-white" />
               </div>
             </div>
           </Card>
@@ -421,7 +284,7 @@ export default function AssetRegister() {
             <div className="flex items-start justify-between">
               <div className="space-y-2">
                 <p className="text-sm font-semibold text-purple-600 dark:text-purple-400 uppercase tracking-wide">Total Assets</p>
-                <p className="text-5xl font-bold bg-gradient-to-br from-purple-600 to-purple-400 bg-clip-text text-transparent">{assets?.length?.toLocaleString("en-US")}</p>
+                <p className="text-5xl font-bold bg-gradient-to-br from-purple-600 to-purple-400 bg-clip-text text-transparent">{totalAssets.toLocaleString("en-US")}</p>
                 <p className="text-xs font-medium text-muted-foreground">AI Detected</p>
               </div>
               <div className="p-4 rounded-2xl bg-gradient-to-br from-purple-500 to-purple-600 shadow-lg">
@@ -434,8 +297,7 @@ export default function AssetRegister() {
             <div className="flex items-start justify-between">
               <div className="space-y-2">
                 <p className="text-sm font-semibold text-green-600 dark:text-green-400 uppercase tracking-wide">Good Condition</p>
-                <p className="text-5xl font-bold bg-gradient-to-br from-green-600 to-green-400 bg-clip-text text-transparent">{Number(totalGood).toLocaleString("en-US")}</p>
-                {/* <p className="text-xs font-medium text-muted-foreground">{totalAssets > 0 ? ((totalGood / totalAssets) * 100).toFixed(0) : 0}% of total</p> */}
+                <p className="text-5xl font-bold bg-gradient-to-br from-green-600 to-green-400 bg-clip-text text-transparent">{totalGood.toLocaleString("en-US")}</p>
               </div>
               <div className="p-4 rounded-2xl bg-gradient-to-br from-green-500 to-green-600 shadow-lg">
                 <CheckCircle className="h-7 w-7 text-white" />
@@ -443,16 +305,13 @@ export default function AssetRegister() {
             </div>
           </Card>
 
-
           <Card className="p-6 shadow-elevated border-0 bg-gradient-to-br from-red-50 to-white dark:from-red-950/20 dark:to-card animate-fade-in hover:shadow-glow transition-all duration-300">
             <div className="flex items-start justify-between">
               <div className="space-y-2">
                 <p className="text-sm font-semibold text-red-600 dark:text-red-400 uppercase tracking-wide">Damaged Condition</p>
-                <p className="text-5xl font-bold bg-gradient-to-br from-red-600 to-red-400 bg-clip-text text-transparent">{Number(totalDamaged).toLocaleString("en-US")}</p>
-                {/* <p className="text-xs font-medium text-muted-foreground">Poor condition</p> */}
+                <p className="text-5xl font-bold bg-gradient-to-br from-red-600 to-red-400 bg-clip-text text-transparent">{totalDamaged.toLocaleString("en-US")}</p>
               </div>
               <div className="p-4 rounded-2xl bg-gradient-to-br from-red-500 to-red-600 shadow-lg">
-
                 <AlertTriangle className="h-7 w-7 text-white" />
               </div>
             </div>
@@ -517,7 +376,6 @@ export default function AssetRegister() {
                     <th className="text-left p-5 font-bold text-sm uppercase tracking-wide">Length (km)</th>
                     <th className="text-left p-5 font-bold text-sm uppercase tracking-wide">Surveyor</th>
                     <th className="text-left p-5 font-bold text-sm uppercase tracking-wide">Survey Date</th>
-                    {/* <th className="text-left p-5 font-bold text-sm uppercase tracking-wide">Asset Condition</th> */}
                     <th className="text-left p-5 font-bold text-sm uppercase tracking-wide">Actions</th>
                   </tr>
                 </thead>
@@ -573,25 +431,6 @@ export default function AssetRegister() {
                           <span className="text-sm text-muted-foreground">Not surveyed</span>
                         )}
                       </td>
-                      {/* <td className="p-5">
-                        {road.hasSurvey ? (
-                          <div className="flex gap-2 flex-wrap">
-                            <Badge variant="outline" className="bg-gradient-to-r from-green-500/10 to-green-600/10 text-green-700 dark:text-green-400 border-green-500/30 font-semibold">
-                              {road.goodCondition} Good
-                            </Badge>
-                            <Badge variant="outline" className="bg-gradient-to-r from-amber-500/10 to-amber-600/10 text-amber-700 dark:text-amber-400 border-amber-500/30 font-semibold">
-                              {road.fairCondition} Fair
-                            </Badge>
-                            <Badge variant="outline" className="bg-gradient-to-r from-red-500/10 to-red-600/10 text-red-700 dark:text-red-400 border-red-500/30 font-semibold">
-                              {road.poorCondition} Poor
-                            </Badge>
-                          </div>
-                        ) : (
-                          <Badge variant="outline" className="text-muted-foreground">
-                            No data
-                          </Badge>
-                        )}
-                      </td> */}
                       <td className="p-5">
                         <div className="flex gap-2">
                           {road.surveyId ? (
@@ -690,66 +529,48 @@ export default function AssetRegister() {
                       All Categories
                       <Badge variant="secondary" className="ml-2 text-xs">{detailAssets.length}</Badge>
                     </TabsTrigger>
-                    {Object.values(ANNOTATION_CATEGORIES)
-                      .filter(category => detailAssets.some(a => a.category === category))
-                      .map(category => {
-                        const count = detailAssets.filter(a => a.category === category).length;
-                        return (
-                          <TabsTrigger key={category} value={category} className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
-                            {getCategoryName(category, labelMapData)}
-                            <Badge variant="secondary" className="ml-2 text-xs">{count}</Badge>
-                          </TabsTrigger>
-                        );
-                      })
-                    }
-                    {/* Dynamic tabs for categories not in ANNOTATION_CATEGORIES (e.g. from non-demo assets) */}
-                    {Array.from(new Set(detailAssets.map(a => a.category).filter(Boolean)))
-                      .filter(cat => !Object.values(ANNOTATION_CATEGORIES).includes(cat))
-                      .map(category => {
-                        const count = detailAssets.filter(a => a.category === category).length;
-                        return (
-                          <TabsTrigger key={category} value={category} className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
-                            {getCategoryName(category, labelMapData)}
-                            <Badge variant="secondary" className="ml-2 text-xs">{count}</Badge>
-                          </TabsTrigger>
-                        );
-                      })
-                    }
+                    {detailCategories.map(categoryId => {
+                      const count = detailAssets.filter(a => a.category_id === categoryId).length;
+                      return (
+                        <TabsTrigger key={categoryId} value={categoryId} className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
+                          {getCategoryDisplayName(categoryId)}
+                          <Badge variant="secondary" className="ml-2 text-xs">{count}</Badge>
+                        </TabsTrigger>
+                      );
+                    })}
                   </TabsList>
                 </div>
 
                 {/* Dynamic Content Based on Selected Category */}
                 {(() => {
-                  const selectedCategory = filterCategory;
-                  const categoryAssets = selectedCategory === 'all'
+                  const categoryAssets = filterCategory === 'all'
                     ? detailAssets
-                    : detailAssets.filter(a => a.category === selectedCategory);
+                    : detailAssets.filter(a => a.category_id === filterCategory);
 
                   const filteredAssets = categoryAssets.filter(
                     asset => filterCondition === 'all' || asset.condition?.toLowerCase() === filterCondition
                   );
 
-                  // Get unique asset types (labels) for this category - use asset_type or type
-                  const assetTypes = Array.from(new Set(filteredAssets.map(a => a.asset_type || a.type || a.category).filter(Boolean)));
+                  // Get unique asset types grouped by asset_id (or asset_type fallback)
+                  const typeMap: Map<string, Asset[]> = new Map();
+                  filteredAssets.forEach(a => {
+                    const key = a.asset_id || a.asset_type || a.type || 'Unknown';
+                    if (!typeMap.has(key)) typeMap.set(key, []);
+                    typeMap.get(key)!.push(a);
+                  });
 
-                  // Calculate stats by type
-                  const typeStats = assetTypes.map(type => {
-                    const typeAssets = filteredAssets.filter(a => (a.asset_type || a.type || a.category) === type);
-                    // Get asset_id from the first asset of this type
-                    const assetId = typeAssets[0]?.asset_id;
+                  const typeStats = Array.from(typeMap.entries()).map(([key, assets]) => ({
+                    key,
+                    asset_id: assets[0]?.asset_id,
+                    displayName: getAssetDisplayName(assets[0]),
+                    total: assets.length,
+                    good: assets.filter(a => a.condition?.toLowerCase() === 'good').length,
+                    damaged: assets.filter(a => a.condition?.toLowerCase() === 'damaged').length,
+                    avgConfidence: assets.reduce((sum, a) => sum + (a.confidence || 0), 0) / (assets.length || 1),
+                  })).sort((a, b) => b.total - a.total);
 
-                    return {
-                      type,
-                      asset_id: assetId,
-                      total: typeAssets.length,
-                      good: typeAssets.filter(a => a.condition?.toLowerCase() === 'good').length,
-                      damaged: typeAssets.filter(a => a.condition?.toLowerCase() === 'damaged').length,
-                      avgConfidence: typeAssets.reduce((sum, a) => sum + (a.confidence || 0), 0) / (typeAssets.length || 1),
-                    };
-                  }).sort((a, b) => b.total - a.total);
-
-                  const totalGood = filteredAssets.filter(a => a.condition?.toLowerCase() === 'good').length;
-                  const totalDamaged = filteredAssets.filter(a => a.condition?.toLowerCase() === 'damaged').length;
+                  const catTotalGood = filteredAssets.filter(a => a.condition?.toLowerCase() === 'good').length;
+                  const catTotalDamaged = filteredAssets.filter(a => a.condition?.toLowerCase() === 'damaged').length;
 
                   return (
                     <div className="space-y-6">
@@ -760,26 +581,26 @@ export default function AssetRegister() {
                           <p className="text-3xl font-bold bg-gradient-to-br from-purple-600 to-purple-400 bg-clip-text text-transparent">
                             {filteredAssets.length}
                           </p>
-                          <p className="text-xs text-muted-foreground">{assetTypes.length} types</p>
+                          <p className="text-xs text-muted-foreground">{typeStats.length} types</p>
                         </Card>
 
                         <Card className="p-4 bg-gradient-to-br from-green-50 to-white dark:from-green-950/20 dark:to-card border-green-200">
                           <p className="text-xs font-semibold text-green-600 dark:text-green-400 uppercase tracking-wide">Good</p>
                           <p className="text-3xl font-bold bg-gradient-to-br from-green-600 to-green-400 bg-clip-text text-transparent">
-                            {totalGood}
+                            {catTotalGood}
                           </p>
                           <p className="text-xs text-muted-foreground">
-                            {filteredAssets.length > 0 ? ((totalGood / filteredAssets.length) * 100).toFixed(0) : 0}%
+                            {filteredAssets.length > 0 ? ((catTotalGood / filteredAssets.length) * 100).toFixed(0) : 0}%
                           </p>
                         </Card>
 
                         <Card className="p-4 bg-gradient-to-br from-red-50 to-white dark:from-red-950/20 dark:to-card border-red-200">
                           <p className="text-xs font-semibold text-red-600 dark:text-red-400 uppercase tracking-wide">Damaged</p>
                           <p className="text-3xl font-bold bg-gradient-to-br from-red-600 to-red-400 bg-clip-text text-transparent">
-                            {totalDamaged}
+                            {catTotalDamaged}
                           </p>
                           <p className="text-xs text-muted-foreground">
-                            {filteredAssets.length > 0 ? ((totalDamaged / filteredAssets.length) * 100).toFixed(0) : 0}%
+                            {filteredAssets.length > 0 ? ((catTotalDamaged / filteredAssets.length) * 100).toFixed(0) : 0}%
                           </p>
                         </Card>
 
@@ -796,19 +617,15 @@ export default function AssetRegister() {
                       <Card className="p-6">
                         <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
                           <BarChart3 className="h-5 w-5 text-primary dark:text-foreground" />
-                          {selectedCategory === 'all' ? 'Asset Types Overview' : `${selectedCategory} - Asset Types`}
+                          {filterCategory === 'all' ? 'Asset Types Overview' : `${getCategoryDisplayName(filterCategory)} - Asset Types`}
                         </h3>
 
                         {typeStats.length > 0 ? (
                           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                            {typeStats.map(stat => {
-                              // Resolve display name for the asset type
-                              const displayName = (labelMapData?.labels?.[stat.asset_id]?.display_name) || stat.type;
-                              
-                              return (
-                              <Card key={stat.type} className="p-4 bg-muted/20 hover:bg-muted/40 transition-colors">
+                            {typeStats.map(stat => (
+                              <Card key={stat.key} className="p-4 bg-muted/20 hover:bg-muted/40 transition-colors">
                                 <div className="flex items-center justify-between mb-3">
-                                  <h4 className="font-semibold text-sm truncate flex-1" title={displayName}>{displayName}</h4>
+                                  <h4 className="font-semibold text-sm truncate flex-1" title={stat.displayName}>{stat.displayName}</h4>
                                   <Badge variant="secondary" className="ml-2 font-bold">{stat.total}</Badge>
                                 </div>
 
@@ -845,8 +662,7 @@ export default function AssetRegister() {
                                   </span>
                                 </div>
                               </Card>
-                            )
-                          })}
+                            ))}
                           </div>
                         ) : (
                           <p className="text-muted-foreground text-center py-8">No assets found for the selected filters</p>
@@ -891,26 +707,27 @@ export default function AssetRegister() {
                                 const paginatedAssets = filteredAssets.slice(startIndex, startIndex + itemsPerPage);
 
                                 return paginatedAssets.map((asset) => {
-                                  const assetId = asset.asset_id;
-                                  const assetType = (assetId && labelMapData?.labels?.[assetId]?.display_name) || asset.asset_type || asset.type || 'Unknown';
-                                  
+                                  const assetDisplayName = getAssetDisplayName(asset);
+                                  const lat = asset.location?.coordinates?.[1];
+                                  const lng = asset.location?.coordinates?.[0];
+
                                   return (
                                     <tr key={asset._id} className="border-b hover:bg-primary/5 transition-colors">
                                       <td className="p-3">
                                         <div className="flex items-center gap-2">
-                                          <span className="font-semibold text-sm">{assetType}</span>
+                                          <span className="font-semibold text-sm">{assetDisplayName}</span>
                                         </div>
                                       </td>
                                       <td className="p-3">
                                         <Badge variant="outline" className="text-xs bg-primary/5">
-                                          {(asset.category_id && labelMapData?.categories?.[asset.category_id]?.display_name) || asset.category}
+                                          {asset.category_id ? getCategoryDisplayName(asset.category_id) : (asset.asset_type || '—')}
                                         </Badge>
                                       </td>
                                       <td className="p-3">
-                                        {asset.lat && asset.lng ? (
+                                        {lat && lng ? (
                                           <div className="flex items-center gap-1 text-xs font-mono text-muted-foreground">
                                             <MapPin className="h-3 w-3" />
-                                            {asset.lat.toFixed(4)}, {asset.lng.toFixed(4)}
+                                            {lat.toFixed(4)}, {lng.toFixed(4)}
                                           </div>
                                         ) : (
                                           <span className="text-xs text-muted-foreground">—</span>

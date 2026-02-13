@@ -1,9 +1,12 @@
+import os
+
 from flask import Blueprint, jsonify, request
 from bson import ObjectId
 from pymongo import ASCENDING, DESCENDING
 
 from db import get_db
 from utils.ids import get_now_iso
+from utils.is_demo_video import is_demo
 from utils.rbac import role_required
 from utils.response import mongo_response
 
@@ -55,16 +58,48 @@ def list_assets():
 	route_id = request.args.get("route_id", type=int)
 	category = request.args.get("category")
 	condition = request.args.get("condition")
+
+	db = get_db()
+
 	if survey_id:
-		query["survey_id"] = ObjectId(survey_id)
+		# Find all videos belonging to this survey
+		survey_videos = list(db.videos.find(
+			{"survey_id": ObjectId(survey_id)},
+			{"storage_url": 1}
+		))
+
+		# Collect video_keys (basenames) for any demo videos
+		demo_video_keys = []
+		has_real_videos = False
+		for v in survey_videos:
+			if is_demo(video_file=v):
+				url = v.get("storage_url", "")
+				basename = os.path.splitext(os.path.basename(url))[0]
+				if basename:
+					demo_video_keys.append(basename)
+			else:
+				has_real_videos = True
+
+		# Build the survey/video_key filter using $or
+		or_conditions = []
+		if has_real_videos:
+			or_conditions.append({"survey_id": ObjectId(survey_id)})
+		if demo_video_keys:
+			or_conditions.append({"video_key": {"$in": demo_video_keys}})
+
+		if or_conditions:
+			query["$or"] = or_conditions
+		else:
+			query["survey_id"] = ObjectId(survey_id)
+
 	if route_id is not None:
 		query["route_id"] = route_id
 	if category:
 		query["category"] = category
 	if condition:
 		query["condition"] = condition
-	db = get_db()
-	items = list(db.assets.find(query).sort("detected_at", DESCENDING).limit(1000))
+
+	items = list(db.assets.find(query).sort("detected_at", DESCENDING))
 	return mongo_response({"items": items, "count": len(items)})
 
 
