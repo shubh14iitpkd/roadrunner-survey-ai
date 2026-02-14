@@ -21,6 +21,7 @@ from db import get_db
 from utils.ids import get_now_iso
 from utils.rbac import role_required
 from utils.extract_gpx import extract_gpx
+from utils.is_demo_video import DEMO_VIDEOS
 
 videos_bp = Blueprint("videos", __name__)
 from config import Config
@@ -1089,7 +1090,20 @@ def process_video_with_ai(video_id: str):
 @videos_bp.get("/<video_id>/frame_annotated")
 def get_video_frame_annotated(video_id: str):
     db = get_db()
-    video = db.videos.find_one({"_id": ObjectId(video_id)})
+
+    # Check if video_id is actually a demo video key (not an ObjectId)
+    if video_id in DEMO_VIDEOS:
+        # Demo asset: find video by matching storage_url basename
+        all_videos = list(db.videos.find())
+        video = None
+        for v in all_videos:
+            url = v.get("storage_url", "")
+            basename = os.path.splitext(os.path.basename(url))[0] if url else ""
+            if basename == video_id:
+                video = v
+                break
+    else:
+        video = db.videos.find_one({"_id": ObjectId(video_id)})
 
     if not video:
         return jsonify({"error": "Video not found"}), 404
@@ -1145,9 +1159,9 @@ def get_video_frame_annotated(video_id: str):
         # Scale to reduce the payload size
         frame_height = frame.shape[0]
         frame_width = frame.shape[1]
-        resize_width = 640  # request.args.get("width", type=int)
-        new_height = int(frame_height * (resize_width / frame_width))
-        frame = cv2.resize(frame, (resize_width, new_height))
+        # resize_width = 640  # request.args.get("width", type=int)
+        # new_height = int(frame_height * (resize_width / frame_width))
+        # frame = cv2.resize(frame, (resize_width, new_height))
 
         # sgm = SageMakerVideoProcessor()
         # Check if this is a demo video by matching storage_url basename with frame 'key'

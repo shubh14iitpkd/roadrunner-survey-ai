@@ -199,42 +199,10 @@ export default function FramePopupContent({
         <div className="font-semibold text-sm mb-1 text-foreground">
           {trackTitle}
         </div>
-        <div className="text-[11px] text-muted-foreground">
+        {/* <div className="text-[11px] text-muted-foreground">
           Point {pointIndex + 1} of {totalPoints} | {frameData.timestamp}s
-        </div>
+        </div> */}
         {/* GPX Location Info */}
-        {(frameData.gpxLatitude || frameData.gpxLongitude || frameData.gpxTimestamp) && (
-          <div className="mt-1 text-[11px] text-muted-foreground space-y-0.5">
-            {frameData.gpxLatitude !== undefined && frameData.gpxLongitude !== undefined && (
-              <div>
-                <span className="text-foreground/70 font-medium">Location:</span>{' '}
-                {frameData.gpxLatitude.toFixed(6)}, {frameData.gpxLongitude.toFixed(6)}
-              </div>
-            )}
-            {frameData.gpxTimestamp && (() => {
-              // Parse GPX timestamp format: "2025:08:17 09:01:48Z" -> standard ISO format
-              const gpxTs = frameData.gpxTimestamp;
-              const isoString = gpxTs.replace(/^(\d{4}):(\d{2}):(\d{2})/, '$1-$2-$3');
-              const date = new Date(isoString);
-              const localTime = !isNaN(date.getTime())
-                ? date.toLocaleString(undefined, {
-                  year: 'numeric',
-                  month: 'short',
-                  day: 'numeric',
-                  hour: '2-digit',
-                  minute: '2-digit',
-                  second: '2-digit'
-                })
-                : gpxTs;
-              return (
-                <div>
-                  <span className="text-foreground/70 font-medium">Captured:</span>{' '}
-                  {localTime}
-                </div>
-              );
-            })()}
-          </div>
-        )}
       </div>
 
       {/* Controls */}
@@ -245,10 +213,10 @@ export default function FramePopupContent({
           variant={showLabels ? 'default' : 'secondary'}
           onClick={() => setShowLabels(!showLabels)}
         >
-          {showLabels ? 'Hide' : 'Show'} Labels
+          {showLabels ? 'Hide' : 'Show'} Label
         </Button>
 
-        <Select
+        {/* <Select
           value={selectedClass || "all"}
           onValueChange={(value) => setSelectedClass(value === "all" ? null : value)}
         >
@@ -295,7 +263,7 @@ export default function FramePopupContent({
               );
             })}
           </SelectContent>
-        </Select>
+        </Select> */}
       </div>
 
       {/* Image Container */}
