@@ -436,7 +436,7 @@ class LocalVideoProcessor:
 
                                 track_id = track.track_id
                                 class_name = track.get_det_class()
-                                # ltrb_box = track.to_ltrb()
+                                ltwh_box = track.to_ltwh(orig=True)
                                 if db is not None:
                                     exists = db.assets.find_one(
                                         {
@@ -478,6 +478,12 @@ class LocalVideoProcessor:
                                             "frame_number": frame_num,
                                             "timestamp": timestamp,
                                             "video_id": video_id,
+                                            "box": {
+                                                "x": float(ltwh_box[0]),
+                                                "y": float(ltwh_box[1]),
+                                                "width": float(ltwh_box[2]),
+                                                "height": float(ltwh_box[3]),
+                                            },
                                             "survey_id": survey_id,
                                             "route_id": route_id,
                                             "location": {
