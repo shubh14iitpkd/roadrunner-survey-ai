@@ -6,8 +6,11 @@ import { Badge } from "@/components/ui/badge";
 import {
   Search, MapPin, TrendingUp, CheckCircle, AlertTriangle,
   FileText, ArrowLeft, Calendar, User, Layers, Map as MapIcon, Package, BarChart3,
-  ChevronLeft, ChevronRight, Loader2
+  ChevronLeft, ChevronRight, Loader2, Download
 } from "lucide-react";
+import { pdf } from "@react-pdf/renderer";
+import RoadReportPDF from "@/components/reports/RoadReportPDF";
+import type { AssetRow, RoadReportData } from "@/components/reports/RoadReportPDF";
 import { Link, useSearchParams } from "react-router-dom";
 import {
   Select,
@@ -64,8 +67,14 @@ interface Road {
   route_id: number;
   road_name: string;
   start_point_name?: string;
+  start_lat?: number;
+  start_lng?: number;
   end_point_name?: string;
+  end_lat?: number;
+  end_lng?: number;
   estimated_distance_km?: number;
+  road_type?: string;
+  road_side?: string;
 }
 
 export default function AssetRegister() {
@@ -84,6 +93,7 @@ export default function AssetRegister() {
   const [filterCondition, setFilterCondition] = useState<string>("all");
   const [currentPage, setCurrentPage] = useState(1);
   const [loadingSurveyId, setLoadingSurveyId] = useState<string | null>(null);
+  const [generatingPdfRouteId, setGeneratingPdfRouteId] = useState<number | null>(null);
   const itemsPerPage = 50;
   const { data: labelMapData } = useLabelMap();
 
@@ -224,6 +234,91 @@ export default function AssetRegister() {
         return "bg-gradient-to-r from-red-500/10 to-red-600/10 text-red-700 dark:text-red-400 border-red-500/30";
       default:
         return "bg-muted text-muted-foreground";
+    }
+  };
+
+  // ── PDF download handler ──
+  const handleDownloadPdf = async (routeId: number, surveyId: string) => {
+    try {
+      setGeneratingPdfRouteId(routeId);
+
+      // Fetch full road details and assets in parallel
+      const [roadResp, assetsResp] = await Promise.all([
+        api.roads.get(routeId),
+        api.assets.list({ survey_id: surveyId }),
+      ]);
+      console.log("roadResp", roadResp);
+      const fullRoad = roadResp.item;
+      const assetItems: Asset[] = (assetsResp?.items || []).map((a: any) => ({
+        ...a,
+        _id: typeof a._id === 'object' && a._id.$oid ? a._id.$oid : String(a._id),
+      }));
+
+      const goodCount = assetItems.filter(a => a.condition?.toLowerCase() === 'good').length;
+      const damagedCount = assetItems.filter(a => a.condition?.toLowerCase() === 'damaged').length;
+
+      const reportRoad: RoadReportData = {
+        road_name: fullRoad.road_name,
+        road_type: fullRoad.road_type,
+        start_point_name: fullRoad.start_point_name,
+        start_lat: fullRoad.start_lat,
+        start_lng: fullRoad.start_lng,
+        end_point_name: fullRoad.end_point_name,
+        end_lat: fullRoad.end_lat,
+        end_lng: fullRoad.end_lng,
+        estimated_distance_km: fullRoad.estimated_distance_km,
+        road_side: fullRoad.road_side,
+        total_assets: assetItems.length,
+        good_assets: goodCount,
+        damaged_assets: damagedCount,
+      };
+
+      // Helper to resolve names within this handler
+      const resolveAssetName = (asset: Asset) => {
+        if (asset.asset_id && labelMapData?.labels?.[asset.asset_id]?.display_name) {
+          return labelMapData.labels[asset.asset_id].display_name;
+        }
+        return asset.asset_type || asset.type || 'Unknown';
+      };
+
+      const resolveCatName = (catId: string) => {
+        return labelMapData?.categories?.[catId]?.display_name
+          || labelMapData?.categories?.[catId]?.default_name
+          || catId;
+      };
+
+      const assetRows: AssetRow[] = assetItems.map(a => ({
+        name: resolveAssetName(a),
+        category: a.category_id ? resolveCatName(a.category_id) : (a.asset_type || '—'),
+        lat: a.location?.coordinates?.[1],
+        lng: a.location?.coordinates?.[0],
+        confidence: a.confidence || 0,
+        condition: a.condition || 'Unknown',
+      }));
+
+      const generatedDate = new Date().toLocaleDateString('en-GB', {
+        day: '2-digit', month: 'short', year: 'numeric',
+      });
+
+      const blob = await pdf(
+        <RoadReportPDF road={reportRoad} assets={assetRows} generatedDate={generatedDate} />
+      ).toBlob();
+
+      // Trigger download
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `RoadSightAI_Report_${fullRoad.road_name.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      toast.success('PDF report downloaded!');
+    } catch (err: any) {
+      toast.error('Failed to generate PDF: ' + (err?.message || 'Unknown error'));
+    } finally {
+      setGeneratingPdfRouteId(null);
     }
   };
 
@@ -460,6 +555,25 @@ export default function AssetRegister() {
                             >
                               <BarChart3 className="h-3 w-3 mr-2" />
                               No Survey
+                            </Button>
+                          )}
+                          {road.surveyId && (
+                            <Button
+                              size="sm"
+                              disabled={generatingPdfRouteId === road.route_id}
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                handleDownloadPdf(road.route_id, road.surveyId!);
+                              }}
+                              className="h-9 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white shadow-md"
+                            >
+                              {generatingPdfRouteId === road.route_id ? (
+                                <Loader2 className="h-3 w-3 mr-2 animate-spin" />
+                              ) : (
+                                <Download className="h-3 w-3 mr-2" />
+                              )}
+                              {generatingPdfRouteId === road.route_id ? "Generating..." : "PDF"}
                             </Button>
                           )}
                           <Link to={`/gis?road=${encodeURIComponent(road.roadName)}`}>

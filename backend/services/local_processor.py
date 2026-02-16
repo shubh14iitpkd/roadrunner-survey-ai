@@ -452,8 +452,10 @@ class LocalVideoProcessor:
                                     continue
 
                                 confidence = float(confidence)
-                                # lat_set.add(gpx_data[frame_num]["lat"])
-                                # lon_set.add(gpx_data[frame_num]["lon"])
+                                t_box = [ltwh_box[0], ltwh_box[1], ltwh_box[0]+ltwh_box[2], ltwh_box[1]+ltwh_box[3]]
+                                estimated = self.lat_long_estimator.estimate_location(car_lat, car_lon, car_heading, width, height, t_box)
+                                track_location = { "type": "Point", "coordinates": [estimated["lon"], estimated["lat"]]}
+
                                 if db is not None:
                                     # Look up asset_id and category_id from label map
                                     label_info = self.label_map.get(class_name, {})
@@ -486,10 +488,7 @@ class LocalVideoProcessor:
                                             },
                                             "survey_id": survey_id,
                                             "route_id": route_id,
-                                            "location": {
-                                                "type": "Point",
-                                                "coordinates": [gpx_data[frame_num]["lon"], gpx_data[frame_num]["lat"]]
-                                            } if gpx_data and gpx_data.get(frame_num) else None,
+                                            "location": track_location,
                                             "created_at": datetime.utcnow().isoformat(),
                                         }
                                     )

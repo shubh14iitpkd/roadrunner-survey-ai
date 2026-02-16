@@ -1,3 +1,4 @@
+from utils.response import mongo_response
 from flask import Blueprint, jsonify, request
 from pymongo import ASCENDING, TEXT
 
@@ -102,7 +103,7 @@ def get_road(route_id: int):
 	road = db.roads.find_one({"route_id": route_id})
 	if not road:
 		return jsonify({"error": "not found"}), 404
-	return jsonify({"item": road})
+	return mongo_response({"item": road})
 
 
 @roads_bp.post("/")
