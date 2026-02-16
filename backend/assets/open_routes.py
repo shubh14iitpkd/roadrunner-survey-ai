@@ -1,3 +1,8 @@
+"""
+This file contains routes we expose so that 
+third parties can use our data
+"""
+
 import os
 
 from flask import Blueprint, jsonify, request
@@ -7,22 +12,17 @@ from pymongo import ASCENDING, DESCENDING
 from db import get_db
 from utils.ids import get_now_iso
 from utils.is_demo_video import is_demo
-from utils.rbac import role_required
 from utils.response import mongo_response
 
-assets_bp = Blueprint("assets", __name__)
+open_assets_bp = Blueprint("pub_assets", __name__)
 
-
-@assets_bp.get("/", endpoint="assets_list")
-@role_required(["admin", "surveyor", "viewer"])
+@open_assets_bp.get("/", endpoint="pub_assets_list")
 def list_assets():
 	"""
-	List assets with filters
+	List assets with filters and pagination
 	---
 	tags:
 	  - Assets
-	security:
-	  - Bearer: []
 	parameters:
 	  - name: survey_id
 	    in: query
@@ -40,6 +40,16 @@ def list_assets():
 	    in: query
 	    type: string
 	    description: Filter by condition
+	  - name: page
+	    in: query
+	    type: integer
+	    default: 1
+	    description: Page number for pagination
+	  - name: limit
+	    in: query
+	    type: integer
+	    default: 100
+	    description: Number of items per page
 	responses:
 	  200:
 	    description: Assets retrieved successfully
@@ -50,7 +60,13 @@ def list_assets():
 	          type: array
 	          items:
 	            type: object
-	        count:
+	        total:
+	          type: integer
+	        page:
+	          type: integer
+	        limit:
+	          type: integer
+	        total_pages:
 	          type: integer
 	"""
 	query = {}
@@ -58,6 +74,13 @@ def list_assets():
 	route_id = request.args.get("route_id", type=int)
 	category = request.args.get("category")
 	condition = request.args.get("condition")
+	
+	# Pagination parameters
+	page = request.args.get("page", type=int, default=1)
+	limit = request.args.get("limit", type=int, default=100)
+	if page < 1:
+		page = 1
+	offset = (page - 1) * limit
 
 	db = get_db()
 
@@ -99,20 +122,29 @@ def list_assets():
 	if condition:
 		query["condition"] = condition
 
-	items = list(db.assets.find(query).sort("detected_at", DESCENDING))
-	return mongo_response({"items": items, "count": len(items)})
+	# Execute query with pagination
+	total = db.assets.count_documents(query)
+	items = list(db.assets.find(query).sort([("detected_at", DESCENDING), ("_id", ASCENDING)]).skip(offset).limit(limit))
+	
+	import math
+	total_pages = math.ceil(total / limit) if limit > 0 else 0
+
+	return mongo_response({
+		"items": items,
+		"total": total,
+		"page": page,
+		"limit": limit,
+		"total_pages": total_pages
+	})
 
 
-@assets_bp.get("/<asset_id>", endpoint="assets_get_id")
-@role_required(["admin", "surveyor", "viewer"])
+@open_assets_bp.get("/<asset_id>", endpoint="pub_assets_get_id")
 def get_asset(asset_id: str):
 	"""
 	Get asset details
 	---
 	tags:
 	  - Assets
-	security:
-	  - Bearer: []
 	parameters:
 	  - name: asset_id
 	    in: path
@@ -131,17 +163,13 @@ def get_asset(asset_id: str):
 		return mongo_response({"error": "not found"}, 404)
 	return mongo_response({"item": it})
 
-
-@assets_bp.post("/bulk", endpoint="assets_bulk")
-@role_required(["admin", "surveyor"])
+@open_assets_bp.post("/bulk", endpoint="pub_assets_bulk")
 def bulk_insert():
 	"""
 	Bulk insert or update assets
 	---
 	tags:
 	  - Assets
-	security:
-	  - Bearer: []
 	parameters:
 	  - name: body
 	    in: body
@@ -197,45 +225,10 @@ def bulk_insert():
 		})
 	return jsonify({"inserted": 0, "modified": 0, "total": 0})
 
-
-@assets_bp.put("/<asset_id>", endpoint="assets_update_id")
-@role_required(["admin", "surveyor"])
-def update_asset(asset_id: str):
-	"""
-	Update an asset
-	---
-	tags:
-	  - Assets
-	security:
-	  - Bearer: []
-	parameters:
-	  - name: asset_id
-	    in: path
-	    type: string
-	    required: true
-	    description: The ID of the asset
-	  - name: body
-	    in: body
-	    required: true
-	    schema:
-	      type: object
-	responses:
-	  200:
-	    description: Asset updated successfully
-	  404:
-	    description: Asset not found
-	"""
-	body = request.get_json(silent=True) or {}
-	db = get_db()
-	res = db.assets.find_one_and_update({"_id": ObjectId(asset_id)}, {"$set": body})
-	if not res:
-		return jsonify({"error": "not found"}), 404
-	return jsonify({"ok": True})
-
-@assets_bp.get("/<user_id>/resolved-map", endpoint="resolved_map")
+@open_assets_bp.get("/<user_id>/resolved-map", endpoint="resolved_map")
 def get_resolved_map(user_id: str):
 	"""
-	Get resolved asset map for a user (including preferences)
+	Get asset map for system or user which is used to resolve display name for asset
 	---
 	tags:
 	  - Assets

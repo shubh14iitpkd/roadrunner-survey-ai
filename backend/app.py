@@ -2,6 +2,7 @@ from flask import Flask, jsonify, send_from_directory
 from flask_cors import CORS
 from flask_jwt_extended import JWTManager, jwt_required, get_jwt_identity
 from flasgger import Swagger
+from flask_swagger_ui import get_swaggerui_blueprint
 from dotenv import load_dotenv
 
 from config import Config
@@ -33,6 +34,7 @@ def create_app() -> Flask:
 	from surveys.routes import surveys_bp
 	from videos.routes import videos_bp
 	from assets.routes import assets_bp
+	from assets.open_routes import open_assets_bp
 	from dashboard.routes import dashboard_bp
 	from categories.routes import categories_bp, master_bp
 	from ai.routes import ai_bp
@@ -45,6 +47,7 @@ def create_app() -> Flask:
 	app.register_blueprint(surveys_bp, url_prefix="/api/surveys")
 	app.register_blueprint(videos_bp, url_prefix="/api/videos")
 	app.register_blueprint(assets_bp, url_prefix="/api/assets")
+	app.register_blueprint(open_assets_bp, url_prefix="/api/public/assets")
 	app.register_blueprint(dashboard_bp, url_prefix="/api/dashboard")
 	app.register_blueprint(categories_bp, url_prefix="/api/categories")
 	app.register_blueprint(master_bp, url_prefix="/api/master")
@@ -52,18 +55,28 @@ def create_app() -> Flask:
 	app.register_blueprint(tiles_bp, url_prefix="/api/tiles")
 	app.register_blueprint(frames_bp, url_prefix="/api/frames")
 	app.register_blueprint(user_bp, url_prefix="/api/users")
-	
+
+	def pr(rule):
+		# print(rule.endpoint)
+		return rule.endpoint.startswith("pub_assets.")
 	enable_swagger = os.environ.get("ENABLE_SWAGGER", "false") == "true"
 	app.config['SWAGGER'] = {
-		'title': 'RoadSight API',
+		'title': 'API Documentation',
 		'uiversion': 3,
 		'specs': [
 			{
 				'endpoint': 'apispec',
 				'route': '/api/docs/swagger.json',
-				'rule_filter': lambda rule: True,
+				'rule_filter': lambda rule: not pr(rule),
 				'model_filter': lambda tag: True,
-			}
+			},
+			{
+				"endpoint": "assets_spec",
+				"route": "/api/docs/assets_raw.json",
+				# "rule_filter": lambda rule: rule.endpoint.startswith("asset_"),
+				"rule_filter": lambda rule: pr(rule),
+				"model_filter": lambda tag: True,
+        	},
     	],
     	'static_url_path': '/flasgger_static',
 		'securityDefinitions': {
@@ -76,10 +89,52 @@ def create_app() -> Flask:
     	},
 		'specs_route': '/api/docs/'
 	}
+
+	# 1. Blueprint for the Main API
+	main_docs_ui = get_swaggerui_blueprint(
+		'/api/docs/main',
+		'/api/docs/swagger.json',
+		config={'app_name': "Main API Docs"}
+	)
+
+	# 2. Blueprint for the Assets API
+	assets_docs_ui = get_swaggerui_blueprint(
+		'/api/docs/assets',
+		'/api/docs/assets.json',
+		config={'app_name': "Assets API Docs"}
+	)
+
 	if enable_swagger:
 		Swagger(app, template={
 			"swagger": "2.0"
 		})
+		app.register_blueprint(main_docs_ui, name="main_swagger", url_prefix='/api/docs/main')
+		app.register_blueprint(assets_docs_ui, name="assets_swagger", url_prefix='/api/docs/assets')
+		# To hide security options
+		@app.route('/api/docs/assets.json')
+		def assets_spec_json():
+			# call the internally-generated assets spec
+			with app.test_client() as c:
+				resp = c.get('/api/docs/assets_raw.json')
+			spec = resp.get_json()
+
+			if not spec:
+				# return whatever error/empty result is appropriate
+				return jsonify({}), 500
+
+			# Remove top-level securityDefinitions and security
+			spec.pop('securityDefinitions', None)
+			spec.pop('security', None)
+
+			# Remove per-operation 'security' entries (defensive)
+			for path_item in spec.get('paths', {}).values():
+				if not isinstance(path_item, dict):
+					continue
+				for op_obj in path_item.values():
+					if isinstance(op_obj, dict):
+						op_obj.pop('security', None)
+
+			return jsonify(spec)
 	# Handle OPTIONS requests globally (CORS preflight)
 	@app.before_request
 	def handle_preflight():
