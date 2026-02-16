@@ -60,7 +60,7 @@ ENV/
 .env
 *.mp4
 # *.gpx
-*.png
+# *.png
 *.jpg
 *.jpeg
 **/backend/uploads
