@@ -236,10 +236,10 @@ def extract_asset_info(result_item, video_name, interpolated_gpx, fps, labels_ma
         "confidence": confidence,
         "condition": "good" if confidence  >= 0.2 else "damaged",
         "box": {
-            "x": first_frame.get("x", 0),
-            "y": first_frame.get("y", 0),
-            "width": first_frame.get("width", 0),
-            "height": first_frame.get("height", 0),
+            "x": first_frame.get("x", 0) / 100 * 2560,
+            "y": first_frame.get("y", 0) / 100 * 1440,
+            "width": first_frame.get("width", 0) / 100 * 2560,
+            "height": first_frame.get("height", 0) / 100 * 1440,
         },
         "location": {
             "type": "Point",

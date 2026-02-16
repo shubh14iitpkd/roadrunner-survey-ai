@@ -11,6 +11,8 @@ import FramePopupContent from "@/components/FramePopupContent";
 import { Button } from "@/components/ui/button";
 import { createRoot, Root } from "react-dom/client";
 import { useLabelMap } from "@/contexts/LabelMapContext";
+import { getAssetIconFromId, isAssetIconExist } from "@/components/settings/iconConfig";
+
 delete (L.Icon.Default.prototype as any)._getIconUrl;
 L.Icon.Default.mergeOptions({
   iconUrl: markerIcon,
@@ -59,7 +61,8 @@ const PopupLoader = () => (
 export default function LeafletMapView({ selectedRoadNames = [], roads = [], selectedAssetTypes = [], selectedCategories = [] }: LeafletMapViewProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<L.Map | null>(null);
-  const markersRef = useRef<L.CircleMarker[]>([]);
+  const markersRef = useRef<L.Marker[]>([]);
+  // const markersRef = useRef<L.CircleMarker[]>([]);
   const [allAssets, setAllAssets] = useState<MapAsset[]>([]);
   const [loadingAssets, setLoadingAssets] = useState(false);
   const { data: labelMapData } = useLabelMap();
@@ -233,15 +236,35 @@ export default function LeafletMapView({ selectedRoadNames = [], roads = [], sel
       const latLng: L.LatLngTuple = [lat, lng];
       const color = getMarkerColor(asset.condition);
 
-      const circleMarker = L.circleMarker(latLng, {
-        radius: 5,
-        fillColor: color,
-        color: '#ffffff',
-        weight: 1,
-        opacity: 1,
-        fillOpacity: 0.85,
-        renderer: canvasRendererRef.current || undefined,
-      }).addTo(mapRef.current!);
+      console.log(getAssetIconFromId(asset.asset_id))
+      let circleMarker;
+      if (isAssetIconExist(asset.asset_id)) {
+        circleMarker = L.marker(latLng, {
+          icon: getAssetIconFromId(asset.asset_id)
+        }).addTo(mapRef.current!);
+      } else {
+        circleMarker = L.circleMarker(latLng, {
+          radius: 5,
+          fillColor: color,
+          color: '#ffffff',
+          weight: 1,
+          opacity: 1,
+          fillOpacity: 0.85,
+          renderer: canvasRendererRef.current || undefined,
+        }).addTo(mapRef.current!);
+      }
+
+
+
+      // const circleMarker = L.circleMarker(latLng, {
+      //   radius: 5,
+      //   fillColor: color,
+      //   color: '#ffffff',
+      //   weight: 1,
+      //   opacity: 1,
+      //   fillOpacity: 0.85,
+      //   renderer: canvasRendererRef.current || undefined,
+      // }).addTo(mapRef.current!);
 
       // On click: load frame popup using asset.video_id + asset.frame_number
       circleMarker.on('click', async () => {

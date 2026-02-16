@@ -147,7 +147,7 @@ export default function FramePopupContent({
       }
 
       // Scale coordinates to canvas size
-      const x = box[0] * (canvas.width / frameData.width);
+      const x = (box[0] * (canvas.width / frameData.width));
       const y = box[1] * (canvas.height / frameData.height);
       const w = (box[2] - box[0]) * (canvas.width / frameData.width);
       const h = (box[3] - box[1]) * (canvas.height / frameData.height);
