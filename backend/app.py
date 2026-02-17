@@ -34,7 +34,7 @@ def create_app() -> Flask:
 	from surveys.routes import surveys_bp
 	from videos.routes import videos_bp
 	from assets.routes import assets_bp
-	from assets.open_routes import open_assets_bp
+	from assets.open_routes import open_assets_bp, open_routes_bp, open_videos_bp, open_surveys_bp
 	from dashboard.routes import dashboard_bp
 	from categories.routes import categories_bp, master_bp
 	from ai.routes import ai_bp
@@ -48,6 +48,9 @@ def create_app() -> Flask:
 	app.register_blueprint(videos_bp, url_prefix="/api/videos")
 	app.register_blueprint(assets_bp, url_prefix="/api/assets")
 	app.register_blueprint(open_assets_bp, url_prefix="/api/public/assets")
+	app.register_blueprint(open_routes_bp, url_prefix="/api/public/roads")
+	# app.register_blueprint(open_videos_bp, url_prefix="/api/public/videos")
+	app.register_blueprint(open_surveys_bp, url_prefix="/api/public/surveys")
 	app.register_blueprint(dashboard_bp, url_prefix="/api/dashboard")
 	app.register_blueprint(categories_bp, url_prefix="/api/categories")
 	app.register_blueprint(master_bp, url_prefix="/api/master")
@@ -58,7 +61,7 @@ def create_app() -> Flask:
 
 	def pr(rule):
 		# print(rule.endpoint)
-		return rule.endpoint.startswith("pub_assets.")
+		return rule.endpoint.startswith("pub_")
 	enable_swagger = os.environ.get("ENABLE_SWAGGER", "false") == "true"
 	app.config['SWAGGER'] = {
 		'title': 'API Documentation',
@@ -87,7 +90,7 @@ def create_app() -> Flask:
 				'description': 'JWT Authorization header using the Bearer scheme. Example: "Authorization: Bearer {token}"'
         	}
     	},
-		'specs_route': '/api/docs/'
+		'specs_route': '/api/docs/main-docs'
 	}
 
 	# 1. Blueprint for the Main API

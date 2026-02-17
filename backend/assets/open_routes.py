@@ -15,6 +15,10 @@ from utils.is_demo_video import is_demo
 from utils.response import mongo_response
 
 open_assets_bp = Blueprint("pub_assets", __name__)
+open_routes_bp = Blueprint("pub_routes", __name__)
+open_videos_bp = Blueprint("pub_videos", __name__)
+open_surveys_bp = Blueprint("pub_surveys", __name__)
+
 
 @open_assets_bp.get("/", endpoint="pub_assets_list")
 def list_assets():
@@ -24,18 +28,6 @@ def list_assets():
 	tags:
 	  - Assets
 	parameters:
-	  - name: survey_id
-	    in: query
-	    type: string
-	    description: Filter by survey ID
-	  - name: route_id
-	    in: query
-	    type: integer
-	    description: Filter by route ID
-	  - name: category
-	    in: query
-	    type: string
-	    description: Filter by category
 	  - name: condition
 	    in: query
 	    type: string
@@ -163,126 +155,160 @@ def get_asset(asset_id: str):
 		return mongo_response({"error": "not found"}, 404)
 	return mongo_response({"item": it})
 
-@open_assets_bp.post("/bulk", endpoint="pub_assets_bulk")
-def bulk_insert():
+
+# @open_videos_bp.get("/videos", endpoint="pub_videos_list")
+# def list_videos():
+# 	"""
+# 	List all videos (public)
+# 	---
+# 	tags:
+# 	  - Videos
+# 	responses:
+# 	  200:
+# 	    description: List of videos retrieved successfully
+# 	    schema:
+# 	      type: object
+# 	      properties:
+# 	        items:
+# 	          type: array
+# 	          items:
+# 	            type: object
+# 	        count:
+# 	          type: integer
+# 	"""
+# 	query = {}
+# 	route_id = request.args.get("route_id", type=int)
+# 	survey_id = request.args.get("survey_id")
+# 	status = request.args.get("status")
+
+# 	if route_id is not None:
+# 		query["route_id"] = route_id
+# 	if survey_id:
+# 		query["survey_id"] = ObjectId(survey_id)
+# 	if status:
+# 		query["status"] = status
+
+# 	db = get_db()
+# 	items = list(db.videos.find(query).sort("created_at", DESCENDING))
+
+# 	return mongo_response({"items": items, "count": len(items)})
+
+
+@open_surveys_bp.get("/", endpoint="pub_surveys_list")
+def list_surveys():
 	"""
-	Bulk insert or update assets
+	List surveys with filters
 	---
 	tags:
-	  - Assets
+	  - Surveys
 	parameters:
-	  - name: body
-	    in: body
-	    required: true
+	  - name: latest_only
+	    in: query
+	    type: boolean
+	    default: true
+	    description: Filter by latest version only
+	responses:
+	  200:
+	    description: List of surveys retrieved successfully
 	    schema:
 	      type: object
-	      required:
-	        - assets
 	      properties:
-	        assets:
+	        items:
 	          type: array
 	          items:
 	            type: object
-	responses:
-	  200:
-	    description: Bulk operation successful
-	  400:
-	    description: Missing assets array
+	        count:
+	          type: integer
 	"""
-	body = request.get_json(silent=True) or {}
-	assets = body.get("assets", [])
-	if not isinstance(assets, list) or not assets:
-		return jsonify({"error": "assets array required"}), 400
-	
-	from pymongo import UpdateOne
-	
-	operations = []
-	for a in assets:
-		a.setdefault("detected_at", get_now_iso())
-		# Use upsert to handle re-processing - update if exists, insert if not
-		asset_id = a.pop("_id", None)
-		if asset_id:
-			operations.append(UpdateOne(
-				{"_id": asset_id},
-				{"$set": a},
-				upsert=True
-			))
-		else:
-			# No _id provided, generate one via insert
-			operations.append(UpdateOne(
-				{"_id": ObjectId()},
-				{"$set": a},
-				upsert=True
-			))
-	
-	db = get_db()
-	if operations:
-		res = db.assets.bulk_write(operations)
-		return jsonify({
-			"inserted": res.upserted_count,
-			"modified": res.modified_count,
-			"total": len(operations)
-		})
-	return jsonify({"inserted": 0, "modified": 0, "total": 0})
+	query = {}
+	route_id = request.args.get("route_id", type=int)
+	status = request.args.get("status")
+	latest_only = request.args.get("latest_only", "true").lower() == "true"  # Default to showing latest only
 
-@open_assets_bp.get("/<user_id>/resolved-map", endpoint="resolved_map")
-def get_resolved_map(user_id: str):
+	if route_id is not None:
+		query["route_id"] = route_id
+	if status:
+		query["status"] = status
+	if latest_only:
+		query["is_latest"] = True
+
+	db = get_db()
+	items = list(db.surveys.find(query).sort("survey_date", DESCENDING))
+	return mongo_response({"items": items, "count": len(items)})
+
+@open_routes_bp.get("/", endpoint="pub_roads_list")
+def list_roads():
 	"""
-	Get asset map for system or user which is used to resolve display name for asset
+	List all roads
 	---
 	tags:
-	  - Assets
-	parameters:
-	  - name: user_id
-	    in: path
-	    type: string
-	    required: false
-	    description: The ID of the user
+	  - Roads
 	responses:
 	  200:
-	    description: Resolved map retrieved successfully
+	    description: List of roads retrieved successfully
 	    schema:
 	      type: object
 	      properties:
-	        categories:
-	          type: object
-	        labels:
-	          type: object
+	        items:
+	          type: array
+	          items:
+	            type: object
+	        count:
+	          type: integer
+	"""
+	query = {}
+	search = request.args.get("search")
+	road_type = request.args.get("type")
+	road_side = request.args.get("side")
+	if search:
+		query["$text"] = {"$search": search}
+	if road_type:
+		query["road_type"] = road_type
+	if road_side:
+		query["road_side"] = road_side
+
+	db = get_db()
+	cursor = db.roads.find(query).sort("route_id", ASCENDING)
+	roads = []
+	for r in cursor:
+		roads.append({
+			"route_id": r.get("route_id"),
+			"road_name": r.get("road_name"),
+			"start_point_name": r.get("start_point_name"),
+			"start_lat": r.get("start_lat"),
+			"start_lng": r.get("start_lng"),
+			"end_point_name": r.get("end_point_name"),
+			"end_lat": r.get("end_lat"),
+			"end_lng": r.get("end_lng"),
+			"estimated_distance_km": r.get("estimated_distance_km"),
+			"road_type": r.get("road_type"),
+			"road_side": r.get("road_side"),
+			"gpx_file_url": r.get("gpx_file_url"),
+		})
+	return jsonify({"items": roads, "count": len(roads)})
+
+
+@open_routes_bp.get("/<int:route_id>", endpoint="pub_roads_get_id")
+def get_road(route_id: int):
+	"""
+	Get details of a specific road
+	---
+	tags:
+	  - Roads
+	parameters:
+	  - name: route_id
+	    in: path
+	    type: integer
+	    required: true
+	    description: The route ID of the road
+	responses:
+	  200:
+	    description: Road details retrieved successfully
+	  404:
+	    description: Road not found
 	"""
 	db = get_db()
-	system_cats = list(db.system_asset_categories.find())
-	system_labels = list(db.system_asset_labels.find())
-
-	try:
-		prefs = db.user_preferences.find_one({"user_id": ObjectId(user_id)}) or {}
-	except:
-		prefs = {}
-	
-	labels_override = prefs.get("label_overrides", {})
-	cat_override = prefs.get("category_overrides", {})
-
-	resolved_cats = {}
-	for cat in system_cats:
-		cid = cat["category_id"]
-		resolved_cats[cid] = {
-			"category_id": cid,
-			"default_name": cat["default_name"],
-			"original_display_name": cat["display_name"],
-			"display_name": cat_override.get(cid, {}).get("display_name") or cat["display_name"]
-		}
-		
-	resolved_labels = {}
-	for l in system_labels:
-		aid = l["asset_id"]
-		resolved_labels[aid] = {
-			"asset_id": aid,
-			"category_id": l.get("category_id"),  # Include category_id for tree building
-			"default_name": l["default_name"],
-			"original_display_name": l["display_name"],
-			"display_name": labels_override.get(aid, {}).get("display_name") or l["display_name"]
-		}
-
-	return {
-		"categories": resolved_cats,
-		"labels": resolved_labels
-	}
+	road = db.roads.find_one({"route_id": route_id})
+	if not road:
+		return jsonify({"error": "not found"}), 404
+	return mongo_response({"item": road})
