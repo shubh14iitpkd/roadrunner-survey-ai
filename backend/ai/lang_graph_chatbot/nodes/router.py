@@ -6,7 +6,7 @@ Uses LLM-based classification with few-shot examples for reliable routing.
 
 from langchain_core.messages import SystemMessage, HumanMessage
 from ai.lang_graph_chatbot.state import AgentState, ResponseType, extract_text_content
-from ai.lang_chatbot.models import get_gemini_model
+from ai.lang_graph_chatbot.models import get_gemini_model
 
 
 ROUTER_PROMPT = """You are an intent classifier for a road survey AI assistant.
@@ -28,9 +28,6 @@ User: "How does road drainage work?"
 Intent: expert
 
 User: "What causes road deterioration?"
-Intent: expert
-
-User: "Can you explain asset condition categories?"
 Intent: expert
 
 User: "What are best practices for road surveys?"

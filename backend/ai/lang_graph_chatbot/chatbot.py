@@ -28,8 +28,8 @@ class LangGraphChatbot:
         Initialize chatbot with optional context.
 
         Args:
-            video_id: Video identifier for queries
-            route_id: Route number for survey queries (reserved for future use)
+            video_id: Video identifier for queries (optional)
+            route_id: Route number for survey queries (primary context)
             chat_id: Chat identifier for conversation memory (thread_id)
             user_id: User identifier for display name preferences
         """
@@ -39,19 +39,21 @@ class LangGraphChatbot:
         self.user_id = user_id
         self.graph = get_graph()
 
-    def ask(self, question: str, video_id: str = None, chat_id: str = None) -> str:
+    def ask(self, question: str, video_id: str = None, route_id: int = None, chat_id: str = None) -> str:
         """
         Ask a question to the chatbot.
 
         Args:
             question: User's question
             video_id: Optional video ID override
+            route_id: Optional route ID override
             chat_id: Optional chat ID override for memory thread
 
         Returns:
             The chatbot's response string
         """
         effective_video_id = video_id or self.video_id
+        effective_route_id = route_id if route_id is not None else self.route_id
         effective_chat_id = chat_id or self.chat_id
 
         # Build the initial state
@@ -60,6 +62,7 @@ class LangGraphChatbot:
             "intent": None,  # will be set by router
             "response_type": ResponseType.TEXT,  # will be set by router
             "video_id": effective_video_id,
+            "route_id": effective_route_id,
             "user_id": self.user_id,
             "final_response": None,
         }

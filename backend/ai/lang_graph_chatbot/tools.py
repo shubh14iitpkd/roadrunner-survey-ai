@@ -45,14 +45,22 @@ def _is_demo_video_id(video_id: str) -> bool:
     return is_demo(video_url=video_id + ".mp4")
 
 
-def _get_asset_query_filter(video_id: str) -> dict:
+def _get_asset_query_filter(video_id: str = "", route_id: Optional[int] = None) -> dict:
     """
-    Build the correct MongoDB query filter for assets based on video type.
-    Demo videos use video_key, regular videos use video_id.
+    Build the correct MongoDB query filter for assets.
+    Prioritizes video_id if present (specific video), otherwise filters by route_id (all videos on route).
     """
-    if _is_demo_video_id(video_id):
-        return {"video_key": video_id}
-    return {"video_id": video_id}
+    query = {}
+    if video_id:
+        if _is_demo_video_id(video_id):
+            query["video_key"] = video_id
+        else:
+            query["video_id"] = video_id
+    
+    if route_id is not None:
+        query["route_id"] = route_id
+        
+    return query
 
 
 # =============================================================================
@@ -61,41 +69,49 @@ def _get_asset_query_filter(video_id: str) -> dict:
 
 
 @tool
-def list_videos() -> str:
+def list_videos(route_id: Optional[int] = None) -> str:
     """
-    List all uploaded videos from the database.
-    Use this when the user asks to see their videos or wants to know what videos exist.
+    List uploaded videos, optionally filtered by route_id.
+    Use this when the user asks to see videos for a specific route.
+
+    Args:
+        route_id: Optional route number to filter videos by
 
     Returns:
         Formatted list of videos with title, route, and upload date
     """
     db = get_db()
-    videos = list(db.videos.find({}).sort("created_at", -1).limit(30))
+    query = {}
+    if route_id is not None:
+        query["route_id"] = route_id
+
+    videos = list(db.videos.find(query).sort("created_at", -1).limit(30))
 
     if not videos:
-        return "No videos found in the database."
+        filter_msg = f" for route {route_id}" if route_id is not None else ""
+        return f"No videos found{filter_msg}."
 
     lines = [f"Videos ({len(videos)} found)\n"]
     for v in videos:
         title = v.get("title", "Untitled")
-        route_id = v.get("route_id", "—")
+        r_id = v.get("route_id", "—")
         created = v.get("created_at", "Unknown")
         storage_url = v.get("storage_url", "")
         video_key = get_video_key(storage_url) if storage_url else "—"
-        demo_tag = " [Demo]" if is_demo(video_url=storage_url) else ""
-        lines.append(f"- **{title}**{demo_tag} | Route {route_id} | Uploaded {created} | Key: `{video_key}`")
+        lines.append(f"- **{title}** | Route {r_id} | Uploaded {created} | Key: `{video_key}`")
 
     return "\n".join(lines)
 
 
 @tool
-def list_surveys(status: str = "") -> str:
+def list_surveys(status: str = "", route_id: Optional[int] = None) -> str:
     """
-    List all surveys, optionally filtered by status.
+    List all surveys, optionally filtered by status and route.
     Use this when the user asks for surveys, survey list, or survey history.
 
     Args:
-        status: Optional filter — "completed", "processing", "uploaded" (leave empty for all)
+        status: Optional filter — "completed", "processing", "uploaded"
+        route_id: Optional route number to filter surveys by
 
     Returns:
         Formatted list of surveys
@@ -105,12 +121,15 @@ def list_surveys(status: str = "") -> str:
     query = {}
     if status and status.strip():
         query["status"] = {"$regex": status, "$options": "i"}
+    if route_id is not None:
+        query["route_id"] = route_id
 
     surveys = list(db.surveys.find(query).sort("survey_date", -1).limit(30))
 
     if not surveys:
-        filter_msg = f" with status '{status}'" if status else ""
-        return f"No surveys found{filter_msg}."
+        status_msg = f" with status '{status}'" if status else ""
+        route_msg = f" for route {route_id}" if route_id is not None else ""
+        return f"No surveys found{status_msg}{route_msg}."
 
     lines = [f"Surveys ({len(surveys)} found)\n"]
     for s in surveys:
@@ -118,38 +137,40 @@ def list_surveys(status: str = "") -> str:
         date = s.get("survey_date", "Unknown")
         surveyor = s.get("surveyor_name", "Unknown")
         version = s.get("survey_version", 1)
-        is_latest = "✓ Latest" if s.get("is_latest") else ""
+        is_latest = "Latest" if s.get("is_latest") else ""
         lines.append(f"- Route **{route}** | {date} | {surveyor} | v{version} {is_latest}")
 
     return "\n".join(lines)
 
 
 @tool
-def get_asset_condition_summary(video_id: str = "") -> str:
+def get_asset_condition_summary(video_id: str = "", route_id: Optional[int] = None) -> str:
     """
-    Get a summary of asset conditions (good vs damaged) for a video.
+    Get a summary of asset conditions (good vs damaged).
+    Can summarize for a specific video OR an entire route.
     Use this when the user asks about asset conditions, asset health, damage breakdown,
     or requests a pie chart / visualization of asset conditions.
-    If no video_id is provided, uses the most recently uploaded video.
 
     Args:
-        video_id: The video identifier or key (optional — defaults to most recent video)
+        video_id: Optional specific video ID
+        route_id: Optional route ID to summarize across all videos on that route
 
     Returns:
         Condition breakdown with counts and percentages for good and damaged assets
     """
     db = get_db()
 
-    # Resolve video_id if not provided
-    if not video_id or not video_id.strip():
+    # If neither provided, try to find context or default to latest video
+    if not video_id and route_id is None:
+        # For now, default to latest video if nothing specified
         video = db.videos.find_one({}, sort=[("created_at", -1)])
         if not video:
-            return "No videos found in the database."
+            return "No data found."
         storage_url = video.get("storage_url", "")
         video_id = get_video_key(storage_url) if storage_url else str(video["_id"])
 
-    # Build query based on demo vs regular
-    asset_filter = _get_asset_query_filter(video_id)
+    # Build query
+    asset_filter = _get_asset_query_filter(video_id, route_id)
 
     # Aggregate conditions
     pipeline = [
@@ -159,8 +180,9 @@ def get_asset_condition_summary(video_id: str = "") -> str:
 
     results = list(db.assets.aggregate(pipeline))
 
+    context_label = f"video `{video_id}`" if video_id else f"route {route_id}"
     if not results:
-        return f"No assets found for video `{video_id}`."
+        return f"No assets found for {context_label}."
 
     total = sum(r["count"] for r in results)
     good = 0
@@ -179,7 +201,7 @@ def get_asset_condition_summary(video_id: str = "") -> str:
     damaged_pct = round(damaged / total * 100, 1) if total else 0
 
     lines = [
-        f"Asset Condition Summary for `{video_id}`\n",
+        f"Asset Condition Summary for {context_label}\n",
         f"- **Total assets**: {total:,}",
         f"- **Good condition**: {good:,} ({good_pct}%)",
         f"- **Damaged / Poor**: {damaged:,} ({damaged_pct}%)",

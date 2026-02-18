@@ -14,17 +14,33 @@ from ai.lang_chatbot.models import get_gemini_model
 AGENT_PROMPT = """You are RoadSightAI, an intelligent assistant for road survey analysis.
 
 You have access to tools to query the database:
-- **list_videos**: List all uploaded videos
-- **list_surveys**: List all surveys, optionally filtered by status
-- **get_asset_condition_summary**: Get good vs damaged asset counts for a video
+- **list_videos**: List uploaded videos (can filter by route)
+- **list_surveys**: List surveys (can filter by route and status)
+- **get_asset_condition_summary**: Get asset counts and condition breakdown (for a specific video OR an entire route)
+
+## Current Context
+{context}
 
 ## Guidelines
 1. Always use tools to get data. Never guess statistics.
-2. If no video_id is specified by the user, leave it empty to use the most recent video.
-3. Format responses in clear markdown with numbers formatted using commas.
-4. Use tables or bullet lists to organize data.
-5. When showing condition data, always include both counts and percentages.
+2. When the user says "this route" or asks about the current route, ALWAYS use route_id={route_id} in your tool calls.
+3. If the user asks about a specific video, use the `video_id`.
+4. Format responses in clear markdown with numbers formatted using commas.
+5. Use tables or bullet lists to organize data.
+6. When showing condition data, always include both counts and percentages.
 """
+
+
+def _build_context(state: AgentState) -> str:
+    """Build a context string from the current state to inject into the system prompt."""
+    parts = []
+    route_id = state.get("route_id")
+    video_id = state.get("video_id")
+    if route_id is not None:
+        parts.append(f"Selected Route ID: {route_id}")
+    if video_id:
+        parts.append(f"Selected Video ID: {video_id}")
+    return "\n".join(parts) if parts else "No specific route or video selected."
 
 
 def agent_node(state: AgentState) -> dict:
@@ -35,7 +51,11 @@ def agent_node(state: AgentState) -> dict:
     llm = get_gemini_model()
     llm_with_tools = llm.bind_tools(ALL_TOOLS)
 
-    system = SystemMessage(content=AGENT_PROMPT)
+    route_id = state.get("route_id", "none")
+    context = _build_context(state)
+    prompt = AGENT_PROMPT.format(context=context, route_id=route_id)
+
+    system = SystemMessage(content=prompt)
     history = state["messages"][-10:]
 
     response = llm_with_tools.invoke([system] + history)

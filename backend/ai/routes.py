@@ -40,6 +40,12 @@ def create_chat():
             title:
               type: string
               description: Chat title
+            video_id:
+              type: string
+              description: Optional linked video ID
+            route_id:
+              type: integer
+              description: Optional linked route ID
     responses:
       201:
         description: Chat created successfully
@@ -48,6 +54,9 @@ def create_chat():
     """
     body = request.get_json(silent=True) or {}
     title = (body.get("title") or "New Chat").strip() or "New Chat"
+    video_id = body.get("video_id")
+    route_id = body.get("route_id")
+    
     user_id = current_user_id_str()
     if not user_id:
         return jsonify({"error": "unauthorized"}), 401
@@ -56,6 +65,8 @@ def create_chat():
     doc = {
         "user_id": ObjectId(user_id),
         "title": title,
+        "video_id": video_id,
+        "route_id": route_id,
         "created_at": get_now_iso(),
         "updated_at": get_now_iso(),
     }
@@ -170,7 +181,10 @@ def add_message(chat_id: str):
               description: The user's message
             video_id:
               type: string
-              description: Optional ID of the video being discussed from
+              description: Optional ID of the video being discussed
+            route_id:
+              type: integer
+              description: Optional ID of the route being discussed
     responses:
       201:
         description: Message sent and response received
@@ -192,7 +206,8 @@ def add_message(chat_id: str):
     body = request.get_json(silent=True) or {}
     content = body.get("content")
     video_id = body.get("video_id")  # Optional: current video being discussed
-
+    route_id = body.get("route_id")  # Optional: current route being discussed
+    print(route_id, __file__)
     if not content:
         return jsonify({"error": "content is required"}), 400
 
@@ -206,6 +221,10 @@ def add_message(chat_id: str):
     )
     if not chat:
         return jsonify({"error": "not found"}), 404
+
+    # Use chat context if not provided in message
+    if not route_id and chat.get("route_id"):
+        route_id = chat.get("route_id")
 
     # 1. Save user message
     user_msg = {
@@ -239,21 +258,36 @@ def add_message(chat_id: str):
         normalized_video_id = None
         if video_id:
             try:
-                video_doc = db.videos.find_one({"_id": ObjectId(video_id)})
-                if video_doc:
-                    # Get video name from storage_url or title
-                    storage_url = video_doc.get("storage_url", "")
-                    title = video_doc.get("title", "")
-                    if storage_url:
-                        normalized_video_id = os.path.splitext(os.path.basename(storage_url))[0]
-                    elif title:
-                        normalized_video_id = os.path.splitext(title)[0]
-                    print(f"[routes] Video lookup: {video_id} -> {normalized_video_id}")
+                # Basic string cleaning if passed directly
+                if "/" in video_id or "\\" in video_id:
+                    normalized_video_id = os.path.splitext(os.path.basename(video_id))[0]
+                else:
+                    # Lookup via ID if it looks like an ObjectId
+                    if len(video_id) == 24:
+                         video_doc = db.videos.find_one({"_id": ObjectId(video_id)})
+                         if video_doc:
+                             storage_url = video_doc.get("storage_url", "")
+                             title = video_doc.get("title", "")
+                             if storage_url:
+                                 normalized_video_id = os.path.splitext(os.path.basename(storage_url))[0]
+                             elif title:
+                                 normalized_video_id = os.path.splitext(title)[0]
+                             else:
+                                 normalized_video_id = str(video_doc["_id"])
+                    else:
+                        normalized_video_id = video_id
+
             except Exception as e:
                 print(f"[routes] Video lookup failed: {e}")
+                normalized_video_id = video_id
         
-        # Create chatbot with video context and chat_id for memory
-        chatbot = LangGraphChatbot(video_id=normalized_video_id, chat_id=chat_id, user_id=user_id)
+        # Create chatbot with video/route context and chat_id for memory
+        chatbot = LangGraphChatbot(
+            video_id=normalized_video_id, 
+            route_id=route_id,
+            chat_id=chat_id, 
+            user_id=user_id
+        )
         ai_response_text = chatbot.ask(content)
 
     except Exception as e:
