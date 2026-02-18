@@ -27,6 +27,7 @@ import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { VisualizationBlock } from "@/components/VisualizationBlock";
 
 interface Message {
   role: "user" | "assistant";
@@ -95,6 +96,27 @@ function parseTimestampFromQuery(query: string): { timestamp?: number; frameNumb
 
   return {};
 }
+
+const markdownComponents = {
+  code({ className, children, ...props }: any) {
+    const match = /language-(\w+)/.exec(className || "");
+    const lang = match?.[1];
+    const content = String(children).replace(/\n$/, "");
+    if (lang === "visualization") {
+      return (
+        <VisualizationBlock
+          jsonString={content}
+        />
+      );
+    }
+    // Default code block rendering
+    return (
+      <code className={className} {...props}>
+        {children}
+      </code>
+    );
+  },
+};
 
 export default function AskAI() {
   const [messages, setMessages] = useState<Message[]>([
@@ -648,7 +670,10 @@ Found **183** damaged assets requiring attention.
                     {message.role === "user" ? (
                       <p className="text-sm">{message.content}</p>
                     ) : (
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                      <ReactMarkdown
+                        remarkPlugins={[remarkGfm]}
+                        components={markdownComponents}
+                      >
                         {message.content}
                       </ReactMarkdown>
                     )}

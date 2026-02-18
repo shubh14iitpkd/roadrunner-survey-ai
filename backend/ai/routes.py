@@ -7,7 +7,7 @@ from flask_jwt_extended import jwt_required, get_jwt_identity
 from bson import ObjectId
 from db import get_db
 from utils.ids import get_now_iso
-from ai.lang_chatbot.lang_bot import LangChatbot
+from ai.lang_graph_chatbot.chatbot import LangGraphChatbot
 import os
 
 ai_bp = Blueprint("ai", __name__)
@@ -253,7 +253,7 @@ def add_message(chat_id: str):
                 print(f"[routes] Video lookup failed: {e}")
         
         # Create chatbot with video context and chat_id for memory
-        chatbot = LangChatbot(video_id=normalized_video_id, chat_id=chat_id, user_id=user_id)
+        chatbot = LangGraphChatbot(video_id=normalized_video_id, chat_id=chat_id, user_id=user_id)
         ai_response_text = chatbot.ask(content)
 
     except Exception as e:

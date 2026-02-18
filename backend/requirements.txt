@@ -41,6 +41,7 @@ google-pasta==0.2.0
 googleapis-common-protos==1.72.0
 googlemaps==4.10.0
 gpxpy==1.6.2
+grandalf==0.8
 graphene==3.4.3
 graphql-core==3.2.6
 graphql-relay==3.2.0
@@ -131,6 +132,7 @@ python-dateutil==2.9.0.post0
 python-dotenv==1.0.1
 pytz==2025.2
 PyYAML==6.0.3
+RapidFuzz==3.14.3
 referencing==0.37.0
 requests==2.32.5
 requests-toolbelt==1.0.0
