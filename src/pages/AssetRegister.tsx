@@ -1,14 +1,14 @@
-import { useState, useEffect } from "react";
+import { useState, useMemo, useEffect, useCallback } from "react";
+import { useSearchParams } from "react-router-dom";
+import LeafletMapView from "@/components/LeafletMapView";
 import { Card } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { api } from "@/lib/api";
 import {
-  Search, MapPin, TrendingUp, CheckCircle, AlertTriangle,
-  FileText, ArrowLeft, Calendar, User, Layers, Map, Package, BarChart3,
-  ChevronLeft, ChevronRight
+  MapPin, X, Filter, Download, Eye, Database,
+  ChevronLeft, ChevronRight,
 } from "lucide-react";
-import { Link, useSearchParams } from "react-router-dom";
 import {
   Select,
   SelectContent,
@@ -17,911 +17,398 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { api } from "@/lib/api";
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
+} from "@/components/ui/table";
 import { toast } from "sonner";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
-import { demoDataCache } from "@/contexts/UploadContext";
-import { isDemoVideo, loadDemoData, convertToAssets, ANNOTATION_CATEGORIES } from "@/services/demoDataService";
+import { assetTypes } from "@/data/assetCategories";
 
-interface Asset {
-  _id: string;
-  route_id: number;
-  survey_id: string;
-  category: string;          // Annotation category: OIA, ITS, Roadway Lighting, etc.
-  asset_type?: string;       // The specific asset label (e.g., "Guardrail")
-  type?: string;
-  condition: string;
-  confidence?: number;
-  lat?: number;
-  lng?: number;
-  detected_at: string;
-  image_url?: string;
-  description?: string;
+interface AssetRow {
+  assetId: string;
+  assetType: string;
+  assetCategory: string;
+  lat: number;
+  lng: number;
+  roadName: string;
+  direction: "LHS" | "RHS";
+  side: "Shoulder" | "Median" | "Pavement" | "Overhead";
+  lastSurveyDate: string;
+  imageUrl?: string;
 }
 
-interface Survey {
-  _id: string;
-  route_id: number;
-  survey_date: string;
-  surveyor_name: string;
-  status: string;
-  totals?: {
-    total_assets: number;
-    good: number;
-    fair: number;
-    poor: number;
-  };
-}
+// Generate demo asset data
+function generateDemoAssets(): AssetRow[] {
+  const roads = [
+    "Al Corniche Street", "West Bay Road", "Salwa Road", "C Ring Road",
+    "Lusail Expressway", "Dukhan Highway", "Al Shamal Road", "Orbital Highway",
+  ];
+  const directions: ("LHS" | "RHS")[] = ["LHS", "RHS"];
+  const sides: ("Shoulder" | "Median" | "Pavement" | "Overhead")[] = [
+    "Shoulder", "Median", "Pavement", "Overhead",
+  ];
 
-interface Road {
-  route_id: number;
-  road_name: string;
-  start_point_name?: string;
-  end_point_name?: string;
-  estimated_distance_km?: number;
+  const allAssets: AssetRow[] = [];
+
+  assetTypes.forEach((at, idx) => {
+    const count = Math.floor(Math.random() * 5) + 1;
+    for (let j = 0; j < count; j++) {
+      allAssets.push({
+        assetId: `AST-${String(allAssets.length + 1).padStart(5, "0")}`,
+        assetType: at.type,
+        assetCategory: at.category,
+        lat: 25.2854 + (Math.random() - 0.5) * 0.15,
+        lng: 51.531 + (Math.random() - 0.5) * 0.15,
+        roadName: roads[Math.floor(Math.random() * roads.length)],
+        direction: directions[Math.floor(Math.random() * 2)],
+        side: sides[Math.floor(Math.random() * 4)],
+        lastSurveyDate: `2025-${String(Math.floor(Math.random() * 3) + 9).padStart(2, "0")}-${String(Math.floor(Math.random() * 28) + 1).padStart(2, "0")}`,
+      });
+    }
+  });
+
+  return allAssets;
 }
 
 export default function AssetRegister() {
   const [searchParams] = useSearchParams();
-  const routeIdFromUrl = searchParams.get('route_id');
-  
-  const [searchQuery, setSearchQuery] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [assets, setAssets] = useState<Asset[]>([]);
-  const [surveys, setSurveys] = useState<Survey[]>([]);
-  const [roads, setRoads] = useState<Road[]>([]);
-  const [selectedSurveyId, setSelectedSurveyId] = useState<string | null>(null);
-  const [selectedRouteId, setSelectedRouteId] = useState<string | null>(routeIdFromUrl);
-  const [isDetailDialogOpen, setIsDetailDialogOpen] = useState(false);
-  const [detailAssets, setDetailAssets] = useState<Asset[]>([]);
-  const [filterCategory, setFilterCategory] = useState<string>("all");
-  const [filterCondition, setFilterCondition] = useState<string>("all");
-  const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 50;
+  const [roads, setRoads] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
 
-  // Reset page when filters or detail assets change
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [filterCategory, filterCondition, detailAssets]);
+  // Filters
+  const [selectedAssetTypes, setSelectedAssetTypes] = useState<string[]>([]);
+  const [directionFilter, setDirectionFilter] = useState<"all" | "LHS" | "RHS">("all");
+  const [sideFilter, setSideFilter] = useState<"all" | "Shoulder" | "Median" | "Pavement" | "Overhead">("all");
 
-  // Update selectedRouteId if URL changes
-  useEffect(() => {
-    setSelectedRouteId(routeIdFromUrl);
-  }, [routeIdFromUrl]);
+  // Selection
+  const [selectedAsset, setSelectedAsset] = useState<AssetRow | null>(null);
 
-  // Auto-load survey assets when route_id is in URL
+  // Table pagination
+  const [page, setPage] = useState(1);
+  const pageSize = 20;
+
+  // Demo data
+  const [allAssets] = useState<AssetRow[]>(() => generateDemoAssets());
+
+  // Load roads from API
   useEffect(() => {
-    if (routeIdFromUrl && !loading && surveys.length > 0) {
-      const matchingSurvey = surveys.find(s => s.route_id.toString() === routeIdFromUrl);
-      if (matchingSurvey && matchingSurvey._id !== selectedSurveyId) {
-        loadSurveyAssets(matchingSurvey._id);
+    (async () => {
+      try {
+        setLoading(true);
+        const roadsResp = await api.roads.list();
+        if (roadsResp?.items) setRoads(roadsResp.items);
+      } catch (err: any) {
+        console.error("Failed to load roads:", err);
+      } finally {
+        setLoading(false);
       }
-    }
-  }, [routeIdFromUrl, loading, surveys]);
+    })();
+  }, []);
 
-  // Load initial data on mount and when routeIdFromUrl changes (for page reload)
-  useEffect(() => {
-    // Reset state on URL change/reload
-    setDetailAssets([]);
-    setSelectedSurveyId(null);
-    setIsDetailDialogOpen(false);
-    loadData();
-  }, [routeIdFromUrl]);
+  // Filtered assets
+  const filteredAssets = useMemo(() => {
+    return allAssets.filter((a) => {
+      if (selectedAssetTypes.length > 0 && !selectedAssetTypes.includes(a.assetType)) return false;
+      if (directionFilter !== "all" && a.direction !== directionFilter) return false;
+      if (sideFilter !== "all" && a.side !== sideFilter) return false;
+      return true;
+    });
+  }, [allAssets, selectedAssetTypes, directionFilter, sideFilter]);
 
-  const loadData = async () => {
-    try {
-      setLoading(true);
-      const [framesResp, surveysResp, roadsResp] = await Promise.all([
-        api.frames.list({ has_detections: true, limit: 20000 }),
-        api.Surveys.list({ latest_only: true }),
-        api.roads.list(),
-      ]);
+  const totalPages = Math.ceil(filteredAssets.length / pageSize);
+  const pagedAssets = filteredAssets.slice((page - 1) * pageSize, page * pageSize);
 
-      // Normalize survey IDs to strings (handle MongoDB ObjectId format)
-      const normalizedSurveys = (surveysResp?.items || []).map((survey: any) => ({
-        ...survey,
-        _id: typeof survey._id === 'object' && survey._id.$oid
-          ? survey._id.$oid
-          : String(survey._id)
-      }));
+  useEffect(() => { setPage(1); }, [selectedAssetTypes, directionFilter, sideFilter]);
 
-      // Convert frames with detections to assets
-      const assetsFromFrames: Asset[] = [];
-      (framesResp?.items || []).forEach((frame: any) => {
-        if (frame.detections && Array.isArray(frame.detections)) {
-          frame.detections.forEach((detection: any, index: number) => {
-            assetsFromFrames.push({
-              _id: `${frame._id}_${index}`,
-              route_id: frame.route_id,
-              survey_id: frame.survey_id || '',
-              category: detection.class_name || 'Unknown',
-              type: detection.class_name || 'Unknown',
-              condition: detection.confidence > 0.8 ? 'good' : detection.confidence > 0.5 ? 'fair' : 'poor',
-              confidence: detection.confidence,
-              lat: frame.latitude,
-              lng: frame.longitude,
-              detected_at: frame.created_at || new Date().toISOString(),
-              image_url: frame.frame_path,
-              description: `${detection.class_name} detected with ${(detection.confidence * 100).toFixed(0)}% confidence`
-            });
-          });
-        }
-      });
+  const mapSelectedRoadNames = useMemo(() => {
+    const roadParam = searchParams.get("road");
+    return roadParam ? [roadParam] : [];
+  }, [searchParams]);
 
-      setAssets(assetsFromFrames);
-      setSurveys(normalizedSurveys);
-      setRoads(roadsResp?.items || []);
-    } catch (err: any) {
-      toast.error("Failed to load data: " + (err?.message || "Unknown error"));
-    } finally {
-      setLoading(false);
-    }
+  const handleRowClick = useCallback((asset: AssetRow) => {
+    setSelectedAsset(asset);
+  }, []);
+
+  const handleExportExcel = () => {
+    const headers = [
+      "Asset ID", "Asset Type", "Category", "Latitude", "Longitude",
+      "Road Name", "Direction", "Side", "Last Survey Date",
+    ];
+    const rows = filteredAssets.map((a) => [
+      a.assetId, a.assetType, a.assetCategory,
+      a.lat.toFixed(6), a.lng.toFixed(6), a.roadName, a.direction,
+      a.side, a.lastSurveyDate,
+    ]);
+    const csv = [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "master-assets-library.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success("Asset library exported");
   };
 
-  const loadSurveyAssets = async (surveyId: string) => {
-    try {
-      // First, get videos for this survey
-      const videosResp = await api.videos.list({ survey_id: surveyId });
-      const videos = videosResp?.items || [];
-
-      if (videos.length === 0) {
-        toast.error("No videos found for this survey");
-        return;
-      }
-
-      // Fetch metadata for all videos and combine detections
-      const assetsFromMetadata: Asset[] = [];
-
-      for (const video of videos) {
-        const videoId = typeof video._id === 'object' && video._id.$oid
-          ? video._id.$oid
-          : String(video._id);
-
-        // Demo video handling (must work even after page reload)
-        const demoKey = isDemoVideo(video.title || "");
-        const cachedDemoData = demoDataCache.get(videoId);
-
-        if (demoKey) {
-          let demoData = cachedDemoData;
-
-          // Cache is in-memory and gets cleared on refresh, so reload demo data from public files.
-          if (!demoData) {
-            demoData = await loadDemoData(demoKey);
-            if (demoData) demoDataCache.set(videoId, demoData);
-          }
-
-          if (demoData) {
-            console.log(
-              `Using demo data for video ${videoId} (${demoKey}): ${demoData.totalDetections} detections`
-            );
-            const demoAssets = convertToAssets(demoData, video.route_id || 0, surveyId);
-            assetsFromMetadata.push(...(demoAssets as Asset[]));
-            continue;
-          }
-        }
-
-        try {
-          const metadataResp = await api.videos.getMetadata(videoId);
-          const metadata = metadataResp?.metadata || [];
-
-          // Convert metadata frames to assets
-          metadata.forEach((frame: any) => {
-            if (frame.detections && Array.isArray(frame.detections)) {
-              frame.detections.forEach((detection: any, index: number) => {
-                assetsFromMetadata.push({
-                  _id: `${videoId}_frame${frame.frame_number}_det${index}`,
-                  route_id: video.route_id || 0,
-                  survey_id: surveyId,
-                  category: detection.class_name || 'Unknown',
-                  type: detection.class_name || 'Unknown',
-                  condition: detection.confidence > 0.8 ? 'good' : detection.confidence > 0.5 ? 'fair' : 'poor',
-                  confidence: detection.confidence,
-                  lat: frame.lat,
-                  lng: frame.lon,
-                  detected_at: video.created_at || new Date().toISOString(),
-                  image_url: frame.frame_path,
-                  description: `${detection.class_name} detected with ${(detection.confidence * 100).toFixed(0)}% confidence at timestamp ${frame.timestamp.toFixed(1)}s`
-                });
-              });
-            }
-          });
-        } catch (metaErr: any) {
-          console.warn(`No metadata for video ${videoId}:`, metaErr.message);
-          // Continue with other videos even if one fails
-        }
-      }
-
-      if (assetsFromMetadata.length === 0) {
-        toast.info("No AI detections found in metadata for this survey");
-      }
-
-      setDetailAssets(assetsFromMetadata);
-      setSelectedSurveyId(surveyId);
-      setIsDetailDialogOpen(true);
-    } catch (err: any) {
-      toast.error("Failed to load assets: " + (err?.message || "Unknown error"));
-    }
-  };
-
-  // Group assets by route_id for reliable matching
-  const assetsByRouteMap = assets.reduce((acc, asset) => {
-    const routeId = asset.route_id;
-    if (!acc[routeId]) acc[routeId] = [];
-    acc[routeId].push(asset);
-    return acc;
-  }, {} as Record<number, Asset[]>);
-
-  // Group surveys by route_id (get latest survey for each road)
-  const surveyByRouteMap = surveys.reduce((acc, survey) => {
-    if (!acc[survey.route_id] || new Date(survey.survey_date) > new Date(acc[survey.route_id].survey_date)) {
-      acc[survey.route_id] = survey;
-    }
-    return acc;
-  }, {} as Record<number, Survey>);
-
-  // Create enriched road data with survey/asset information
-  const enrichedRoads = roads.map((road) => {
-    const latestSurvey = surveyByRouteMap[road.route_id];
-    const routeAssets = assetsByRouteMap[road.route_id] || [];
-
-    const goodCount = routeAssets.filter(a => a.condition?.toLowerCase() === 'good').length;
-    const fairCount = routeAssets.filter(a => a.condition?.toLowerCase() === 'fair').length;
-    const poorCount = routeAssets.filter(a => a.condition?.toLowerCase() === 'poor').length;
-
-    return {
-      route_id: road.route_id,
-      roadName: road.road_name,
-      lengthKm: road.estimated_distance_km || 0,
-      surveyId: latestSurvey?._id || null,
-      surveyDate: latestSurvey?.survey_date || null,
-      surveyorName: latestSurvey?.surveyor_name || null,
-      totalAssets: routeAssets.length,
-      goodCondition: goodCount,
-      fairCondition: fairCount,
-      poorCondition: poorCount,
-      hasSurvey: !!latestSurvey,
-    };
-  });
-
-  // Filter enriched roads
-  const filteredRoads = enrichedRoads.filter((road) => {
-    // If route_id is specified in URL, only show that road
-    if (selectedRouteId && road.route_id.toString() !== selectedRouteId) {
-      return false;
-    }
-    
-    const matchesSearch =
-      road.roadName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      road.route_id.toString().includes(searchQuery.toLowerCase()) ||
-      (road.surveyorName && road.surveyorName.toLowerCase().includes(searchQuery.toLowerCase()));
-    return matchesSearch;
-  });
-
-  // Calculate KPIs from enrichedRoads to match table values
-  const totalRoads = roads.length;
-  const surveyedRoads = enrichedRoads.filter(r => r.hasSurvey).length;
-  const totalAssets = enrichedRoads.reduce((sum, r) => sum + r.totalAssets, 0);
-  const totalGood = enrichedRoads.reduce((sum, r) => sum + r.goodCondition, 0);
-  const totalFair = enrichedRoads.reduce((sum, r) => sum + r.fairCondition, 0);
-  const totalPoor = enrichedRoads.reduce((sum, r) => sum + r.poorCondition, 0);
-
-  const selectedSurvey = surveys.find(s => s._id === selectedSurveyId);
-  const selectedRoad = roads.find(r => r.route_id === selectedSurvey?.route_id);
-
-  const getConditionColor = (condition: string) => {
-    const cond = condition?.toLowerCase();
-    switch (cond) {
-      case "good":
-        return "bg-gradient-to-r from-green-500/10 to-green-600/10 text-green-700 dark:text-green-400 border-green-500/30";
-      case "fair":
-        return "bg-gradient-to-r from-amber-500/10 to-amber-600/10 text-amber-700 dark:text-amber-400 border-amber-500/30";
-      case "poor":
-        return "bg-gradient-to-r from-red-500/10 to-red-600/10 text-red-700 dark:text-red-400 border-red-500/30";
-      default:
-        return "bg-muted text-muted-foreground";
-    }
-  };
-
-  // Get unique categories for filter
-  const categories = Array.from(new Set(assets.map(a => a.category).filter(Boolean)));
+  // Unique asset type options for filter
+  const assetTypeOptions = useMemo(() => {
+    const types = [...new Set(allAssets.map((a) => a.assetType))];
+    return types.sort();
+  }, [allAssets]);
 
   return (
-    <div className="space-y-6">
-      {/* Hero Header */}
-      <div className="relative overflow-hidden gradient-primary p-8 shadow-elevated">
-        <div className="absolute bg-primary inset-0"></div>
-        <div className="relative">
-          <h1 className="text-4xl font-bold mb-2 text-white drop-shadow-lg">Asset Register</h1>
-          <p className="text-white/90 text-lg">
-            AI-detected road assets from survey analysis
-          </p>
-        </div>
-      </div>
-
-      <div className="px-6 space-y-6">
-        {/* KPI Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-          <Card className="p-6 shadow-elevated border-0 bg-gradient-to-br from-blue-50 to-white dark:from-blue-950/20 dark:to-card animate-fade-in hover:shadow-glow transition-all duration-300">
-            <div className="flex items-start justify-between">
-              <div className="space-y-2">
-                <p className="text-sm font-semibold text-blue-600 dark:text-blue-400 uppercase tracking-wide">Total Roads</p>
-                <p className="text-5xl font-bold bg-gradient-to-br from-blue-600 to-blue-400 bg-clip-text text-transparent">{totalRoads}</p>
-                <p className="text-xs font-medium text-muted-foreground">{surveyedRoads} with surveys</p>
-              </div>
-              <div className="p-4 rounded-2xl bg-gradient-to-br from-blue-500 to-blue-600 shadow-lg">
-                <Map className="h-7 w-7 text-white" />
-              </div>
-            </div>
-          </Card>
-
-          <Card className="p-6 shadow-elevated border-0 bg-gradient-to-br from-purple-50 to-white dark:from-purple-950/20 dark:to-card animate-fade-in hover:shadow-glow transition-all duration-300">
-            <div className="flex items-start justify-between">
-              <div className="space-y-2">
-                <p className="text-sm font-semibold text-purple-600 dark:text-purple-400 uppercase tracking-wide">Total Assets</p>
-                <p className="text-5xl font-bold bg-gradient-to-br from-purple-600 to-purple-400 bg-clip-text text-transparent">{totalAssets.toLocaleString("en-US")}</p>
-                <p className="text-xs font-medium text-muted-foreground">AI Detected</p>
-              </div>
-              <div className="p-4 rounded-2xl bg-gradient-to-br from-purple-500 to-purple-600 shadow-lg">
-                <Layers className="h-7 w-7 text-white" />
-              </div>
-            </div>
-          </Card>
-
-          <Card className="p-6 shadow-elevated border-0 bg-gradient-to-br from-green-50 to-white dark:from-green-950/20 dark:to-card animate-fade-in hover:shadow-glow transition-all duration-300">
-            <div className="flex items-start justify-between">
-              <div className="space-y-2">
-                <p className="text-sm font-semibold text-green-600 dark:text-green-400 uppercase tracking-wide">Good Condition</p>
-                <p className="text-5xl font-bold bg-gradient-to-br from-green-600 to-green-400 bg-clip-text text-transparent">{Number(totalGood).toLocaleString("en-US")}</p>
-                {/* <p className="text-xs font-medium text-muted-foreground">{totalAssets > 0 ? ((totalGood / totalAssets) * 100).toFixed(0) : 0}% of total</p> */}
-              </div>
-              <div className="p-4 rounded-2xl bg-gradient-to-br from-green-500 to-green-600 shadow-lg">
-                <CheckCircle className="h-7 w-7 text-white" />
-              </div>
-            </div>
-          </Card>
-
-
-          <Card className="p-6 shadow-elevated border-0 bg-gradient-to-br from-red-50 to-white dark:from-red-950/20 dark:to-card animate-fade-in hover:shadow-glow transition-all duration-300">
-            <div className="flex items-start justify-between">
-              <div className="space-y-2">
-                <p className="text-sm font-semibold text-red-600 dark:text-red-400 uppercase tracking-wide">Needs Attention</p>
-                <p className="text-5xl font-bold bg-gradient-to-br from-red-600 to-red-400 bg-clip-text text-transparent">{Number(totalPoor).toLocaleString("en-US")}</p>
-                {/* <p className="text-xs font-medium text-muted-foreground">Poor condition</p> */}
-              </div>
-              <div className="p-4 rounded-2xl bg-gradient-to-br from-red-500 to-red-600 shadow-lg">
-
-                <AlertTriangle className="h-7 w-7 text-white" />
-              </div>
-            </div>
-          </Card>
-        </div>
-
-        {/* Search & Filters */}
-        <Card className="p-4 shadow-elevated border-0 gradient-card animate-fade-in">
-          <div className="flex flex-col md:flex-row gap-4">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
-              <Input
-                placeholder="Search by route ID, road name, or surveyor..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-11 h-12"
-              />
-            </div>
-            <div className="w-full md:w-64">
-              <Select 
-                value={selectedRouteId || "all"} 
-                onValueChange={(val) => setSelectedRouteId(val === "all" ? null : val)}
-              >
-                <SelectTrigger className="h-12">
-                  <SelectValue placeholder="Filter by Route" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Routes</SelectItem>
-                  {roads.map((road) => (
-                    <SelectItem key={road.route_id} value={road.route_id.toString()}>
-                      #{road.route_id} - {road.road_name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            {selectedRouteId && (
-              <Button 
-                variant="outline" 
-                onClick={() => setSelectedRouteId(null)}
-                className="h-12"
-              >
-                Clear Filter
-              </Button>
-            )}
+    <div className="flex flex-col h-screen overflow-hidden">
+      {/* Header */}
+      <div className="relative overflow-hidden bg-primary px-6 py-4 shadow-elevated shrink-0">
+        <div className="absolute bg-primary inset-0 opacity-30"></div>
+        <div className="relative flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold text-white drop-shadow-lg flex items-center gap-2">
+              <Database className="h-6 w-6" />
+              Master Assets Library
+            </h1>
+            <p className="text-white/80 text-sm">
+              Digital asset register for the entire road network
+            </p>
           </div>
-        </Card>
-
-        {/* Summary Table */}
-        <Card className="shadow-elevated border-0 gradient-card overflow-hidden animate-fade-in">
-          {loading ? (
-            <div className="p-12 text-center text-muted-foreground">
-              Loading assets...
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead className="bg-gradient-to-r from-primary/5 via-accent/5 to-primary/5 border-b-2 border-primary/20">
-                  <tr>
-                    <th className="text-left p-5 font-bold text-sm uppercase tracking-wide">Route ID</th>
-                    <th className="text-left p-5 font-bold text-sm uppercase tracking-wide">Road Name</th>
-                    <th className="text-left p-5 font-bold text-sm uppercase tracking-wide">Length (km)</th>
-                    <th className="text-left p-5 font-bold text-sm uppercase tracking-wide">Surveyor</th>
-                    <th className="text-left p-5 font-bold text-sm uppercase tracking-wide">Survey Date</th>
-                    {/* <th className="text-left p-5 font-bold text-sm uppercase tracking-wide">Asset Condition</th> */}
-                    <th className="text-left p-5 font-bold text-sm uppercase tracking-wide">Total Assets</th>
-                    <th className="text-left p-5 font-bold text-sm uppercase tracking-wide">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredRoads.map((road, index) => (
-                    <tr
-                      key={road.route_id}
-                      className="border-b hover:bg-gradient-to-r hover:from-primary/5 hover:to-transparent transition-all duration-200"
-                      style={{ animationDelay: `${index * 50}ms` }}
-                    >
-                      <td className="p-5">
-                        {road.surveyId ? (
-                          <Button
-                            variant="link"
-                            className="font-mono font-bold text-primary hover:text-primary/80 p-0"
-                            onClick={(e) => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              loadSurveyAssets(road.surveyId!);
-                            }}
-                          >
-                            #{road.route_id}
-                          </Button>
-                        ) : (
-                          <span className="font-mono font-bold text-muted-foreground">#{road.route_id}</span>
-                        )}
-                      </td>
-                      <td className="p-5 font-semibold">{road.roadName}</td>
-                      <td className="p-5 font-mono">{road.lengthKm.toFixed(1)}</td>
-                      <td className="p-5">
-                        {road.surveyorName ? (
-                          <div className="flex items-center gap-2">
-                            <User className="h-4 w-4 text-muted-foreground" />
-                            <span className="text-sm">{road.surveyorName}</span>
-                          </div>
-                        ) : (
-                          <span className="text-sm text-muted-foreground">—</span>
-                        )}
-                      </td>
-                      <td className="p-5">
-                        {road.surveyDate ? (
-                          <div className="flex items-center gap-2">
-                            <Calendar className="h-4 w-4 text-muted-foreground" />
-                            <span className="text-sm">{new Date(road.surveyDate).toLocaleDateString()}</span>
-                          </div>
-                        ) : (
-                          <span className="text-sm text-muted-foreground">Not surveyed</span>
-                        )}
-                      </td>
-                      {/* <td className="p-5">
-                        {road.hasSurvey ? (
-                          <div className="flex gap-2 flex-wrap">
-                            <Badge variant="outline" className="bg-gradient-to-r from-green-500/10 to-green-600/10 text-green-700 dark:text-green-400 border-green-500/30 font-semibold">
-                              {road.goodCondition} Good
-                            </Badge>
-                            <Badge variant="outline" className="bg-gradient-to-r from-amber-500/10 to-amber-600/10 text-amber-700 dark:text-amber-400 border-amber-500/30 font-semibold">
-                              {road.fairCondition} Fair
-                            </Badge>
-                            <Badge variant="outline" className="bg-gradient-to-r from-red-500/10 to-red-600/10 text-red-700 dark:text-red-400 border-red-500/30 font-semibold">
-                              {road.poorCondition} Poor
-                            </Badge>
-                          </div>
-                        ) : (
-                          <Badge variant="outline" className="text-muted-foreground">
-                            No data
-                          </Badge>
-                        )}
-                      </td> */}
-                      <td className="p-5">
-                        <Badge variant="secondary" className="font-bold text-lg px-3 py-1">
-                          {road.totalAssets}
-                        </Badge>
-                      </td>
-                      <td className="p-5">
-                        <div className="flex gap-2">
-                          {road.surveyId ? (
-                            <Button
-                              size="sm"
-                              onClick={(e) => {
-                                e.preventDefault();
-                                e.stopPropagation();
-                                loadSurveyAssets(road.surveyId!);
-                              }}
-                              className="h-9 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white shadow-md"
-                            >
-                              <BarChart3 className="h-3 w-3 mr-2" />
-                              Details
-                            </Button>
-                          ) : (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              disabled
-                              className="h-9"
-                            >
-                              <BarChart3 className="h-3 w-3 mr-2" />
-                              No Survey
-                            </Button>
-                          )}
-                          <Link to={`/gis?road=${encodeURIComponent(road.roadName)}`}>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="h-9 border-primary/30 text-primary hover:bg-primary/10 dark:text-foreground dark:hover:bg-foreground/10 dark:border-foreground"
-                            >
-                              <MapPin className="h-3 w-3 mr-2 dark:text-foreground" />
-                              GIS View
-                            </Button>
-                          </Link>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          {!loading && filteredRoads.length === 0 && (
-            <div className="text-center py-16">
-              <div className="inline-flex p-6 rounded-full bg-primary/10 mb-4">
-                <Layers className="h-16 w-16 text-primary" />
-              </div>
-              <p className="text-xl font-semibold mb-2">No roads found</p>
-              <p className="text-muted-foreground mb-6">Try adjusting your search criteria or add roads in Road Register</p>
-              <Button onClick={() => setSearchQuery("")} className="gradient-primary text-white">
-                Clear Search
-              </Button>
-            </div>
-          )}
-        </Card>
+          <div className="flex items-center gap-2">
+            <Badge variant="secondary" className="text-sm font-bold px-3 py-1">
+              {filteredAssets.length} assets
+            </Badge>
+            <Button
+              variant="secondary"
+              size="sm"
+              className="gap-1"
+              onClick={handleExportExcel}
+            >
+              <Download className="h-4 w-4" />
+              Export CSV
+            </Button>
+          </div>
+        </div>
       </div>
 
-      {/* Detailed Assets Dialog with Analytics */}
-      <Dialog open={isDetailDialogOpen} onOpenChange={setIsDetailDialogOpen}>
-        <DialogContent className="max-w-[95vw] max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <div className="flex items-center gap-3 mb-2">
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => setIsDetailDialogOpen(false)}
-              >
-                <ArrowLeft className="h-5 w-5" />
-              </Button>
-              <div>
-                <DialogTitle className="text-2xl">
-                  {selectedRoad?.road_name || `Route ${selectedSurvey?.route_id}`} - AI Detection Analytics
-                </DialogTitle>
-                <DialogDescription className="text-base">
-                  Route #{selectedSurvey?.route_id} • Surveyed on {selectedSurvey?.survey_date ? new Date(selectedSurvey.survey_date).toLocaleDateString() : ''} by {selectedSurvey?.surveyor_name}
-                </DialogDescription>
-              </div>
-            </div>
-          </DialogHeader>
+      {/* Filters Bar */}
+      <div className="px-4 py-3 border-b bg-card flex flex-wrap items-center gap-3 shrink-0">
+        <div className="flex items-center gap-1 text-sm font-medium text-muted-foreground">
+          <Filter className="h-4 w-4" />
+          Filters:
+        </div>
 
-          {detailAssets.length > 0 ? (
-            <>
-              {/* Category Tabs Navigation */}
-              <Tabs value={filterCategory} onValueChange={setFilterCategory} className="w-full">
-                <div className="flex items-center justify-between mb-4">
-                  <TabsList className="bg-muted/50 p-1 h-auto flex-wrap">
-                    <TabsTrigger value="all" className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
-                      All Categories
-                      <Badge variant="secondary" className="ml-2 text-xs">{detailAssets.length}</Badge>
-                    </TabsTrigger>
-                    {Object.values(ANNOTATION_CATEGORIES)
-                      .filter(category => detailAssets.some(a => a.category === category))
-                      .map(category => {
-                        const count = detailAssets.filter(a => a.category === category).length;
-                        return (
-                          <TabsTrigger key={category} value={category} className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
-                            {category}
-                            <Badge variant="secondary" className="ml-2 text-xs">{count}</Badge>
-                          </TabsTrigger>
-                        );
-                      })
-                    }
-                  </TabsList>
-                  
-                  <Select value={filterCondition} onValueChange={setFilterCondition}>
-                    <SelectTrigger className="w-[160px]">
-                      <SelectValue placeholder="All Conditions" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Conditions</SelectItem>
-                      <SelectItem value="good">Good</SelectItem>
-                      <SelectItem value="fair">Fair</SelectItem>
-                    </SelectContent>
-                  </Select>
+        <Select
+          value={selectedAssetTypes[0] || "all"}
+          onValueChange={(v) => setSelectedAssetTypes(v === "all" ? [] : [v])}
+        >
+          <SelectTrigger className="w-56 h-9">
+            <SelectValue placeholder="All Asset Types" />
+          </SelectTrigger>
+          <SelectContent className="bg-background z-50 max-h-64">
+            <SelectItem value="all">All Asset Types</SelectItem>
+            {assetTypeOptions.map((t) => (
+              <SelectItem key={t} value={t} className="text-xs">{t}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
+        {/* Direction toggle */}
+        <div className="flex rounded-md border overflow-hidden">
+          {(["all", "LHS", "RHS"] as const).map((d) => (
+            <button
+              key={d}
+              onClick={() => setDirectionFilter(d)}
+              className={cn(
+                "px-3 py-1.5 text-xs font-medium transition-colors",
+                directionFilter === d
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-card text-muted-foreground hover:bg-muted"
+              )}
+            >
+              {d === "all" ? "All" : d}
+            </button>
+          ))}
+        </div>
+
+        {/* Side toggle */}
+        <div className="flex rounded-md border overflow-hidden">
+          {(["all", "Shoulder", "Median", "Pavement", "Overhead"] as const).map((s) => (
+            <button
+              key={s}
+              onClick={() => setSideFilter(s)}
+              className={cn(
+                "px-3 py-1.5 text-xs font-medium transition-colors",
+                sideFilter === s
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-card text-muted-foreground hover:bg-muted"
+              )}
+            >
+              {s === "all" ? "All" : s}
+            </button>
+          ))}
+        </div>
+
+        {(selectedAssetTypes.length > 0 || directionFilter !== "all" || sideFilter !== "all") && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-8 text-xs"
+            onClick={() => {
+              setSelectedAssetTypes([]);
+              setDirectionFilter("all");
+              setSideFilter("all");
+            }}
+          >
+            <X className="h-3 w-3 mr-1" />
+            Clear
+          </Button>
+        )}
+      </div>
+
+      {/* Main Content: Map (left) + Image (right) */}
+      <div className="flex-1 flex min-h-0">
+        {/* Map */}
+        <div className="flex-1 relative min-w-0">
+          <LeafletMapView
+            selectedRoadNames={mapSelectedRoadNames}
+            roads={roads}
+            selectedAssetTypes={selectedAssetTypes}
+          />
+        </div>
+
+        {/* Detail Panel */}
+        <div className="w-80 border-l bg-card flex flex-col shrink-0">
+          {selectedAsset ? (
+            <ScrollArea className="flex-1">
+              <div className="p-4 space-y-4">
+                {/* Image placeholder */}
+                <div className="aspect-video bg-muted rounded-lg flex items-center justify-center relative overflow-hidden border">
+                  {selectedAsset.imageUrl ? (
+                    <img
+                      src={selectedAsset.imageUrl}
+                      alt="Asset"
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <div className="text-center">
+                      <Eye className="h-10 w-10 mx-auto mb-1 text-muted-foreground/40" />
+                      <p className="text-xs text-muted-foreground">Asset Image</p>
+                    </div>
+                  )}
                 </div>
 
-                {/* Dynamic Content Based on Selected Category */}
-                {(() => {
-                  const selectedCategory = filterCategory;
-                  const categoryAssets = selectedCategory === 'all' 
-                    ? detailAssets 
-                    : detailAssets.filter(a => a.category === selectedCategory);
-                  
-                  const filteredAssets = categoryAssets.filter(
-                    asset => filterCondition === 'all' || asset.condition?.toLowerCase() === filterCondition
-                  );
-
-                  // Get unique asset types (labels) for this category - use asset_type or type
-                  const assetTypes = Array.from(new Set(filteredAssets.map(a => a.asset_type || a.type || a.category).filter(Boolean)));
-                  
-                  // Calculate stats by type
-                  const typeStats = assetTypes.map(type => {
-                    const typeAssets = filteredAssets.filter(a => (a.asset_type || a.type || a.category) === type);
-                    return {
-                      type,
-                      total: typeAssets.length,
-                      good: typeAssets.filter(a => a.condition?.toLowerCase() === 'good').length,
-                      fair: typeAssets.filter(a => a.condition?.toLowerCase() === 'fair').length,
-                      poor: typeAssets.filter(a => a.condition?.toLowerCase() === 'poor').length,
-                      avgConfidence: typeAssets.reduce((sum, a) => sum + (a.confidence || 0), 0) / (typeAssets.length || 1),
-                    };
-                  }).sort((a, b) => b.total - a.total);
-
-                  const totalGood = filteredAssets.filter(a => a.condition?.toLowerCase() === 'good').length;
-                  const totalFair = filteredAssets.filter(a => a.condition?.toLowerCase() === 'fair').length;
-
-                  return (
-                    <div className="space-y-6">
-                      {/* Category Overview KPIs */}
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                        <Card className="p-4 bg-gradient-to-br from-purple-50 to-white dark:from-purple-950/20 dark:to-card border-purple-200">
-                          <p className="text-xs font-semibold text-purple-600 dark:text-purple-400 uppercase tracking-wide">Total Assets</p>
-                          <p className="text-3xl font-bold bg-gradient-to-br from-purple-600 to-purple-400 bg-clip-text text-transparent">
-                            {filteredAssets.length}
-                          </p>
-                          <p className="text-xs text-muted-foreground">{assetTypes.length} types</p>
-                        </Card>
-
-                        <Card className="p-4 bg-gradient-to-br from-green-50 to-white dark:from-green-950/20 dark:to-card border-green-200">
-                          <p className="text-xs font-semibold text-green-600 dark:text-green-400 uppercase tracking-wide">Good</p>
-                          <p className="text-3xl font-bold bg-gradient-to-br from-green-600 to-green-400 bg-clip-text text-transparent">
-                            {totalGood}
-                          </p>
-                          <p className="text-xs text-muted-foreground">
-                            {filteredAssets.length > 0 ? ((totalGood / filteredAssets.length) * 100).toFixed(0) : 0}%
-                          </p>
-                        </Card>
-
-                        <Card className="p-4 bg-gradient-to-br from-amber-50 to-white dark:from-amber-950/20 dark:to-card border-amber-200">
-                          <p className="text-xs font-semibold text-amber-600 dark:text-amber-400 uppercase tracking-wide">Fair</p>
-                          <p className="text-3xl font-bold bg-gradient-to-br from-amber-600 to-amber-400 bg-clip-text text-transparent">
-                            {totalFair}
-                          </p>
-                          <p className="text-xs text-muted-foreground">
-                            {filteredAssets.length > 0 ? ((totalFair / filteredAssets.length) * 100).toFixed(0) : 0}%
-                          </p>
-                        </Card>
-
-                        <Card className="p-4 bg-gradient-to-br from-blue-50 to-white dark:from-blue-950/20 dark:to-card border-blue-200">
-                          <p className="text-xs font-semibold text-blue-600 dark:text-blue-400 uppercase tracking-wide">Avg Confidence</p>
-                          <p className="text-3xl font-bold bg-gradient-to-br from-blue-600 to-blue-400 bg-clip-text text-transparent">
-                            {(filteredAssets.reduce((sum, a) => sum + (a.confidence || 0), 0) / (filteredAssets.length || 1) * 100).toFixed(0)}%
-                          </p>
-                          <p className="text-xs text-muted-foreground">AI detection</p>
-                        </Card>
-                      </div>
-
-                      {/* Asset Types Breakdown for Selected Category */}
-                      <Card className="p-6">
-                        <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
-                          <BarChart3 className="h-5 w-5 text-primary dark:text-foreground" />
-                          {selectedCategory === 'all' ? 'Asset Types Overview' : `${selectedCategory} - Asset Types`}
-                        </h3>
-                        
-                        {typeStats.length > 0 ? (
-                          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                            {typeStats.map(stat => (
-                              <Card key={stat.type} className="p-4 bg-muted/20 hover:bg-muted/40 transition-colors">
-                                <div className="flex items-center justify-between mb-3">
-                                  <h4 className="font-semibold text-sm truncate flex-1" title={stat.type}>{stat.type}</h4>
-                                  <Badge variant="secondary" className="ml-2 font-bold">{stat.total}</Badge>
-                                </div>
-                                
-                                {/* Condition breakdown bar */}
-                                <div className="flex h-3 rounded-full overflow-hidden mb-2">
-                                  {stat.good > 0 && (
-                                    <div 
-                                      className="bg-green-500 transition-all" 
-                                      style={{ width: `${(stat.good / stat.total) * 100}%` }}
-                                      title={`Good: ${stat.good}`}
-                                    />
-                                  )}
-                                  {stat.fair > 0 && (
-                                    <div 
-                                      className="bg-amber-500 transition-all" 
-                                      style={{ width: `${(stat.fair / stat.total) * 100}%` }}
-                                      title={`Fair: ${stat.fair}`}
-                                    />
-                                  )}
-                                </div>
-                                
-                                {/* Condition labels */}
-                                <div className="flex justify-between text-xs text-muted-foreground">
-                                  <span className="flex items-center gap-1">
-                                    <span className="w-2 h-2 rounded-full bg-green-500"></span>
-                                    {stat.good}
-                                  </span>
-                                  <span className="flex items-center gap-1">
-                                    <span className="w-2 h-2 rounded-full bg-amber-500"></span>
-                                    {stat.fair}
-                                  </span>
-                                  <span className="text-primary dark:text-foreground font-medium">
-                                    {(stat.avgConfidence * 100).toFixed(0)}% conf
-                                  </span>
-                                </div>
-                              </Card>
-                            ))}
-                          </div>
-                        ) : (
-                          <p className="text-muted-foreground text-center py-8">No assets found for the selected filters</p>
-                        )}
-                      </Card>
-
-                      {/* Detailed Assets Table */}
-                      <Card className="overflow-hidden">
-                        <div className="p-4 border-b bg-muted/30">
-                          <h3 className="font-bold flex items-center gap-2">
-                            <FileText className="h-5 w-5" />
-                            Detailed Asset List
-                            <Badge variant="outline" className="ml-2">{filteredAssets.length} items</Badge>
-                          </h3>
-                        </div>
-                        
-                        <div className="overflow-x-auto">
-                          <table className="w-full">
-                            <thead className="bg-gradient-to-r from-primary/5 via-accent/5 to-primary/5 border-b">
-                              <tr>
-                                <th className="text-left p-3 font-bold text-xs uppercase tracking-wide">Asset Type</th>
-                                <th className="text-left p-3 font-bold text-xs uppercase tracking-wide">Category</th>
-                                <th className="text-left p-3 font-bold text-xs uppercase tracking-wide">Location</th>
-                                <th className="text-left p-3 font-bold text-xs uppercase tracking-wide">Confidence</th>
-                                <th className="text-left p-3 font-bold text-xs uppercase tracking-wide">Condition</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {(() => {
-                                const totalPages = Math.ceil(filteredAssets.length / itemsPerPage);
-                                const startIndex = (currentPage - 1) * itemsPerPage;
-                                const paginatedAssets = filteredAssets.slice(startIndex, startIndex + itemsPerPage);
-
-                                return paginatedAssets.map((asset) => {
-                                  const assetType = asset.asset_type || asset.type || 'Unknown';
-                                  return (
-                                    <tr key={asset._id} className="border-b hover:bg-primary/5 transition-colors">
-                                      <td className="p-3">
-                                        <div className="flex items-center gap-2">
-                                          <span className="font-semibold text-sm">{assetType}</span>
-                                        </div>
-                                      </td>
-                                      <td className="p-3">
-                                        <Badge variant="outline" className="text-xs bg-primary/5">
-                                          {asset.category}
-                                        </Badge>
-                                      </td>
-                                      <td className="p-3">
-                                        {asset.lat && asset.lng ? (
-                                          <div className="flex items-center gap-1 text-xs font-mono text-muted-foreground">
-                                            <MapPin className="h-3 w-3" />
-                                            {asset.lat.toFixed(4)}, {asset.lng.toFixed(4)}
-                                          </div>
-                                        ) : (
-                                          <span className="text-xs text-muted-foreground">—</span>
-                                        )}
-                                      </td>
-                                      <td className="p-3">
-                                        <div className="flex items-center gap-2">
-                                          <div className="w-12 h-2 bg-muted rounded-full overflow-hidden">
-                                            <div
-                                              className="h-full bg-gradient-to-r from-primary to-accent"
-                                              style={{ width: `${(asset.confidence || 0) * 100}%` }}
-                                            />
-                                          </div>
-                                          <span className="text-xs font-bold">
-                                            {((asset.confidence || 0) * 100).toFixed(0)}%
-                                          </span>
-                                        </div>
-                                      </td>
-                                      <td className="p-3">
-                                        <Badge variant="outline" className={cn("font-semibold capitalize text-xs", getConditionColor(asset.condition))}>
-                                          {asset.condition || "Unknown"}
-                                        </Badge>
-                                      </td>
-                                    </tr>
-                                  );
-                                });
-                              })()}
-                            </tbody>
-                          </table>
-                        </div>
-
-                        {/* Pagination */}
-                        {(() => {
-                          const totalPages = Math.ceil(filteredAssets.length / itemsPerPage);
-                          const startIndex = (currentPage - 1) * itemsPerPage;
-                          const endIndex = Math.min(startIndex + itemsPerPage, filteredAssets.length);
-
-                          if (totalPages <= 1) return null;
-
-                          return (
-                            <div className="flex items-center justify-between px-4 py-3 border-t bg-muted/30">
-                              <div className="text-sm text-muted-foreground">
-                                Showing {startIndex + 1} - {endIndex} of {filteredAssets.length} assets
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                                  disabled={currentPage === 1}
-                                  className="h-8"
-                                >
-                                  <ChevronLeft className="h-4 w-4 mr-1" />
-                                  Previous
-                                </Button>
-                                <span className="text-sm font-medium px-3">
-                                  Page {currentPage} of {totalPages}
-                                </span>
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                                  disabled={currentPage === totalPages}
-                                  className="h-8"
-                                >
-                                  Next
-                                  <ChevronRight className="h-4 w-4 ml-1" />
-                                </Button>
-                              </div>
-                            </div>
-                          );
-                        })()}
-                      </Card>
+                {/* Metadata */}
+                <div className="space-y-3">
+                  <h3 className="font-bold text-sm">Asset Details</h3>
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div>
+                      <p className="text-muted-foreground">Asset ID</p>
+                      <p className="font-mono font-bold">{selectedAsset.assetId}</p>
                     </div>
-                  );
-                })()}
-              </Tabs>
-            </>
-          ) : (
-            <Card className="p-12 text-center border-2 border-dashed">
-              <div className="inline-flex p-6 rounded-full bg-primary/10 mb-4">
-                <Package className="h-16 w-16 text-primary" />
+                    <div>
+                      <p className="text-muted-foreground">Asset Type</p>
+                      <p className="font-medium">{selectedAsset.assetType}</p>
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground">Category</p>
+                      <Badge variant="secondary" className="text-xs mt-0.5">
+                        {selectedAsset.assetCategory}
+                      </Badge>
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground">Coordinates</p>
+                      <p className="font-mono text-xs">
+                        {selectedAsset.lat.toFixed(5)}, {selectedAsset.lng.toFixed(5)}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground">Road</p>
+                      <p className="font-medium">{selectedAsset.roadName}</p>
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground">Direction</p>
+                      <Badge variant="outline">{selectedAsset.direction}</Badge>
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground">Side</p>
+                      <Badge variant="outline">{selectedAsset.side}</Badge>
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground">Last Survey</p>
+                      <p className="text-xs">{selectedAsset.lastSurveyDate}</p>
+                    </div>
+                  </div>
+                </div>
               </div>
-              <h3 className="text-xl font-semibold mb-2">No Assets Detected</h3>
-              <p className="text-muted-foreground mb-4">
-                No AI-detected assets found for this survey yet.
-              </p>
-              <p className="text-sm text-muted-foreground">
-                Assets will appear here after processing survey videos with AI detection.
-              </p>
-            </Card>
+            </ScrollArea>
+          ) : (
+            <div className="flex-1 flex items-center justify-center p-6">
+              <div className="text-center text-muted-foreground">
+                <MapPin className="h-12 w-12 mx-auto mb-2 opacity-30" />
+                <p className="text-sm font-medium">Select an asset</p>
+                <p className="text-xs mt-1">Click a row in the table or a point on the map</p>
+              </div>
+            </div>
           )}
-        </DialogContent>
-      </Dialog>
+        </div>
+      </div>
+
+      {/* Bottom Table */}
+      <div className="border-t bg-card shrink-0" style={{ maxHeight: "40%" }}>
+        <div className="overflow-auto" style={{ maxHeight: "100%" }}>
+          <Table>
+            <TableHeader>
+              <TableRow className="bg-muted/50">
+                <TableHead className="font-semibold text-xs">Asset ID</TableHead>
+                <TableHead className="font-semibold text-xs">Asset Type</TableHead>
+                <TableHead className="font-semibold text-xs">Category</TableHead>
+                <TableHead className="font-semibold text-xs">Coordinates</TableHead>
+                <TableHead className="font-semibold text-xs">Road</TableHead>
+                <TableHead className="font-semibold text-xs">Dir</TableHead>
+                <TableHead className="font-semibold text-xs">Side</TableHead>
+                <TableHead className="font-semibold text-xs">Survey Date</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {pagedAssets.map((a) => (
+                <TableRow
+                  key={a.assetId}
+                  className={cn(
+                    "cursor-pointer hover:bg-muted/30 text-xs",
+                    selectedAsset?.assetId === a.assetId && "bg-primary/10"
+                  )}
+                  onClick={() => handleRowClick(a)}
+                >
+                  <TableCell className="font-mono font-bold">{a.assetId}</TableCell>
+                  <TableCell className="max-w-32 truncate">{a.assetType}</TableCell>
+                  <TableCell>
+                    <Badge variant="secondary" className="text-xs">{a.assetCategory}</Badge>
+                  </TableCell>
+                  <TableCell className="font-mono text-xs">
+                    {a.lat.toFixed(4)}, {a.lng.toFixed(4)}
+                  </TableCell>
+                  <TableCell className="max-w-28 truncate">{a.roadName}</TableCell>
+                  <TableCell>{a.direction}</TableCell>
+                  <TableCell>{a.side}</TableCell>
+                  <TableCell>{a.lastSurveyDate}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+        {/* Pagination */}
+        <div className="flex items-center justify-between px-4 py-2 border-t text-xs text-muted-foreground">
+          <span>
+            Showing {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, filteredAssets.length)} of {filteredAssets.length}
+          </span>
+          <div className="flex gap-1">
+            <Button variant="outline" size="icon" className="h-7 w-7" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
+              <ChevronLeft className="h-3 w-3" />
+            </Button>
+            <Button variant="outline" size="icon" className="h-7 w-7" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>
+              <ChevronRight className="h-3 w-3" />
+            </Button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
