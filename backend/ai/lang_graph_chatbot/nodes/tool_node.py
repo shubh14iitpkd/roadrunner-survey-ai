@@ -45,6 +45,20 @@ You have these tools (they all return raw JSON — you interpret the data and re
 - Map user words to category/asset names: "traffic signs" → "Directional Signage", "street lights" → "Roadway Lighting", "road surface/pavement" → "Pavement", "barriers/guardrails" → "Oia".
 - Include both counts and percentages when discussing conditions.
 - Never fabricate data — always call a tool first.
+
+## Map blocks
+When a tool returns location data (get_asset_locations, get_damage_hotspots), you MUST include a map block AFTER your text explanation. Use this exact format:
+
+```map
+{{"type":"marker","title":"Title","markers":{{"lat":25.21,"lng":51.52,"label":"Name","info":"Details","color":"red"}}}}
+```
+
+Rules:
+- Use `"type":"marker"` for individual locations, `"type":"circle"` for hotspots/clusters (add `"radius": 12` for emphasis).
+- Use `"color":"red"` for damaged, `"green"` for good, `"blue"` default.
+- For hotspots, use red circle markers with radius proportional to count.
+- Always include ALL locations from the tool output in the markers array.
+- The map block must contain VALID JSON on a single line.
 """
 
 

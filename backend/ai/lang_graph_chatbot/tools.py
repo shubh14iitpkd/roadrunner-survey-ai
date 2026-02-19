@@ -646,7 +646,7 @@ def get_asset_locations(asset_name: str = "", category_name: str = "", route_id:
 def get_damage_hotspots(route_id: int, top_n: int = 5) -> str:
     """
     Find locations with the highest concentration of damaged assets.
-    Use for "Where are the damage hotspots?", "Where are most defects?".
+    Use for "Where are the damage hotspots?", "Where are most defects?", "Which areas have most defects".
 
     Args:
         route_id: Route to analyze

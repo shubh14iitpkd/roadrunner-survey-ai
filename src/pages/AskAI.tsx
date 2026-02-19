@@ -16,6 +16,7 @@ import { cn } from "@/lib/utils";
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { VisualizationBlock } from "@/components/VisualizationBlock";
+import { MapBlock } from "@/components/MapBlock";
 
 interface Message {
   role: "user" | "assistant";
@@ -87,6 +88,13 @@ const markdownComponents = {
     if (lang === "visualization") {
       return (
         <VisualizationBlock
+          jsonString={content}
+        />
+      );
+    }
+    if (lang === "map") {
+      return (
+        <MapBlock
           jsonString={content}
         />
       );
