@@ -1159,9 +1159,10 @@ def get_video_frame_annotated(video_id: str):
         # Scale to reduce the payload size
         frame_height = frame.shape[0]
         frame_width = frame.shape[1]
-        # resize_width = 640  # request.args.get("width", type=int)
-        # new_height = int(frame_height * (resize_width / frame_width))
-        # frame = cv2.resize(frame, (resize_width, new_height))
+        if request.args.get("resize", "true").lower() == "true":
+            resize_width = 640  # request.args.get("width", type=int)
+            new_height = int(frame_height * (resize_width / frame_width))
+            frame = cv2.resize(frame, (resize_width, new_height))
 
         # sgm = SageMakerVideoProcessor()
         # Check if this is a demo video by matching storage_url basename with frame 'key'

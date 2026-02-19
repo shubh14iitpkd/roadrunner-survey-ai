@@ -53,13 +53,14 @@ export const api = {
 		delete: (route_id: number) => apiFetch(`/api/roads/${route_id}`, { method: "DELETE" }),
 	},
 	ai: {
-		createChat: (title: string, videoId?: string) => apiFetch("/api/ai/chats", { method: "POST", body: JSON.stringify({ title, video_id: videoId }) }),
+		createChat: (title: string, videoId?: string, routeId?: number | string) => 
+			apiFetch("/api/ai/chats", { method: "POST", body: JSON.stringify({ title, video_id: videoId, route_id: Number(routeId) }) }),
 		listChats: () => apiFetch("/api/ai/chats"),
 		listMessages: (chatId: string) => apiFetch(`/api/ai/chats/${chatId}/messages`),
 		addMessage: (chatId: string, role: "user" | "assistant", content: string) =>
 			apiFetch(`/api/ai/chats/${chatId}/messages`, { method: "POST", body: JSON.stringify({ role, content }) }),
-		sendMessage: (chatId: string, role: "user" | "assistant", content: string, videoId?: string) =>
-			apiFetch(`/api/ai/chats/${chatId}/messages`, { method: "POST", body: JSON.stringify({ role, content, video_id: videoId }) }),
+		sendMessage: (chatId: string, role: "user" | "assistant", content: string, videoId?: string, routeId?: number | string) =>
+			apiFetch(`/api/ai/chats/${chatId}/messages`, { method: "POST", body: JSON.stringify({ role, content, video_id: videoId, route_id: Number(routeId) }) }),
 	},
 	Surveys: {
 		list: (params?: { route_id?: number; status?: string; latest_only?: boolean }) => {
@@ -98,8 +99,8 @@ export const api = {
 		getLibrary: (bucket: string, path: string | null) => apiFetch(`/api/videos/library?bucket=${bucket}&path=${path || ""}`),
 		postFromLibrary: (video_key: string, video_id: string, survey_id: string, route_id: string, thumb_path?: string) =>
 			apiFetch("/api/videos/library", { method: "POST", body: JSON.stringify({ video_key, video_id, survey_id, route_id, thumb_path }) }),
-		getFrameWithDetections: (video_id: string, timestamp?: number | string, frame_number?: number, width?: number) =>
-			apiFetch(`/api/videos/${video_id}/frame_annotated?${timestamp != null ? `timestamp=${timestamp}` : ""}${frame_number != null ? `&frame_number=${frame_number}` : ""}${width != null ? `&width=${width}` : ""}`),
+		getFrameWithDetections: (video_id: string, timestamp?: number | string, frame_number?: number, width?: number, resize?: boolean) =>
+			apiFetch(`/api/videos/${video_id}/frame_annotated?${timestamp != null ? `timestamp=${timestamp}` : ""}${frame_number != null ? `&frame_number=${frame_number}` : ""}${width != null ? `&width=${width}` : ""}${resize != null ? `&resize=${resize}` : ""}`),
 		getAllFrames: (video_id: string, has_detections?: boolean) => {
 			const qs = new URLSearchParams();
 			if (has_detections) qs.set("has_detections", "true");

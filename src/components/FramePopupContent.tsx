@@ -9,7 +9,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { ResolvedMap, useLabelMap } from '@/contexts/LabelMapContext';
-import { MapPin } from 'lucide-react';
+import { MapPin, Loader2 } from 'lucide-react';
+import { api } from '@/lib/api';
+import { useToast } from "@/hooks/use-toast";
 
 interface Detection {
   class_name: string;
@@ -93,10 +95,12 @@ export default function FramePopupContent({
 }: FramePopupContentProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
+  const { toast } = useToast();
   const [selectedClass, setSelectedClass] = useState<string | null>(null);
   const [showLabels, setShowLabels] = useState(true);
   const [colorMap, setColorMap] = useState<Record<string, string>>({});
-  
+  const [isDownloading, setIsDownloading] = useState(0);
+  const idRef = useRef<string>(crypto.randomUUID());
 
 
   // Helper function to get display name from context or fallback to normalized name
@@ -124,7 +128,7 @@ export default function FramePopupContent({
   // Draw detections on canvas
   useEffect(() => {
     if (!canvasRef.current || !imgRef.current || !frameData.detections?.length) return;
-
+    
     const canvas = canvasRef.current;
     const img = imgRef.current;
     const ctx = canvas.getContext('2d');
@@ -184,13 +188,149 @@ export default function FramePopupContent({
   );
 
   // Count detections per class
-  const classCount = frameData.detections?.reduce(
-    (acc, d) => ({
-      ...acc,
-      [d.class_name]: (acc[d.class_name] || 0) + 1,
-    }),
-    {} as Record<string, number>
-  );
+
+  const handleDownload = async (draw: boolean = false) => {
+    if (!frameData || !frameData.image_data) return;
+    if (isDownloading!=0) return;
+
+    setIsDownloading(draw ? 2 : 1);
+    toast({
+      title: "Preparing Download",
+      description: "Fetching high-resolution image and generating annotations...",
+    });
+
+    let imageToUse = frameData.image_data;
+    let widthToUse = frameData.width;
+    let heightToUse = frameData.height;
+
+    // If drawing annotations, try to fetch high-res image first
+    try {
+      const response = await api.videos.getFrameWithDetections(
+        frameData.videoId, 
+        undefined, 
+        frameData.frame_number, 
+        undefined, 
+        false // resize=false for high res
+      );
+      if (response && response.image_data) {
+        imageToUse = response.image_data;
+        // Use dimensions from response if available, though they should match
+        if (response.width) widthToUse = response.width;
+        if (response.height) heightToUse = response.height;
+      }
+    } catch (e) {
+      console.error("Failed to fetch high-res frame, falling back to current image", e);
+      toast({
+        variant: "destructive",
+        title: "High-Res Fetch Failed",
+        description: "Falling back to standard resolution image.",
+      });
+    }
+
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.src = imageToUse;
+
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = widthToUse;
+      canvas.height = heightToUse;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+          setIsDownloading(0);
+          return;
+      }
+
+      // Draw the original image
+      ctx.drawImage(img, 0, 0, widthToUse, heightToUse);
+
+      // Draw detections
+      if (frameData.detections && draw) {
+        frameData.detections.forEach((d) => {
+          // Respect filter
+          if (selectedClass && d.class_name !== selectedClass) return;
+
+          const box = getBoundingBox(d);
+          if (!box) return;
+
+          // Scale for full resolution
+          // Base scale on image width, e.g., 1920px -> line width 4-5px, font 24px
+          const scale = Math.max(1, widthToUse / 1000); 
+          const lineWidth = 3 * scale;
+          const fontSize = 14 * scale;
+          const padding = 4 * scale;
+
+          const color = colorMap[d.class_name] || '#ffffff';
+
+          ctx.strokeStyle = color;
+          ctx.lineWidth = lineWidth;
+          
+          const x = box[0];
+          const y = box[1];
+          const w = box[2] - box[0];
+          const h = box[3] - box[1];
+
+          // Draw box
+          ctx.strokeRect(x, y, w, h);
+
+          if (showLabels) {
+            const label = getDisplayName(d.asset_id, d.class_name);
+            
+            ctx.font = `bold ${fontSize}px Arial`;
+            const textMetrics = ctx.measureText(label);
+            
+            // Draw label background
+            ctx.fillStyle = color;
+            ctx.fillRect(
+              x, 
+              y - fontSize - padding * 2, 
+              textMetrics.width + padding * 2, 
+              fontSize + padding * 2
+            );
+
+            // Draw label text
+            ctx.fillStyle = '#ffffff';
+            ctx.fillText(label, x + padding, y - padding);
+          }
+        });
+      }
+
+      // Trigger download
+      try {
+        const dataUrl = canvas.toDataURL('image/png');
+        const link = document.createElement('a');
+        link.download = `frame-${idRef.current}${draw ? "_annotated": ""}.png`;
+        link.href = dataUrl;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        toast({
+          title: "Download Complete",
+          description: "The image has been saved to your downloads.",
+        });
+      } catch (err) {
+        console.error('Error creating download link:', err);
+         toast({
+          variant: "destructive",
+          title: "Download Failed",
+          description: "Could not create download link.",
+        });
+      } finally {
+        setIsDownloading(0);
+      }
+    };
+
+    img.onerror = (err) => {
+      console.error('Failed to load image for download:', err);
+       toast({
+        variant: "destructive",
+        title: "Download Failed",
+        description: "Failed to load image data.",
+      });
+      setIsDownloading(0);
+    };
+  };
+
 
   return (
     <div className="w-full text-[13px]">
@@ -199,9 +339,9 @@ export default function FramePopupContent({
         <div className="font-semibold text-sm mb-1 text-foreground">
           {trackTitle}
         </div>
-        {/* <div className="text-[11px] text-muted-foreground">
-          Point {pointIndex + 1} of {totalPoints} | {frameData.timestamp}s
-        </div> */}
+        <div className="text-[11px] text-muted-foreground">
+          Click on an image to download.
+        </div>
         {/* GPX Location Info */}
       </div>
 
@@ -268,23 +408,37 @@ export default function FramePopupContent({
 
       {/* Image Container */}
       <div className="flex gap-2.5 justify-center">
-        <div>
+        <div className="relative">
+          {isDownloading==1 && (
+            <div className="absolute inset-0 z-[1000] bg-background/50 backdrop-blur-[1px] flex flex-col items-center justify-center rounded-sm">
+              <Loader2 className="h-8 w-8 animate-spin text-primary" />
+               <span className="text-xs font-medium mt-2 text-foreground bg-background/80 px-2 py-1 rounded">Downloading...</span>
+            </div>
+          )}
           <img
             //   ref={imgRef}
             src={frameData.image_data}
             alt="Road frame"
-            className='w-[380px] h-auto block rounded-sm'
+            onClick={() => handleDownload(false)}
+            className={`w-[380px] h-auto block rounded-sm cursor-pointer ${isDownloading!=0 ? 'pointer-events-none' : ''}`}
           />
         </div>
         <div className="relative w-[380px] mb-2.5">
+          {isDownloading==2 && (
+            <div className="absolute inset-0 z-[1000] bg-background/50 backdrop-blur-[1px] flex flex-col items-center justify-center rounded-sm">
+              <Loader2 className="h-8 w-8 animate-spin text-primary" />
+              <span className="text-xs font-medium mt-2 text-foreground bg-background/80 px-2 py-1 rounded">Downloading...</span>
+            </div>
+          )}
           <img
             ref={imgRef}
             src={frameData.image_data}
             alt="Road frame"
-            className='w-[380px] h-auto block rounded-sm'
+            className={`w-[380px] h-auto block rounded-sm ${isDownloading!=0 ? 'pointer-events-none' : ''}`}
           />
           <canvas
             ref={canvasRef}
+            onClick={() => handleDownload(true)}
             className="absolute top-0 left-0 w-full h-full rounded cursor-pointer"
           />
           <div className="absolute top-1 right-1 z-[999] bg-blue-500/90 text-white px-2 py-1 rounded text-[10px] font-semibold">
@@ -303,18 +457,18 @@ export default function FramePopupContent({
             {frameData.detections.map((d, i) => {
               const displayName = getDisplayName(d.asset_id, d.class_name);
               const color = colorMap[d.class_name] || '#888';
-              const hasLocation = d.location?.coordinates && 
-                                Array.isArray(d.location.coordinates) && 
-                                d.location.coordinates.length === 2;
+              const hasLocation = d.location?.coordinates &&
+                Array.isArray(d.location.coordinates) &&
+                d.location.coordinates.length === 2;
 
               return (
-                <div 
-                  key={`${d.asset_id}-${i}`} 
+                <div
+                  key={`${d.asset_id}-${i}`}
                   className="bg-secondary/30 rounded p-2 text-xs border border-transparent dark:bg-secondary/40 hover:border-border transition-colors"
                 >
                   <div className="flex items-center justify-between mb-1">
                     <div className="flex items-center gap-2">
-                      <div 
+                      <div
                         className="w-2 h-2 rounded-full flex-shrink-0"
                         style={{ backgroundColor: color }}
                       />
@@ -328,19 +482,19 @@ export default function FramePopupContent({
                       </Badge>
                     )} */}
                   </div>
-                  
+
                   {hasLocation ? (
                     <div className="pl-4 text-xs flex items-center gap-1">
-                      <MapPin className='w-3'/>
+                      <MapPin className='w-3' />
                       <span className="font-mono">
                         {/* GeoJSON is [lon, lat], display as Lat, Lon */}
                         {d.location!.coordinates[1].toFixed(4)}, {d.location!.coordinates[0].toFixed(4)}
                       </span>
                     </div>
                   ) : (
-                   <div className="pl-4 text-xs italic">
-                     Location unavailable
-                   </div>
+                    <div className="pl-4 text-xs italic">
+                      Location unavailable
+                    </div>
                   )}
                 </div>
               );
