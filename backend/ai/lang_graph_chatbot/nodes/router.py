@@ -48,6 +48,30 @@ Intent: tool
 User: "Tell me about the latest survey"
 Intent: tool
 
+User: "How many surveys this month?"
+Intent: tool
+
+User: "Who conducted the most surveys?"
+Intent: tool
+
+User: "Describe this route"
+Intent: tool
+
+User: "Where were traffic signs detected?"
+Intent: tool
+
+User: "Where are the damage hotspots?"
+Intent: tool
+
+User: "Which assets have the most defects?"
+Intent: tool
+
+User: "What is the condition of street lights?"
+Intent: tool
+
+User: "What are the asset categories?"
+Intent: tool
+
 User: "Show me a pie chart of asset conditions"
 Intent: visualization
 

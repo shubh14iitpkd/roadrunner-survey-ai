@@ -59,6 +59,27 @@ async function sendMessageToBackend(
 }
 
 const markdownComponents = {
+  table({ children }: any) {
+    return (
+      <div className="my-4 w-full overflow-hidden rounded-lg border border-border">
+        <table className="w-full text-sm text-left border-collapse">
+          {children}
+        </table>
+      </div>
+    );
+  },
+  thead({ children }: any) {
+    return <thead className="bg-muted text-center text-muted-foreground font-medium border-b border-border">{children}</thead>;
+  },
+  th({ children }: any) {
+    return <th className="px-4 py-3 font-semibold border-r last:border-r-0">{children}</th>;
+  },
+  td({ children }: any) {
+    return <td className="px-4 py-2 border-r text-center border-border/50 first:text-left last:border-r-0">{children}</td>;
+  },
+  tr({ children }: any) {
+    return <tr className="hover:bg-muted/50 transition-colors border-b border-border/50 last:border-b-0">{children}</tr>;
+  },
   code({ className, children, ...props }: any) {
     const match = /language-(\w+)/.exec(className || "");
     const lang = match?.[1];
