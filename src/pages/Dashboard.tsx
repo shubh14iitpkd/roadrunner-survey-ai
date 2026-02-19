@@ -2,8 +2,8 @@ import { useState, useEffect } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { BarChart as BarChartIcon, LineChart as LineChartIcon, MapIcon, TrendingUp, MapPin, AlertTriangle, CheckCircle, Activity, Package, Calendar, TrendingDown, Maximize2 } from "lucide-react";
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
+import { BarChart as BarChartIcon, LineChart as LineChartIcon, MapIcon, TrendingUp, MapPin, AlertTriangle, CheckCircle, Activity, Package, Calendar, TrendingDown, Maximize2, ChevronLeft, ChevronRight, Hash } from "lucide-react";
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from "recharts";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useNavigate } from "react-router-dom";
@@ -16,10 +16,11 @@ import { useLabelMap } from "@/contexts/LabelMapContext";
 const CustomTooltip = ({ active, payload, label }: any) => {
   if (active && payload && payload.length) {
     const data = payload[0];
+    console.log(active, payload, label)
     return (
-      <div className="bg-popover border border-border rounded-lg shadow-lg p-3 min-w-32">
+      <div className="bg-popover/80 backdrop-blur-sm border border-border/80 rounded-lg shadow-lg p-3 min-w-32">
         <div className="flex items-center justify-between pb-2">
-          <span className="text-popover-foreground font-medium text-sm">{label}</span>
+          <span className="text-popover-foreground font-medium text-sm">{data.name || label}</span>
         </div>
         <div className="flex items-center justify-between">
           <span className="text-muted-foreground text-xs capitalize mr-2">{data.dataKey}: </span>
@@ -50,6 +51,13 @@ export default function Dashboard() {
   const [topAnomalyCategories, setTopAnomalyCategories] = useState<any[]>([]);
   const [topAnomalyRoads, setTopAnomalyRoads] = useState<any[]>([]);
   const [recentSurveys, setRecentSurveys] = useState<any[]>([]);
+  
+  // Asset Types Table State
+  const [assetTypeTableData, setAssetTypeTableData] = useState<any>({ items: [], total: 0, page: 1, pages: 0 });
+  const [assetTypePage, setAssetTypePage] = useState(1);
+  const [tableLoading, setTableLoading] = useState(false);
+
+  const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8', '#82ca9d'];
 
   // Load all dashboard data from backend
   useEffect(() => {
@@ -96,16 +104,32 @@ export default function Dashboard() {
     })();
   }, [timePeriod, labelMapData]);
 
-  // Calculate health data from actual KPIs
-  const totalAssets = kpis.totalAssets || 1; // Avoid division by zero
-  // const healthData = [
-  //   { name: "Good", value: kpis.good, percentage: Math.round((kpis.good / totalAssets) * 100), color: "#22c55e" },
-  //   { name: "Fair", value: kpis.fair, percentage: Math.round((kpis.fair / totalAssets) * 100), color: "#f59e0b" },
-  //   { name: "Poor", value: kpis.poor, percentage: Math.round((kpis.poor / totalAssets) * 100), color: "#ef4444" },
-  // ];
+  // Load Asset Types Table Data
+  useEffect(() => {
+    (async () => {
+      try {
+        setTableLoading(true);
+        const resp = await api.dashboard.topAssetTypes(assetTypePage, 4);
+        if (resp) {
+            setAssetTypeTableData(resp);
+        }
+      } catch (err) {
+        console.error("Failed to load asset types table:", err);
+      } finally {
+        setTableLoading(false);
+      }
+    })();
+  }, [assetTypePage]);
+
+  // Helper to get asset display name safely
+  const getAssetDisplayName = (item: any) => {
+      const fromMap = labelMapData?.labels?.[item.asset_id]?.display_name;
+      if (fromMap) return fromMap;
+      return item.display_name || item.type;
+  };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 mb-6">
       {/* Hero Header */}
       <div className="relative overflow-hidden bg-primary p-8 shadow-elevated">
         {/* <div className="absolute bg-primary inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGRlZnM+PHBhdHRlcm4gaWQ9ImdyaWQiIHdpZHRoPSI2MCIgaGVpZ2h0PSI2MCIgcGF0dGVyblVuaXRzPSJ1c2VyU3BhY2VPblVzZSI+PHBhdGggZD0iTSAxMCAwIEwgMCAwIDAgMTAiIGZpbGw9Im5vbmUiIHN0cm9rZT0id2hpdGUiIHN0cm9rZS1vcGFjaXR5PSIwLjEiIHN0cm9rZS13aWR0aD0iMSIvPjwvcGF0dGVybj48L2RlZnM+PHJlY3Qgd2lkdGg9IjEwMCUiIGhlaWdodD0iMTAwJSIgZmlsbD0idXJsKCNncmlkKSIvPjwvc3ZnPg==')] opacity-30"></div> */}
@@ -188,21 +212,6 @@ export default function Dashboard() {
               </div>
             </div>
           </Card>
-
-          {/* <Card className="p-6 shadow-elevated border-0 bg-gradient-to-br from-blue-50 to-white dark:from-blue-950/20 dark:to-card animate-fade-in hover:shadow-glow transition-all duration-300">
-            <div className="flex items-start justify-between">
-              <div className="space-y-2">
-                <p className="text-sm font-semibold text-blue-600 dark:text-blue-400 uppercase tracking-wide">Avg Condition</p>
-                <p className="text-5xl font-bold bg-gradient-to-br from-blue-600 to-blue-400 bg-clip-text text-transparent">
-                  {loading ? "..." : `${healthData[0].percentage}%`}
-                </p>
-                <p className="text-xs font-medium text-muted-foreground">Assets in good condition</p>
-              </div>
-              <div className="p-4 rounded-2xl bg-gradient-to-br from-blue-500 to-blue-600 shadow-lg">
-                <Activity className="h-7 w-7 text-white" />
-              </div>
-            </div>
-          </Card> */}
         </div>
 
         {/* GIS Map Overview */}
@@ -228,170 +237,152 @@ export default function Dashboard() {
           <div className="relative w-full rounded-xl overflow-hidden border border-border bg-muted/20" style={{ height: '400px' }}>
             <LeafletMapView selectedRoadNames={[]} roads={roads} />
           </div>
-          {/* <div className="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <div className="p-3 sm:p-4 bg-gradient-to-br from-blue-50 to-cyan-50 dark:from-blue-950/20 dark:to-cyan-950/20 rounded-lg border border-blue-200 dark:border-blue-800">
-              <p className="text-xs sm:text-sm text-blue-600 dark:text-blue-400 font-medium">Total Roads</p>
-              <p className="text-xl sm:text-2xl font-bold text-blue-700 dark:text-blue-300 mt-1">{roads.length}</p>
-            </div>
-            <div className="p-3 sm:p-4 bg-gradient-to-br from-green-50 to-emerald-50 dark:from-green-950/20 dark:to-emerald-950/20 rounded-lg border border-green-200 dark:border-green-800">
-              <p className="text-xs sm:text-sm text-green-600 dark:text-green-400 font-medium">Good</p>
-              <p className="text-xl sm:text-2xl font-bold text-green-700 dark:text-green-300 mt-1">{goodAssets}</p>
-            </div>
-            <div className="p-3 sm:p-4 bg-gradient-to-br from-amber-50 to-yellow-50 dark:from-amber-950/20 dark:to-yellow-950/20 rounded-lg border border-amber-200 dark:border-amber-800">
-              <p className="text-xs sm:text-sm text-amber-600 dark:text-amber-400 font-medium">Fair</p>
-              <p className="text-xl sm:text-2xl font-bold text-amber-700 dark:text-amber-300 mt-1">{fairAssets}</p>
-            </div>
-            <div className="p-3 sm:p-4 bg-gradient-to-br from-red-50 to-rose-50 dark:from-red-950/20 dark:to-rose-950/20 rounded-lg border border-red-200 dark:border-red-800">
-              <p className="text-xs sm:text-sm text-red-600 dark:text-red-400 font-medium">Poor</p>
-              <p className="text-xl sm:text-2xl font-bold text-red-700 dark:text-red-300 mt-1">{poorAssets}</p>
-            </div>
-          </div> */}
         </Card>
 
-        {/* Charts Section */}
-        <div className="grid grid-cols-1 lg:grid-cols-1 gap-6">
-          {/* Asset Distribution by Category */}
-          <Card className="p-6 sm:p-8 shadow-elevated border-0 gradient-card">
-            <div className="flex items-center gap-3 mb-6">
-              <div className="p-3 rounded-xl bg-gradient-to-br from-blue-500 to-cyan-500">
-                <BarChartIcon className="h-6 w-6 text-white" />
+        {/* Charts & Tables Section */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Asset Distribution (Donut Chart) */}
+          <Card className="p-6 sm:p-8 card pla shadow-elevated border-0 gradient-card">
+            <div className="flex items-center gap-3">
+              <div className="p-3 rounded-xl bg-gradient-to-br from-orange-500 to-amber-500">
+                <Activity className="h-6 w-6 text-white" />
               </div>
-              <h3 className="font-bold text-lg sm:text-xl">Assets by Category</h3>
+              <h3 className="font-bold text-lg sm:text-xl">Asset Distribution</h3>
             </div>
-            {loading ? (
-              <div className="space-y-4 h-[280px] flex flex-col justify-end">
-                <div className="flex items-end justify-between gap-4 h-full px-2">
-                  <Skeleton className="w-[10%] h-[30%] bg-primary/10 rounded-t-lg" />
-                  <Skeleton className="w-[10%] h-[60%] bg-primary/10 rounded-t-lg" />
-                  <Skeleton className="w-[10%] h-[45%] bg-primary/10 rounded-t-lg" />
-                  <Skeleton className="w-[10%] h-[90%] bg-primary/10 rounded-t-lg" />
-                  <Skeleton className="w-[10%] h-[55%] bg-primary/10 rounded-t-lg" />
-                  <Skeleton className="w-[10%] h-[75%] bg-primary/10 rounded-t-lg" />
-                  <Skeleton className="w-[10%] h-[40%] bg-primary/10 rounded-t-lg" />
-                  <Skeleton className="w-[10%] h-[85%] bg-primary/10 rounded-t-lg" />
-                </div>
-                <div className="flex justify-between px-2 pb-2">
-                  <Skeleton className="h-3 w-12" />
-                  <Skeleton className="h-3 w-12" />
-                  <Skeleton className="h-3 w-12" />
-                  <Skeleton className="h-3 w-12" />
-                  <Skeleton className="h-3 w-12" />
-                </div>
-              </div>
+             {loading ? (
+               <div className="h-[280px] flex items-center justify-center">
+                  <Skeleton className="w-[200px] h-[200px] rounded-full bg-primary/10" />
+               </div>
             ) : (
-              <ResponsiveContainer width="100%" height={280}>
-                <BarChart data={categoryChartData}>
-                  <CartesianGrid strokeDasharray="3 3" opacity={0.1} />
-                  <XAxis
-                    dataKey="category"
-                    angle={-45}
-                    textAnchor="end"
-                    height={80}
-                    tick={{ fontSize: 10, fill: "hsl(var(--chart-axis))" }}
+              <div className="h-full grid place-items-center"> 
+              <ResponsiveContainer width="100%" height={280} className={"grid place-items-center my-auto"}>
+                <PieChart>
+                  <Pie
+                    data={categoryChartData.slice(0, 6)}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={70}
+                    outerRadius={100}
+                    fill="#8884d8"
+                    paddingAngle={0}
+                    dataKey="count"
+                    nameKey="category"
+                  >
+                    {categoryChartData.slice(0, 6).map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                    ))}
+                  </Pie>
+                  <Tooltip content={<CustomTooltip />} />
+                  <Legend 
+                      layout="vertical" 
+                      verticalAlign="middle" 
+                      align="right"
+                      formatter={(value, entry: any) => <span className="text-sm font-medium text-foreground ml-2">{value}</span>}
                   />
-                  <YAxis tick={{ fontSize: 11, fill: "hsl(var(--chart-axis))" }} />
-                  <Tooltip cursor={false} content={<CustomTooltip />} />
-                  <Bar dataKey="count" fill="hsl(var(--primary))" radius={[8, 8, 0, 0]} />
-                </BarChart>
+                </PieChart>
               </ResponsiveContainer>
+              </div>
             )}
           </Card>
 
-          {/* Categories with Most Anomalies */}
-          {/* <Card className="p-6 sm:p-8 shadow-elevated border-0 gradient-card">
-            <div className="flex items-center gap-3 mb-6">
-              <div className="p-3 rounded-xl bg-gradient-to-br from-red-500 to-orange-500">
-                <AlertTriangle className="h-6 w-6 text-white" />
-              </div>
-              <h3 className="font-bold text-lg sm:text-xl">Anomalies by Category</h3>
+          {/* Top Asset Types Table */}
+          <Card className="shadow-elevated border-0 gradient-card overflow-hidden">
+            <div className="p-6 sm:p-8 pb-4">
+                <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-3">
+                    <div className="p-3 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-500">
+                        <TrendingUp className="h-6 w-6 text-white" />
+                    </div>
+                    <h3 className="font-bold text-lg sm:text-xl">Top Asset Types</h3>
+                </div>
+                </div>
             </div>
-            <ResponsiveContainer width="100%" height={280}>
-              <BarChart data={topAnomalyCategories}>
-                <CartesianGrid strokeDasharray="3 3" opacity={0.1} />
-                <XAxis
-                  dataKey="category"
-                  angle={-45}
-                  textAnchor="end"
-                  height={80}
-                  tick={{ fontSize: 10 }}
-                />
-                <YAxis tick={{ fontSize: 11 }} />
-                <Tooltip />
-                <Bar dataKey="count" fill="#ef4444" radius={[8, 8, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </Card> */}
-        </div>
-
-        {/* Tables Section */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Roads with Most Anomalies */}
-          {/* <Card className="p-6 sm:p-8 shadow-elevated border-0 gradient-card">
-            <div className="flex items-center gap-3 mb-6">
-              <div className="p-3 rounded-xl bg-gradient-to-br from-orange-500 to-red-500">
-                <MapPin className="h-6 w-6 text-white" />
-              </div>
-              <h3 className="font-bold text-lg sm:text-xl">Roads with Most Anomalies</h3>
-            </div>
-            <div className="rounded-lg border border-border overflow-hidden overflow-x-auto">
+            
+            <div className="border-t border-border/50">
               <Table>
-                <TableHeader>
-                  <TableRow className="bg-muted/50">
-                    <TableHead className="font-semibold">#</TableHead>
-                    <TableHead className="font-semibold">Road Name</TableHead>
-                    <TableHead className="font-semibold text-right">Anomalies</TableHead>
+                <TableHeader className="bg-muted/30">
+                  <TableRow className="hover:bg-transparent border-border/50">
+                    <TableHead className="w-[70%] pl-8">Asset Type</TableHead>
+                    <TableHead className="text-right pr-8">Count</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {topAnomalyRoads.map((item, idx) => (
-                    <TableRow key={item.road} className="hover:bg-muted/30">
-                      <TableCell className="font-medium">{idx + 1}</TableCell>
-                      <TableCell className="text-sm sm:text-base">{item.road}</TableCell>
-                      <TableCell className="text-right">
-                        <Badge variant="destructive" className="font-semibold text-xs sm:text-sm">
-                          {item.count}
-                        </Badge>
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                  {tableLoading ? (
+                     Array(4).fill(0).map((_, i) => (
+                        <TableRow key={i} className="border-border/50">
+                            <TableCell className="pl-8"><Skeleton className="min-h-5 w-[180px]" /></TableCell>
+                            <TableCell className="text-right pr-8"><Skeleton className="min-h-5 w-[40px] ml-auto" /></TableCell>
+                        </TableRow>
+                     ))
+                  ) : (
+                    <>
+                      {assetTypeTableData.items.length > 0 ? (
+                        assetTypeTableData.items.map((item: any, i: number) => (
+                          <TableRow key={i} className="hover:bg-muted/50 transition-colors border-border/50 group h-5">
+                            <TableCell className="font-medium pl-8 py-4">
+                                <div className="flex items-center gap-3">
+                                    {/* <span className="bg-primary/10 text-primary p-1.5 rounded-md group-hover:bg-primary/20 transition-colors">
+                                        <Hash className="h-4 w-4" />
+                                    </span> */}
+                                    <span className="text-base">{getAssetDisplayName(item)}</span>
+                                </div>
+                            </TableCell>
+                            <TableCell className="text-right font-bold text-base pr-8">
+                                <Badge variant="secondary" className="font-mono text-sm px-2.5 py-0.5">
+                                    {item.count.toLocaleString()}
+                                </Badge>
+                            </TableCell>
+                          </TableRow>
+                        ))
+                      ) : (
+                        <TableRow className="h-[65px]">
+                          <TableCell colSpan={2} className="text-center text-muted-foreground">
+                            No asset types found.
+                          </TableCell>
+                        </TableRow>
+                      )}
+                      
+                      {/* Fill empty rows to maintain height */}
+                      {Array.from({ length: Math.max(0, 4 - assetTypeTableData.items.length) }).map((_, i) => (
+                        <TableRow key={`empty-${i}`} className="border-border/50 !h-2">
+                           <TableCell colSpan={2} className="p-0">&nbsp;</TableCell>
+                        </TableRow>
+                      ))}
+                    </>
+                  )}
                 </TableBody>
               </Table>
             </div>
-          </Card> */}
 
-          {/* Recent Survey Activity */}
-          {/* <Card className="p-6 sm:p-8 shadow-elevated border-0 gradient-card">
-            <div className="flex items-center gap-3 mb-6">
-              <div className="p-3 rounded-xl bg-gradient-to-br from-purple-500 to-pink-500">
-                <LineChartIcon className="h-6 w-6 text-white" />
+            {/* Pagination */}
+            <div className="flex items-center justify-between px-6 py-4 bg-muted/20 border-t border-border/50">
+               <div className="text-sm font-medium text-muted-foreground">
+                  Page {assetTypeTableData.page} of {assetTypeTableData.pages}
+               </div>
+               <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="h-8 w-8"
+                  onClick={() => setAssetTypePage(prev => Math.max(prev - 1, 1))}
+                  disabled={assetTypePage === 1 || tableLoading}
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                  <span className="sr-only">Previous</span>
+                </Button>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="h-8 w-8"
+                  onClick={() => setAssetTypePage(prev => Math.min(prev + 1, assetTypeTableData.pages))}
+                  disabled={assetTypePage >= assetTypeTableData.pages || tableLoading}
+                >
+                  <ChevronRight className="h-4 w-4" />
+                  <span className="sr-only">Next</span>
+                </Button>
               </div>
-              <h3 className="font-bold text-lg sm:text-xl">Recent Survey Activity</h3>
             </div>
-            <div className="rounded-lg border border-border overflow-hidden overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow className="bg-muted/50">
-                    <TableHead className="font-semibold">Road</TableHead>
-                    <TableHead className="font-semibold">Date</TableHead>
-                    <TableHead className="font-semibold text-right">Assets</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {recentSurveys.map((survey, idx) => (
-                    <TableRow key={idx} className="hover:bg-muted/30">
-                      <TableCell className="font-medium text-sm sm:text-base">{survey.road}</TableCell>
-                      <TableCell className="text-xs sm:text-sm text-muted-foreground">{survey.date}</TableCell>
-                      <TableCell className="text-right">
-                        <Badge variant="secondary" className="font-semibold text-xs sm:text-sm">
-                          {survey.assets}
-                        </Badge>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          </Card> */}
+          </Card>
         </div>
       </div>
     </div>

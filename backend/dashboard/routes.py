@@ -169,6 +169,116 @@ def anomalies_by_category():
 	return jsonify({"items": items})
 
 
+@dashboard_bp.get("/tables/top-asset-types")
+def top_asset_types():
+	"""
+	Get top asset types by count (paginated)
+	---
+	tags:
+	  - Dashboard
+	parameters:
+	  - name: page
+	    in: query
+	    type: integer
+	    default: 1
+	  - name: limit
+	    in: query
+	    type: integer
+	    default: 5
+	responses:
+	  200:
+	    description: Table data retrieved successfully
+	"""
+	page = request.args.get("page", 1, type=int)
+	limit = request.args.get("limit", 5, type=int)
+	skip = (page - 1) * limit
+
+	db = get_db()
+	
+	# 1. Identify latest surveys
+	latest_surveys = list(db.surveys.find({"is_latest": True}, {"_id": 1}))
+	latest_survey_ids = [s["_id"] for s in latest_surveys]
+	
+	if not latest_survey_ids:
+		return jsonify({"items": [], "total": 0, "page": page, "pages": 0})
+
+	# 2. Get videos for these surveys to identify demo videos
+	videos = list(db.videos.find({"survey_id": {"$in": latest_survey_ids}}))
+	
+	demo_video_keys = []
+	for v in videos:
+		storage_path = v.get("storage_url") or v.get("storage_path")
+		if is_demo(video_url=storage_path):
+			key = get_video_key(storage_path)
+			if key:
+				demo_video_keys.append(key)
+	
+	# 3. Match assets by survey_id (real) OR video_key (demo)
+	match_query = {
+		"$or": [
+			{"survey_id": {"$in": latest_survey_ids}},
+			{"video_key": {"$in": demo_video_keys}}
+		]
+	}
+
+	# Count total types first (for pagination)
+	total_agg = db.assets.aggregate([
+		{"$match": match_query},
+		{"$group": {"_id": "$asset_id"}},
+		{"$count": "total"}
+	])
+	
+	try:
+		total_count = total_agg.next().get("total", 0)
+	except StopIteration:
+		total_count = 0
+
+	# Get paginated data
+	agg = db.assets.aggregate([
+		{"$match": match_query},
+		{"$group": {
+			"_id": "$asset_id", 
+			"asset_type": {"$first": "$asset_type"}, 
+			"count": {"$sum": 1}
+		}},
+		{"$sort": {"count": -1}},
+		{"$skip": skip},
+		{"$limit": limit}
+	])
+	
+	results = list(agg)
+	
+	# Fetch display names from system_asset_labels
+	asset_ids = [r["_id"] for r in results if r["_id"]]
+	labels_map = {}
+	if asset_ids:
+		labels = list(db.system_asset_labels.find({"asset_id": {"$in": asset_ids}}))
+		for l in labels:
+			labels_map[l["asset_id"]] = l.get("display_name") or l.get("default_name")
+
+	items = []
+	for d in results:
+		aid = d.get("_id")
+		atype = d.get("asset_type") or "Unknown"
+		display_name = labels_map.get(aid, atype)
+		items.append({
+			"asset_id": aid,
+			"type": atype,
+			"display_name": display_name,
+			"count": d.get("count", 0)
+		})
+	
+	import math
+	total_pages = math.ceil(total_count / limit)
+	
+	return jsonify({
+		"items": items,
+		"total": total_count,
+		"page": page,
+		"pages": total_pages
+	})
+
+
 @dashboard_bp.get("/tables/top-anomaly-roads")
 def top_anomaly_roads():
 	"""

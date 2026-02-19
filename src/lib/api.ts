@@ -182,6 +182,7 @@ export const api = {
 		assetsByCategory: () => apiFetch("/api/dashboard/charts/assets-by-category"),
 		anomaliesByCategory: () => apiFetch("/api/dashboard/charts/anomalies-by-category"),
 		topAnomalyRoads: () => apiFetch("/api/dashboard/tables/top-anomaly-roads"),
+		topAssetTypes: (page: number = 1, limit: number = 5) => apiFetch(`/api/dashboard/tables/top-asset-types?page=${page}&limit=${limit}`),
 		recentSurveys: () => apiFetch("/api/dashboard/recent-surveys"),
 	},
 	user: {

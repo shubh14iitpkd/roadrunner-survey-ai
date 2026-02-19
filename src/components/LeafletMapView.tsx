@@ -236,7 +236,7 @@ export default function LeafletMapView({ selectedRoadNames = [], roads = [], sel
       const latLng: L.LatLngTuple = [lat, lng];
       const color = getMarkerColor(asset.condition);
 
-      console.log(getAssetIconFromId(asset.asset_id))
+      // console.log(getAssetIconFromId(asset.asset_id))
       let circleMarker;
       if (isAssetIconExist(asset.asset_id)) {
         circleMarker = L.marker(latLng, {

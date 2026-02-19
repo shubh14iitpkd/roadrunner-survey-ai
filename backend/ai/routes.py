@@ -207,7 +207,6 @@ def add_message(chat_id: str):
     content = body.get("content")
     video_id = body.get("video_id")  # Optional: current video being discussed
     route_id = body.get("route_id")  # Optional: current route being discussed
-    print(route_id, __file__)
     if not content:
         return jsonify({"error": "content is required"}), 400
 
