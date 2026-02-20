@@ -767,6 +767,362 @@ def get_most_damaged_types(route_id: Optional[int] = None, limit: int = 10) -> s
     return json.dumps({"route_id": route_id, "assets": ranked[:limit]})
 
 
+@tool
+def list_surveyed_routes(period: str = "all") -> str:
+    """
+    List all routes that have been surveyed, with survey count and latest survey date.
+    Use for "How many routes have we surveyed?", "Which routes have surveys?", "List surveyed routes".
+
+    Args:
+        period: "today", "week", "month", "year", or "all"
+
+    Returns:
+        JSON with list of surveyed routes and their survey counts
+    """
+    db = get_db()
+    match_query: dict = {}
+
+    if period != "all":
+        start_date, end_date = _get_date_range(period)
+        match_query["survey_date"] = {"$gte": start_date, "$lte": end_date}
+
+    pipeline = [
+        {"$match": match_query},
+        {"$group": {
+            "_id": "$route_id",
+            "survey_count": {"$sum": 1},
+            "latest_survey_date": {"$max": "$survey_date"},
+            "surveyors": {"$addToSet": "$surveyor_name"},
+        }},
+        {"$sort": {"survey_count": -1}},
+    ]
+    results = list(db.surveys.aggregate(pipeline))
+
+    # Enrich with road names
+    route_ids = [r["_id"] for r in results]
+    roads = {r["route_id"]: r for r in db.roads.find({"route_id": {"$in": route_ids}})}
+
+    surveyed = []
+    for r in results:
+        rid = r["_id"]
+        road = roads.get(rid, {})
+        surveyed.append({
+            "route_id": rid,
+            "road_name": road.get("road_name", f"Route {rid}"),
+            "road_type": road.get("road_type"),
+            "distance_km": road.get("estimated_distance_km"),
+            "survey_count": r["survey_count"],
+            "latest_survey_date": r["latest_survey_date"],
+            "surveyors": r["surveyors"],
+        })
+
+    return json.dumps({
+        "period": period,
+        "total_surveyed_routes": len(surveyed),
+        "routes": surveyed,
+    })
+
+
+@tool
+def rank_routes_by_damage(limit: int = 10) -> str:
+    """
+    Rank all routes by number of damaged assets to find which route has the most damage.
+    Use for "Which route has the most damage?", "Route with most defects", "Compare damage across routes".
+
+    Args:
+        limit: Max routes to return (default 10)
+
+    Returns:
+        JSON array of routes ranked by damage count, with good/damaged/total and damage percentage
+    """
+    db = get_db()
+
+    pipeline = [
+        {"$group": {
+            "_id": {"route_id": "$route_id", "condition": "$condition"},
+            "count": {"$sum": 1},
+        }},
+    ]
+    results = list(db.assets.aggregate(pipeline))
+
+    if not results:
+        return json.dumps({"routes": [], "message": "No asset data found"})
+
+    # Pivot by route
+    route_data: dict[int, dict] = {}
+    for r in results:
+        rid = r["_id"]["route_id"]
+        if rid is None:
+            continue
+        entry = route_data.setdefault(rid, {"good": 0, "damaged": 0, "total": 0})
+        if _classify_condition(r["_id"]["condition"]) == "damaged":
+            entry["damaged"] += r["count"]
+        else:
+            entry["good"] += r["count"]
+        entry["total"] += r["count"]
+
+    # Get road names
+    route_ids = list(route_data.keys())
+    roads = {r["route_id"]: r for r in db.roads.find({"route_id": {"$in": route_ids}})}
+
+    ranked = []
+    for rid, data in route_data.items():
+        road = roads.get(rid, {})
+        ranked.append({
+            "route_id": rid,
+            "road_name": road.get("road_name", f"Route {rid}"),
+            "damaged": data["damaged"],
+            "good": data["good"],
+            "total": data["total"],
+            "damage_rate_pct": round(data["damaged"] / data["total"] * 100, 1) if data["total"] else 0,
+        })
+
+    ranked.sort(key=lambda x: x["damaged"], reverse=True)
+    return json.dumps({"routes": ranked[:limit]})
+
+
+@tool
+def get_surveys_in_time_range(start_date: str = "", end_date: str = "", period: str = "") -> str:
+    """
+    Get surveys conducted within a specific time range or period.
+    Use for "Which routes were surveyed this month?", "Surveys conducted today", "Surveys from Jan to March".
+
+    Args:
+        start_date: Optional start date as YYYY-MM-DD
+        end_date: Optional end date as YYYY-MM-DD
+        period: Alternative to dates — "today", "week", "month", "year"
+
+    Returns:
+        JSON with surveys grouped by route, including surveyor info and dates
+    """
+    db = get_db()
+    query: dict = {}
+
+    if period:
+        sd, ed = _get_date_range(period)
+        query["survey_date"] = {"$gte": sd, "$lte": ed}
+    elif start_date or end_date:
+        date_filter: dict = {}
+        if start_date:
+            date_filter["$gte"] = start_date
+        if end_date:
+            date_filter["$lte"] = end_date
+        if date_filter:
+            query["survey_date"] = date_filter
+
+    surveys = list(db.surveys.find(query).sort("survey_date", -1))
+
+    # Group by route
+    route_ids = list(set(s.get("route_id") for s in surveys if s.get("route_id")))
+    roads = {r["route_id"]: r for r in db.roads.find({"route_id": {"$in": route_ids}})}
+
+    by_route: dict[int, list] = {}
+    for s in surveys:
+        rid = s.get("route_id")
+        by_route.setdefault(rid, []).append({
+            "date": s.get("survey_date"),
+            "surveyor": s.get("surveyor_name"),
+            "status": s.get("status"),
+            "version": s.get("survey_version", 1),
+        })
+
+    route_list = []
+    for rid, survey_list in by_route.items():
+        road = roads.get(rid, {})
+        route_list.append({
+            "route_id": rid,
+            "road_name": road.get("road_name", f"Route {rid}"),
+            "survey_count": len(survey_list),
+            "surveys": survey_list,
+        })
+
+    route_list.sort(key=lambda x: x["survey_count"], reverse=True)
+
+    return json.dumps({
+        "period": period or f"{start_date or '...'} to {end_date or '...'}",
+        "total_surveys": len(surveys),
+        "total_routes": len(route_list),
+        "routes": route_list,
+    })
+
+
+@tool
+def get_route_condition_report(route_id: int) -> str:
+    """
+    Comprehensive condition report for a route, including damage breakdown by category,
+    most damaged asset types, and damage hotspot summary.
+    Use for "Condition of route 258", "What should we improve on this route?",
+    "Advice for improving route", "What's wrong with this route?".
+
+    The agent should use this data to provide actionable improvement recommendations.
+
+    Args:
+        route_id: The route to analyze
+
+    Returns:
+        JSON with overall condition, damage by category, top damaged assets, and hotspot info
+    """
+    db = get_db()
+
+    # Overall condition
+    cond_pipeline = [
+        {"$match": {"route_id": route_id}},
+        {"$group": {"_id": "$condition", "count": {"$sum": 1}}},
+    ]
+    cond_results = list(db.assets.aggregate(cond_pipeline))
+
+    total = sum(r["count"] for r in cond_results)
+    if total == 0:
+        return json.dumps({"route_id": route_id, "error": "No assets found for this route"})
+
+    good = sum(r["count"] for r in cond_results if _classify_condition(r["_id"]) == "good")
+    damaged = total - good
+
+    # Damage by category
+    cat_pipeline = [
+        {"$match": {"route_id": route_id, "condition": {"$in": DAMAGED_CONDITIONS}}},
+        {"$group": {
+            "_id": "$category_id",
+            "damaged_count": {"$sum": 1},
+        }},
+        {"$sort": {"damaged_count": -1}},
+    ]
+    cat_damage = list(db.assets.aggregate(cat_pipeline))
+
+    categories_damaged = []
+    for c in cat_damage:
+        cat_total = db.assets.count_documents({"route_id": route_id, "category_id": c["_id"]})
+        categories_damaged.append({
+            "category": _cat_name(c["_id"]),
+            "damaged": c["damaged_count"],
+            "total": cat_total,
+            "damage_rate_pct": round(c["damaged_count"] / cat_total * 100, 1) if cat_total else 0,
+        })
+
+    # Top damaged asset types
+    asset_pipeline = [
+        {"$match": {"route_id": route_id, "condition": {"$in": DAMAGED_CONDITIONS}}},
+        {"$group": {
+            "_id": "$asset_id",
+            "damaged_count": {"$sum": 1},
+        }},
+        {"$sort": {"damaged_count": -1}},
+        {"$limit": 10},
+    ]
+    top_damaged = list(db.assets.aggregate(asset_pipeline))
+
+    top_damaged_assets = []
+    for a in top_damaged:
+        top_damaged_assets.append({
+            "asset": _label_name(a["_id"]),
+            "damaged_count": a["damaged_count"],
+        })
+
+    # Road info
+    road = db.roads.find_one({"route_id": route_id})
+    road_name = road.get("road_name", f"Route {route_id}") if road else f"Route {route_id}"
+
+    return json.dumps({
+        "route_id": route_id,
+        "road_name": road_name,
+        "overall": {
+            "total_assets": total,
+            "good": good,
+            "good_pct": round(good / total * 100, 1),
+            "damaged": damaged,
+            "damaged_pct": round(damaged / total * 100, 1),
+        },
+        "damage_by_category": categories_damaged,
+        "top_damaged_assets": top_damaged_assets,
+        "recommendation_hint": "Use the damage_by_category and top_damaged_assets data to suggest specific improvement actions like replacing damaged assets, scheduling maintenance for worst categories, and prioritizing hotspot areas.",
+    })
+
+
+@tool
+def get_survey_findings(route_id: Optional[int] = None, period: str = "all") -> str:
+    """
+    Aggregate summary of what was found during surveys — total assets detected
+    grouped by category, with good/damaged counts.
+    Use for "What did we find in surveys?", "Show survey findings", "Survey results summary".
+
+    Args:
+        route_id: Optional route to filter by
+        period: "today", "week", "month", "year", or "all"
+
+    Returns:
+        JSON with asset aggregates from surveyed routes
+    """
+    db = get_db()
+
+    # First get relevant surveys to determine scope
+    survey_query: dict = {}
+    if route_id is not None:
+        survey_query["route_id"] = route_id
+    if period != "all":
+        start_date, end_date = _get_date_range(period)
+        survey_query["survey_date"] = {"$gte": start_date, "$lte": end_date}
+
+    survey_count = db.surveys.count_documents(survey_query)
+    surveyed_route_ids = list(db.surveys.distinct("route_id", survey_query))
+
+    # Get asset aggregates for those routes
+    asset_query: dict = {}
+    if surveyed_route_ids:
+        asset_query["route_id"] = {"$in": surveyed_route_ids}
+    elif route_id is not None:
+        asset_query["route_id"] = route_id
+
+    pipeline = [
+        {"$match": asset_query},
+        {"$group": {
+            "_id": {"category_id": "$category_id", "condition": "$condition"},
+            "count": {"$sum": 1},
+        }},
+    ]
+    results = list(db.assets.aggregate(pipeline))
+
+    if not results:
+        return json.dumps({
+            "period": period,
+            "route_id": route_id,
+            "surveys_matched": survey_count,
+            "categories": [],
+            "grand_total": 0,
+        })
+
+    # Pivot by category
+    cat_data: dict[str, dict] = {}
+    for r in results:
+        cid = r["_id"]["category_id"]
+        entry = cat_data.setdefault(cid, {"good": 0, "damaged": 0, "total": 0})
+        if _classify_condition(r["_id"]["condition"]) == "damaged":
+            entry["damaged"] += r["count"]
+        else:
+            entry["good"] += r["count"]
+        entry["total"] += r["count"]
+
+    categories = []
+    grand_total = 0
+    for cid, data in sorted(cat_data.items(), key=lambda x: x[1]["total"], reverse=True):
+        grand_total += data["total"]
+        categories.append({
+            "category": _cat_name(cid),
+            "total": data["total"],
+            "good": data["good"],
+            "damaged": data["damaged"],
+            "damage_rate_pct": round(data["damaged"] / data["total"] * 100, 1) if data["total"] else 0,
+        })
+
+    return json.dumps({
+        "period": period,
+        "route_id": route_id,
+        "surveys_matched": survey_count,
+        "routes_covered": len(surveyed_route_ids),
+        "categories": categories,
+        "grand_total": grand_total,
+    })
+
+
 # =============================================================================
 # TOOL REGISTRY
 # =============================================================================
@@ -785,4 +1141,9 @@ ALL_TOOLS = [
     get_asset_locations,
     get_damage_hotspots,
     get_most_damaged_types,
+    list_surveyed_routes,
+    rank_routes_by_damage,
+    get_surveys_in_time_range,
+    get_route_condition_report,
+    get_survey_findings,
 ]
