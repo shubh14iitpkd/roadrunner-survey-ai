@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { MessageSquare, Send, Sparkles, MapPin, ChevronDown, Waypoints, Loader2, Image as ImageIcon } from "lucide-react";
+import { MessageSquare, Send, Sparkles, MapPin, ChevronDown, Waypoints, Loader2, Image as ImageIcon, X } from "lucide-react";
 import { api } from "@/lib/api";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
@@ -138,16 +138,7 @@ export default function AskAI() {
     setSelectedRouteId(value);
     const route = routes.find(r => r.route_id.toString() === value);
     setSelectedRoute(route || null);
-    
-    // Add system message
-    if (route) {
-        setMessages(prev => [...prev, {
-            role: "assistant",
-            content: `Selected **${route.road_name}** (Route ${route.route_id}).\nYou can ask about:\n* "How many surveys for this route?"\n* "What is the condition of traffic signs?"\n* "Show me a list of videos"`,
-        }]);
-    }
   };
-
   // Load roads
   useEffect(() => {
     (async () => {
@@ -374,6 +365,11 @@ export default function AskAI() {
                     {selectedRoute.estimated_distance_km} km
                 </Badge>
               )}
+              <div className="unselect-route">
+                <Button variant="destructive" size="sm" className="rounded-full" onClick={() => handleRouteSelect("")}>
+                  <X/>
+                </Button>
+              </div>
             </div>
           )}
         </div>
