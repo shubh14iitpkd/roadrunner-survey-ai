@@ -6,7 +6,7 @@ Produces a ```visualization code block with chart JSON.
 
 from langchain_core.messages import SystemMessage, AIMessage
 from ai.lang_graph_chatbot.state import AgentState, extract_text_content
-from ai.lang_chatbot.models import get_gemini_model
+from ai.lang_graph_chatbot.models import get_gemini_model
 
 
 FORMATTER_PROMPT = """You are a data visualization formatter.
@@ -61,7 +61,7 @@ def formatter_node(state: AgentState) -> dict:
 
     system = SystemMessage(content=FORMATTER_PROMPT)
     # Include recent messages which contain the tool results
-    history = state["messages"][-10:]
+    history = state["messages"][-3:]
 
     response = llm.invoke([system] + history)
 

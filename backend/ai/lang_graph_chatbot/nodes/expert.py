@@ -5,7 +5,7 @@ Uses the LLM with a domain-specific system prompt and full message history.
 
 from langchain_core.messages import SystemMessage, AIMessage
 from ai.lang_graph_chatbot.state import AgentState, extract_text_content
-from ai.lang_chatbot.models import get_gemini_model
+from ai.lang_graph_chatbot.models import get_gemini_model
 
 
 EXPERT_PROMPT = """You are RoadSightAI — a friendly road engineering expert.

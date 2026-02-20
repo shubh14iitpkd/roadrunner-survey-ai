@@ -8,7 +8,7 @@ from langchain_core.messages import SystemMessage, AIMessage, HumanMessage, Tool
 from langgraph.prebuilt import ToolNode
 from ai.lang_graph_chatbot.state import AgentState
 from ai.lang_graph_chatbot.tools import ALL_TOOLS
-from ai.lang_chatbot.models import get_gemini_model
+from ai.lang_graph_chatbot.models import get_gemini_model
 
 
 AGENT_PROMPT = """You are RoadSightAI — a friendly, knowledgeable road survey assistant.
