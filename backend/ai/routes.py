@@ -271,6 +271,63 @@ def add_message(chat_id: str):
     return jsonify({"user_message": user_msg, "assistant_message": ai_msg}), 201
 
 
+@ai_bp.patch("/chats/<chat_id>")
+@jwt_required()
+def update_chat(chat_id: str):
+    """
+    Update a chat session (e.g. rename)
+    ---
+    tags:
+      - AI
+    security:
+      - Bearer: []
+    parameters:
+      - name: chat_id
+        in: path
+        type: string
+        required: true
+        description: The ID of the chat
+      - name: body
+        in: body
+        required: true
+        schema:
+          type: object
+          properties:
+            title:
+              type: string
+              description: New chat title
+    responses:
+      200:
+        description: Chat updated successfully
+      404:
+        description: Chat not found
+      401:
+        description: Unauthorized
+    """
+    user_id = current_user_id_str()
+    if not user_id:
+        return jsonify({"error": "unauthorized"}), 401
+
+    body = request.get_json(silent=True) or {}
+    update_fields = {}
+    if "title" in body:
+        update_fields["title"] = (body["title"] or "").strip() or "New Chat"
+    if not update_fields:
+        return jsonify({"error": "nothing to update"}), 400
+
+    update_fields["updated_at"] = get_now_iso()
+
+    db = get_db()
+    res = db.ai_chats.update_one(
+        {"_id": ObjectId(chat_id), "user_id": ObjectId(user_id)},
+        {"$set": update_fields},
+    )
+    if not res.matched_count:
+        return jsonify({"error": "not found"}), 404
+
+    return jsonify({"ok": True})
+
+
 @ai_bp.delete("/chats/<chat_id>")
 @jwt_required()
 def delete_chat(chat_id: str):

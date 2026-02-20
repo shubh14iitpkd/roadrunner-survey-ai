@@ -61,6 +61,8 @@ export const api = {
 			apiFetch(`/api/ai/chats/${chatId}/messages`, { method: "POST", body: JSON.stringify({ role, content }) }),
 		sendMessage: (chatId: string, role: "user" | "assistant", content: string, videoId?: string, routeId?: number | string) =>
 			apiFetch(`/api/ai/chats/${chatId}/messages`, { method: "POST", body: JSON.stringify({ role, content, video_id: videoId, route_id: Number(routeId) }) }),
+		deleteChat: (chatId: string) => apiFetch(`/api/ai/chats/${chatId}`, { method: "DELETE" }),
+		renameChat: (chatId: string, title: string) => apiFetch(`/api/ai/chats/${chatId}`, { method: "PATCH", body: JSON.stringify({ title }) }),
 	},
 	Surveys: {
 		list: (params?: { route_id?: number; status?: string; latest_only?: boolean }) => {

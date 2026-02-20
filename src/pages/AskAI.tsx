@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,6 +17,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { VisualizationBlock } from "@/components/VisualizationBlock";
 import { MapBlock } from "@/components/MapBlock";
+import { ChatHistorySidebar, type ChatItem } from "@/components/ChatHistorySidebar";
 
 interface Message {
   role: "user" | "assistant";
@@ -58,6 +59,11 @@ async function sendMessageToBackend(
   console.log(response);
   return response.assistant_message?.content || response.content || "(No response)";
 }
+
+const WELCOME_MESSAGE: Message = {
+  role: "assistant",
+  content: "Hello! I'm RoadSight AI Assistant. Select a route above to start analyzing. I can answer questions about survey history, asset totals, and conditions across the route.",
+};
 
 const markdownComponents = {
   table({ children }: any) {
@@ -109,12 +115,7 @@ const markdownComponents = {
 };
 
 export default function AskAI() {
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      role: "assistant",
-      content: "Hello! I'm RoadSight AI Assistant. Select a route above to start analyzing. I can answer questions about survey history, asset totals, and conditions across the route.",
-    },
-  ]);
+  const [messages, setMessages] = useState<Message[]>([WELCOME_MESSAGE]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [chatId, setChatId] = useState<string | null>(null);
@@ -123,6 +124,12 @@ export default function AskAI() {
   const [routes, setRoutes] = useState<RouteInfo[]>([]);
   const [selectedRouteId, setSelectedRouteId] = useState<string>(""); // Stored as string for Select component
   const [selectedRoute, setSelectedRoute] = useState<RouteInfo | null>(null);
+
+  // Chat history sidebar
+  const [chats, setChats] = useState<ChatItem[]>([]);
+  const [chatsLoading, setChatsLoading] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [isFirstMessage, setIsFirstMessage] = useState(true);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -162,6 +169,22 @@ export default function AskAI() {
     })();
   }, []);
 
+  // Load chat history on mount
+  const loadChats = useCallback(async () => {
+    setChatsLoading(true);
+    try {
+      const resp = await api.ai.listChats();
+      setChats(resp?.items || []);
+    } catch (err) {
+      console.error("Failed to load chats:", err);
+    } finally {
+      setChatsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadChats();
+  }, [loadChats]);
 
   // Auto-scroll to bottom
   useEffect(() => {
@@ -175,8 +198,12 @@ export default function AskAI() {
       // Pass route_id if selected
       const routeId = selectedRouteId ? parseInt(selectedRouteId) : undefined;
       const resp = await api.ai.createChat(title, undefined, routeId);
-      setChatId(resp.chat._id);
-      return resp.chat._id as string;
+      const newChatId = resp.chat._id as string;
+      setChatId(newChatId);
+      setIsFirstMessage(true);
+      // Add to local chat list immediately
+      setChats(prev => [resp.chat, ...prev]);
+      return newChatId;
     } catch {
       return null;
     }
@@ -186,6 +213,7 @@ export default function AskAI() {
     if (!input.trim() || busy) return;
 
     const userMessage: Message = { role: "user", content: input };
+    const userInput = input;
     setMessages(prev => [...prev, userMessage]);
     setInput("");
     setBusy(true);
@@ -195,7 +223,7 @@ export default function AskAI() {
     try {
       // Send message to backend
       const routeId = selectedRouteId ? parseInt(selectedRouteId) : undefined;
-      const reply = await sendMessageToBackend(cid, input, routeId);
+      const reply = await sendMessageToBackend(cid!, userInput, routeId);
 
       const aiMessage: Message = {
         role: "assistant",
@@ -203,6 +231,23 @@ export default function AskAI() {
       };
 
       setMessages(prev => [...prev, aiMessage]);
+
+      // Auto-rename chat to first user message
+      if (isFirstMessage && cid) {
+        const autoTitle = userInput.trim().slice(0, 60);
+        try {
+          await api.ai.renameChat(cid, autoTitle);
+          setChats(prev =>
+            prev.map(c => c._id === cid ? { ...c, title: autoTitle, last_message_preview: userInput.slice(0, 200) } : c)
+          );
+        } catch { /* ignore rename errors */ }
+        setIsFirstMessage(false);
+      } else if (cid) {
+        // Update last_message_preview in local state
+        setChats(prev =>
+          prev.map(c => c._id === cid ? { ...c, last_message_preview: userInput.slice(0, 200), updated_at: new Date().toISOString() } : c)
+        );
+      }
     } catch (e: any) {
       const aiMessage: Message = {
         role: "assistant",
@@ -213,6 +258,47 @@ export default function AskAI() {
       setBusy(false);
     }
   };
+
+  // Switch to an existing chat
+  const handleSelectChat = async (selectedChatId: string) => {
+    if (selectedChatId === chatId) return;
+    
+    setChatId(selectedChatId);
+    setIsFirstMessage(false);
+    setBusy(true);
+
+    try {
+      const resp = await api.ai.listMessages(selectedChatId);
+      const msgs: Message[] = (resp?.items || []).map((m: any) => ({
+        role: m.role as "user" | "assistant",
+        content: m.content,
+        timestamp: m.created_at,
+      }));
+      setMessages(msgs.length > 0 ? msgs : [WELCOME_MESSAGE]);
+    } catch (err) {
+      console.error("Failed to load messages:", err);
+      setMessages([WELCOME_MESSAGE]);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Start a new chat
+  const handleNewChat = () => {
+    setChatId(null);
+    setIsFirstMessage(true);
+    setMessages([WELCOME_MESSAGE]);
+  };
+
+  // Remove deleted chat from local list
+  const handleDeleteChat = (deletedChatId: string) => {
+    setChats(prev => prev.filter(c => c._id !== deletedChatId));
+    // If we deleted the active chat, reset to new chat
+    if (deletedChatId === chatId) {
+      handleNewChat();
+    }
+  };
+
   console.log(selectedRouteId);
   const samplePrompts = selectedRouteId ? [
     "What is the condition of assets on this route?",
@@ -239,6 +325,16 @@ export default function AskAI() {
               <h1 className="text-2xl font-bold">Ask AI</h1>
               <p className="text-sm text-muted-foreground">Query road network data with natural language</p>
             </div>
+            <ChatHistorySidebar
+              chats={chats}
+              activeChatId={chatId}
+              loading={chatsLoading}
+              onSelectChat={handleSelectChat}
+              onNewChat={handleNewChat}
+              onDeleteChat={handleDeleteChat}
+              open={sidebarOpen}
+              onOpenChange={setSidebarOpen}
+            />
           </div>
 
           {/* Route Selector */}
@@ -361,4 +457,3 @@ export default function AskAI() {
     </div>
   );
 }
-
