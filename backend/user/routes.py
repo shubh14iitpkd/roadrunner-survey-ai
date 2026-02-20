@@ -1,7 +1,6 @@
 from db import get_db
 from flask import Blueprint, jsonify, request
 from bson import ObjectId
-from ai.lang_chatbot.tools import clear_resolved_map_cache
 
 user_bp = Blueprint("user", __name__)
 
@@ -54,8 +53,6 @@ def update_category_preferences(user_id: str):
             {"$set": {f"category_overrides.{category_id}.display_name": display_name}},
             upsert=True
         )
-        # Invalidate cache for this user so chatbot uses updated preferences
-        clear_resolved_map_cache(user_id)
         return jsonify({"ok": True})
     except Exception as e:
         print(f"[PREFS] {e}")
@@ -110,8 +107,6 @@ def update_label_preferences(user_id: str):
             {"$set": {f"label_overrides.{asset_id}.display_name": display_name}},
             upsert=True
         )
-        # Invalidate cache for this user so chatbot uses updated preferences
-        clear_resolved_map_cache(user_id)
         return jsonify({"ok": True})
     except Exception as e:
         print(f"[PREFS] {e}")
