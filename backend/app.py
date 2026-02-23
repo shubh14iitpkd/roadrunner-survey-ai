@@ -92,7 +92,8 @@ def create_app() -> Flask:
 				'description': 'JWT Authorization header using the Bearer scheme. Example: "Authorization: Bearer {token}"'
         	}
     	},
-		'specs_route': '/api/docs/main-docs'
+		'specs_route': '/api/docs/main-docs',
+		"persistAuthorization": True,
 	}
 
 	# 1. Blueprint for the Main API

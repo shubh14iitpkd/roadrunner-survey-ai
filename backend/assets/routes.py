@@ -21,6 +21,8 @@ def list_assets_paginated():
 	---
 	tags:
 	  - Assets
+	security:
+	  - Bearer: []
 	parameters:
 	  - name: survey_id
 	    in: query
@@ -251,6 +253,8 @@ def get_master_assets():
 	---
 	tags:
 	  - Assets
+	security:
+	  - Bearer: []
 	parameters:
 	  - name: survey_id
 	    in: query
@@ -286,7 +290,7 @@ def get_master_assets():
 	          type: array
 	          items:
 	            type: object
-	        count:
+	        asset_count:
 	          type: integer
 	"""
 	db=get_db()

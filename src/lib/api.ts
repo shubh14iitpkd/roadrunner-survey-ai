@@ -160,14 +160,40 @@ export const api = {
 		},
 	},
 	assets: {
-		list: (params?: { survey_id?: string; route_id?: number; category?: string; condition?: string }) => {
+		list: (params?: { survey_id?: string; route_id?: number; category?: string; condition?: string; zone?: string; side?: string }) => {
 			const qs = new URLSearchParams();
 			if (params?.survey_id) qs.set("survey_id", params.survey_id);
 			if (params?.route_id != null) qs.set("route_id", String(params.route_id));
 			if (params?.category) qs.set("category", params.category);
 			if (params?.condition) qs.set("condition", params.condition);
+			if (params?.zone) qs.set("zone", params.zone);
+			if (params?.side) qs.set("side", params.side);
 			const q = qs.toString();
 			return apiFetch(`/api/assets/all${q ? `?${q}` : ""}`);
+		},
+		listPaginated: (params?: { survey_id?: string; route_id?: number; category?: string; condition?: string; zone?: string; side?: string; page?: number; limit?: number }) => {
+			const qs = new URLSearchParams();
+			if (params?.survey_id) qs.set("survey_id", params.survey_id);
+			if (params?.route_id != null) qs.set("route_id", String(params.route_id));
+			if (params?.category) qs.set("category", params.category);
+			if (params?.condition) qs.set("condition", params.condition);
+			if (params?.zone) qs.set("zone", params.zone);
+			if (params?.side) qs.set("side", params.side);
+			if (params?.page != null) qs.set("page", String(params.page));
+			if (params?.limit != null) qs.set("limit", String(params.limit));
+			const q = qs.toString();
+			return apiFetch(`/api/assets/${q ? `?${q}` : ""}`);
+		},
+		getMaster: (params?: { survey_id?: string; route_id?: number; category?: string; condition?: string; zone?: string; side?: string }) => {
+			const qs = new URLSearchParams();
+			if (params?.survey_id) qs.set("survey_id", params.survey_id);
+			if (params?.route_id != null) qs.set("route_id", String(params.route_id));
+			if (params?.category) qs.set("category", params.category);
+			if (params?.condition) qs.set("condition", params.condition);
+			if (params?.zone) qs.set("zone", params.zone);
+			if (params?.side) qs.set("side", params.side);
+			const q = qs.toString();
+			return apiFetch(`/api/assets/master${q ? `?${q}` : ""}`, { method: "POST" });
 		},
 		get: (asset_id: string) => apiFetch(`/api/assets/${asset_id}`),
 		bulkInsert: (assets: any[]) => apiFetch("/api/assets/bulk", { method: "POST", body: JSON.stringify({ assets }) }),
