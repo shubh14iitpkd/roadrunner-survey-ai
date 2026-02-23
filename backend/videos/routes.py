@@ -1635,6 +1635,16 @@ def upload_library_video():
         "updated_at": get_now_iso(),
     }
 
+    key = os.path.splitext(os.path.basename(storage_url))[0]
+    sid = None
+    if isinstance(survey_id, dict):
+        sid =  survey_id["$oid"]
+    else:
+        sid = survey_id
+    
+    # link the survey id with demo assets
+    db.assets.update_many({ "video_key": key}, {"$set": { "survey_id": ObjectId(sid) }})
+    
     if video_id:
         res = db.videos.find_one_and_update(
             {"_id": ObjectId(video_id)}, {"$set": update_doc}

@@ -1,4 +1,5 @@
 import os
+import math
 
 from flask import Blueprint, jsonify, request
 from bson import ObjectId
@@ -12,12 +13,117 @@ from utils.response import mongo_response
 
 assets_bp = Blueprint("assets", __name__)
 
+@assets_bp.get("/", endpoint="assets_list_paginated")
+@role_required(["admin", "surveyor", "viewer"])
+def list_assets_paginated():
+	"""
+	List assets with filters and pagination
+	---
+	tags:
+	  - Assets
+	parameters:
+	  - name: survey_id
+	    in: query
+	    type: string
+	    description: Filter by survey ID
+	  - name: route_id
+	    in: query
+	    type: integer
+	    description: Filter by route ID
+	  - name: category
+	    in: query
+	    type: string
+	    description: Filter by category
+	  - name: condition
+	    in: query
+	    type: string
+	    description: Filter by condition
+	  - name: side
+	    in: query
+	    type: string
+	    description: Filter by road side
+	  - name: zone
+	    in: query
+	    type: string
+	    description: Filter by zone
+	responses:
+	  200:
+	    description: Assets retrieved successfully
+	    schema:
+	      type: object
+	      properties:
+	        items:
+	          type: array
+	          items:
+	            type: object
+	        count:
+	          type: integer
+	"""
+	query = {}
+	survey_id = request.args.get("survey_id")
+	route_id = request.args.get("route_id", type=int)
+	category = request.args.get("category")
+	condition = request.args.get("condition")
+	zone = request.args.get("zone")
+	road_side = request.args.get("side")
+	page =  int(request.args.get("page", "1"))
+	limit = int(request.args.get("limit", "10"))
+	skip = limit*(page-1)
+	
+	db = get_db()
 
-@assets_bp.get("/", endpoint="assets_list")
+	if survey_id:
+		# Find all videos belonging to this survey
+		survey_videos = list(db.videos.find(
+			{"survey_id": ObjectId(survey_id)},
+			{"storage_url": 1}
+		))
+
+		# Collect video_keys (basenames) for any demo videos
+		demo_video_keys = []
+		has_real_videos = False
+		for v in survey_videos:
+			if is_demo(video_file=v):
+				url = v.get("storage_url", "")
+				basename = os.path.splitext(os.path.basename(url))[0]
+				if basename:
+					demo_video_keys.append(basename)
+			else:
+				has_real_videos = True
+
+		# Build the survey/video_key filter using $or
+		or_conditions = []
+		if has_real_videos:
+			or_conditions.append({"survey_id": ObjectId(survey_id)})
+		if demo_video_keys:
+			or_conditions.append({"video_key": {"$in": demo_video_keys}})
+
+		if or_conditions:
+			query["$or"] = or_conditions
+		else:
+			query["survey_id"] = ObjectId(survey_id)
+
+	if route_id is not None:
+		query["route_id"] = route_id
+	if category:
+		query["category"] = category
+	if condition:
+		query["condition"] = condition
+	if zone:
+		query["zone"] = zone
+	if road_side:
+		query["side"] = road_side
+
+	items = list(db.assets.find(query).skip(skip).limit(limit).sort("created_at", DESCENDING))
+	total_asstes = db.assets.count_documents(query)
+	total_pages = math.ceil(total_asstes/limit)
+	return mongo_response({"items": items, "total_count": total_asstes, "total_pages": total_pages, "page": page, "limit": limit})
+
+@assets_bp.get("/all", endpoint="assets_list")
 @role_required(["admin", "surveyor", "viewer"])
 def list_assets():
 	"""
-	List assets with filters
+	List all assets with filters
 	---
 	tags:
 	  - Assets
@@ -58,6 +164,8 @@ def list_assets():
 	route_id = request.args.get("route_id", type=int)
 	category = request.args.get("category")
 	condition = request.args.get("condition")
+	zone = request.args.get("zone")
+	road_side = request.args.get("side")
 
 	db = get_db()
 
@@ -98,6 +206,10 @@ def list_assets():
 		query["category"] = category
 	if condition:
 		query["condition"] = condition
+	if zone:
+		query["zone"] = zone
+	if road_side:
+		query["side"] = road_side
 
 	items = list(db.assets.find(query).sort("detected_at", DESCENDING))
 	return mongo_response({"items": items, "count": len(items)})
@@ -131,6 +243,90 @@ def get_asset(asset_id: str):
 		return mongo_response({"error": "not found"}, 404)
 	return mongo_response({"item": it})
 
+@assets_bp.post("/master", endpoint="assets_master_lib")
+@role_required(["admin", "surveyor"])
+def get_master_assets():
+	"""
+	List assets with filters for master library
+	---
+	tags:
+	  - Assets
+	parameters:
+	  - name: survey_id
+	    in: query
+	    type: string
+	    description: Filter by survey ID
+	  - name: route_id
+	    in: query
+	    type: integer
+	    description: Filter by route ID
+	  - name: category
+	    in: query
+	    type: string
+	    description: Filter by category
+	  - name: condition
+	    in: query
+	    type: string
+	    description: Filter by condition
+	  - name: side
+	    in: query
+	    type: string
+	    description: Filter by road side
+	  - name: zone
+	    in: query
+	    type: string
+	    description: Filter by zone
+	responses:
+	  200:
+	    description: Assets retrieved successfully
+	    schema:
+	      type: object
+	      properties:
+	        items:
+	          type: array
+	          items:
+	            type: object
+	        count:
+	          type: integer
+	"""
+	db=get_db()
+	# since we need to display all points on map we won't use pagination
+	survey_id = request.args.get("survey_id")
+	route_id = request.args.get("route_id", type=int)
+	category = request.args.get("category")
+	condition = request.args.get("condition")
+	zone = request.args.get("zone")
+	road_side = request.args.get("side")
+
+	all_roads =  list(db.roads.find({}))
+	route_ids = [r.get("route_id") for r in all_roads]
+	all_surveys = list(db.surveys.find({ "route_id": {"$in": route_ids}, "is_latest": True }))
+	survey_ids = [s.get("_id") for s in all_surveys]
+
+	query = {"survey_id": {"$in": survey_ids}}
+	if zone:
+		query["zone"] = zone
+	if category:
+		query["category"] = category
+	if condition:
+		query["condition"] = condition
+	if road_side:
+		query["side"] = road_side
+
+	all_assets = list(db.assets.find(query))
+	
+	return mongo_response({
+		"items": all_assets, 
+		"asset_count": len(all_assets), 
+		"routes": all_roads, 
+		"route_count": len(all_roads), 
+		"surveys": all_surveys, 
+		"survey_count": len(all_surveys)
+	})
+		
+
+		
+	
 
 @assets_bp.post("/bulk", endpoint="assets_bulk")
 @role_required(["admin", "surveyor"])

@@ -167,7 +167,7 @@ export const api = {
 			if (params?.category) qs.set("category", params.category);
 			if (params?.condition) qs.set("condition", params.condition);
 			const q = qs.toString();
-			return apiFetch(`/api/assets/${q ? `?${q}` : ""}`);
+			return apiFetch(`/api/assets/all${q ? `?${q}` : ""}`);
 		},
 		get: (asset_id: string) => apiFetch(`/api/assets/${asset_id}`),
 		bulkInsert: (assets: any[]) => apiFetch("/api/assets/bulk", { method: "POST", body: JSON.stringify({ assets }) }),
