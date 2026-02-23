@@ -16,6 +16,8 @@ import { useToast } from "@/hooks/use-toast";
 interface Detection {
   class_name: string;
   asset_id: string;
+  zone: string | undefined;
+  side: string | undefined;
   confidence: number;
   // Box can be array format: [x1, y1, x2, y2]
   box?: number[];
@@ -341,6 +343,11 @@ export default function FramePopupContent({
         </div>
         <div className="text-[11px] text-muted-foreground">
           Click on an image to download.
+          {frameData.detections.map((d) => (
+            <div key={d.asset_id}>
+              {d.side} - {d.zone}
+            </div>
+          ))}
         </div>
         {/* GPX Location Info */}
       </div>
@@ -460,7 +467,6 @@ export default function FramePopupContent({
               const hasLocation = d.location?.coordinates &&
                 Array.isArray(d.location.coordinates) &&
                 d.location.coordinates.length === 2;
-
               return (
                 <div
                   key={`${d.asset_id}-${i}`}

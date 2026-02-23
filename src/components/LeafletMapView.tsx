@@ -32,6 +32,8 @@ interface MapAsset {
   confidence?: number;
   route_id?: number;
   survey_id?: string;
+  zone?: string;
+  side?: string;
   video_id?: string;
   video_key?: string;
   frame_number?: number;
@@ -332,6 +334,8 @@ export default function LeafletMapView({ selectedRoadNames = [], roads = [], sel
                   confidence: asset.confidence ?? 0,
                   box: [x1, y1, x2, y2],
                   location: asset.location,
+                  zone: asset.zone,
+                  side: asset.side
                 });
               }
 

@@ -11,6 +11,7 @@ from bson import ObjectId
 import subprocess
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from services.LatLongEstimator import LatLongEstimator
+from services.ZoneMapper import ZoneMapper
 
 from deep_sort_realtime.deepsort_tracker import DeepSort
 from ultralytics import YOLO
@@ -67,6 +68,7 @@ class LocalVideoProcessor:
         # Label map for resolving class_name to asset_id and category_id
         # Will be loaded from MongoDB when db is provided to process_video
         self.label_map = {}
+        self.zone_mapper = ZoneMapper()
 
         print(f"[LOCAL] Initialized with model: {self.model_path}")
         print(f"[LOCAL] Frame interval: {self.frame_interval}")
@@ -467,6 +469,9 @@ class LocalVideoProcessor:
                                     
                                     summary[condition] += 1
                                     summary["total_assets"] += 1
+                                    
+                                    zone = self.zone_mapper.resolve_zone(class_name, t_box, width, height)
+                                    side = self.zone_mapper.get_road_side(t_box, width)
 
                                     assets_detected.append(
                                         {
@@ -480,6 +485,8 @@ class LocalVideoProcessor:
                                             "frame_number": frame_num,
                                             "timestamp": timestamp,
                                             "video_id": video_id,
+                                            "road_side": side,
+                                            "zone": zone,
                                             "box": {
                                                 "x": float(ltwh_box[0]),
                                                 "y": float(ltwh_box[1]),
