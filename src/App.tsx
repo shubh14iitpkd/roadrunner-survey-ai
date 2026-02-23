@@ -24,6 +24,7 @@ const Settings = lazy(() => import("./pages/Settings"));
 const Login = lazy(() => import("./pages/Login"));
 const SignUp = lazy(() => import("./pages/SignUp"));
 const NotFound = lazy(() => import("./pages/NotFound"));
+const ModelTest = lazy(() => import("./pages/ModelTest"));
 
 const queryClient = new QueryClient();
 
@@ -46,6 +47,7 @@ const App = () => (
                 {/* Public routes */}
                 <Route path="/login" element={<Login />} />
                 <Route path="/signup" element={<SignUp />} />
+                <Route path="/model-testing" element={<ModelTest />} />
                 {/* Protected routes */}
                 <Route
                   path="/*"
