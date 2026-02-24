@@ -1,100 +1,158 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { BarChart as BarChartIcon, LineChart as LineChartIcon, MapIcon, TrendingUp, MapPin, AlertTriangle, CheckCircle, Activity, Package, Calendar, TrendingDown, Maximize2, ChevronLeft, ChevronRight, Hash } from "lucide-react";
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from "recharts";
+import { cn } from "@/lib/utils";
+import {
+  TrendingUp, AlertTriangle, Package, Calendar,
+  MapPin, Eye, ChevronLeft, ChevronRight, Map, ArrowUpRight, Activity, X, Download
+} from "lucide-react";
+import {
+  PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Sector,
+} from "recharts";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useNavigate } from "react-router-dom";
-import LeafletMapView from "@/components/LeafletMapView";
 import { api } from "@/lib/api";
-import { Skeleton } from "@/components/ui/skeleton";
+import { CategoryBadge } from "@/components/CategoryBadge";
 import { useLabelMap } from "@/contexts/LabelMapContext";
+import {
+  exportAnomalyByAssetTypeReport,
+  exportAnomalyByRoadReport,
+  exportRoadWiseAssetTypeReport,
+} from "@/lib/reportGenerator";
 
-// Custom tooltip component for charts that adapts to dark mode
-const CustomTooltip = ({ active, payload, label }: any) => {
-  if (active && payload && payload.length) {
-    const data = payload[0];
-    console.log(active, payload, label)
-    return (
-      <div className="bg-popover/80 backdrop-blur-sm border border-border/80 rounded-lg shadow-lg p-3 min-w-32">
-        <div className="flex items-center justify-between pb-2">
-          <span className="text-popover-foreground font-medium text-sm">{data.name || label}</span>
-        </div>
-        <div className="flex items-center justify-between">
-          <span className="text-muted-foreground text-xs capitalize mr-2">{data.dataKey}: </span>
-          <span className="text-primary dark:text-foreground font-bold text-sm">{data.value}</span>
-        </div>
-      </div>
-    );
-  }
-  return null;
+const CATEGORY_COLORS = [
+  "hsl(217, 91%, 60%)",   // DIRECTIONAL SIGNAGE - blue
+  "hsl(187, 85%, 43%)",   // ITS - cyan
+  "hsl(152, 69%, 40%)",   // OTHER INFRASTRUCTURE ASSETS - emerald
+  "hsl(38, 92%, 50%)",    // ROADWAY LIGHTING - amber
+  "hsl(271, 81%, 56%)",   // STRUCTURES - purple
+  "hsl(330, 70%, 55%)",   // BEAUTIFICATION - pink
+];
+
+// Active shape renderer for interactive donut
+const renderActiveShape = (props: any) => {
+  const { cx, cy, innerRadius, outerRadius, startAngle, endAngle, fill, payload, value, percent } = props;
+  return (
+    <g>
+      <Sector cx={cx} cy={cy} innerRadius={innerRadius - 3} outerRadius={outerRadius + 4} startAngle={startAngle} endAngle={endAngle} fill={fill} opacity={0.9} />
+      <Sector cx={cx} cy={cy} innerRadius={outerRadius + 6} outerRadius={outerRadius + 9} startAngle={startAngle} endAngle={endAngle} fill={fill} opacity={0.4} />
+      <text x={cx} y={cy - 10} textAnchor="middle" fill="currentColor" className="text-foreground" fontSize={22} fontWeight={700}>
+        {value}
+      </text>
+      <text x={cx} y={cy + 8} textAnchor="middle" fill="currentColor" className="text-muted-foreground" fontSize={10}>
+        {payload.category}
+      </text>
+      <text x={cx} y={cy + 22} textAnchor="middle" fill="currentColor" className="text-muted-foreground" fontSize={10}>
+        {(percent * 100).toFixed(0)}%
+      </text>
+    </g>
+  );
 };
+
+// Center text when no slice is active
+const renderCenterText = (cx: number, cy: number, total: number) => (
+  <g>
+    <text x={cx} y={cy - 10} textAnchor="middle" fill="currentColor" className="text-foreground" fontSize={22} fontWeight={700}>
+      {total}
+    </text>
+    <text x={cx} y={cy + 10} textAnchor="middle" fill="currentColor" className="text-muted-foreground" fontSize={10}>
+      Total Assets
+    </text>
+  </g>
+);
 
 export default function Dashboard() {
   const [timePeriod, setTimePeriod] = useState<"week" | "month">("week");
-  const [roads, setRoads] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
   const { data: labelMapData } = useLabelMap();
+  const [activeDonutIndex, setActiveDonutIndex] = useState<number | undefined>(undefined);
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
+  const onDonutEnter = useCallback((_: any, index: number) => setActiveDonutIndex(index), []);
 
-  // Dashboard data state
   const [kpis, setKpis] = useState<any>({
-    totalAssets: 0,
-    totalAnomalies: 0,
-    good: 0,
-    damaged: 0,
-    kmSurveyed: 0,
+    totalAssets: 0, totalAnomalies: 0, kmSurveyed: 0,
   });
   const [categoryChartData, setCategoryChartData] = useState<any[]>([]);
-  const [topAnomalyCategories, setTopAnomalyCategories] = useState<any[]>([]);
   const [topAnomalyRoads, setTopAnomalyRoads] = useState<any[]>([]);
-  const [recentSurveys, setRecentSurveys] = useState<any[]>([]);
-  
-  // Asset Types Table State
-  const [assetTypeTableData, setAssetTypeTableData] = useState<any>({ items: [], total: 0, page: 1, pages: 0 });
+
+  // Compute the selected category's donut index
+  const selectedDonutIndex = useMemo(() => {
+    if (!selectedCategory) return undefined;
+    const idx = categoryChartData.findIndex(d => d.category === selectedCategory);
+    return idx >= 0 ? idx : undefined;
+  }, [selectedCategory, categoryChartData]);
+
+  // Show selected slice when not hovering
+  const effectiveDonutIndex = activeDonutIndex !== undefined ? activeDonutIndex : selectedDonutIndex;
+
   const [assetTypePage, setAssetTypePage] = useState(1);
+  const [assetTypePageSize] = useState(10);
+
+  // Asset type table data from API
+  const [assetTypeTableData, setAssetTypeTableData] = useState<any>({ items: [], total: 0, page: 1, pages: 0 });
   const [tableLoading, setTableLoading] = useState(false);
 
-  const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8', '#82ca9d'];
+  // Anomaly data from API
+  const [anomalyByAsset, setAnomalyByAsset] = useState<any[]>([]);
 
-  // Load all dashboard data from backend
+  // Helper to get category display name from labelMap
+  const getCategoryDisplayName = useCallback((item) => {
+    const fromMap = labelMapData?.categories?.[item.category_id]?.display_name;
+    if (fromMap) return fromMap;
+    const defaultName = labelMapData?.categories?.[item.category_id]?.default_name;
+    if (defaultName) return defaultName;
+    return "unknown";
+  }, [labelMapData]);
+
+  // Helper to get asset display name from labelMap
+  const getAssetDisplayName = useCallback((item: any) => {
+    const fromMap = labelMapData?.labels?.[item.asset_id]?.display_name;
+    if (fromMap) return fromMap;
+    return item.display_name || item.type;
+  }, [labelMapData]);
+
+  // Resolved asset type rows from API data
+  const assetTypeRows = useMemo(() => {
+    return assetTypeTableData.items.map((item: any) => ({
+      asset_id: item.asset_id,
+      type: getAssetDisplayName(item),
+      category: getCategoryDisplayName(item),
+      count: item.count,
+    }));
+  }, [assetTypeTableData, getAssetDisplayName, getCategoryDisplayName]);
+
+  const assetTypeTotalPages = assetTypeTableData.pages || 1;
+  const pagedAssetTypes = assetTypeRows;
+
+  // Reset page when category changes
+  useEffect(() => { setAssetTypePage(1); }, [selectedCategoryId]);
+
+  // Load main dashboard data
   useEffect(() => {
     (async () => {
       try {
         setLoading(true);
-
-        const [roadsResp, kpisResp, categoryResp, recentSurveysResp] = await Promise.all([
-          api.roads.list(),
+        const [kpisResp, assetsByCategoryResp, topRoadsResp] = await Promise.all([
           api.dashboard.kpis(timePeriod),
           api.dashboard.assetsByCategory(),
-          api.dashboard.recentSurveys(),
+          api.dashboard.topAnomalyRoads(),
         ]);
-
-        if (roadsResp?.items) setRoads(roadsResp.items);
-
-        // KPIs directly from backend
-        if (kpisResp) {
-          setKpis(kpisResp);
+        if (kpisResp) setKpis(kpisResp);
+        if (assetsByCategoryResp?.items && assetsByCategoryResp.items.length > 0) {
+          // Resolve category_id to display names using labelMap
+          setCategoryChartData(
+            assetsByCategoryResp.items.map((item: any) => ({
+              ...item,
+              category: getCategoryDisplayName(item),
+            }))
+          );
         }
 
-        // Category chart data — resolve category_id to display names
-        const rawCategoryData = categoryResp?.items || [];
-        const resolvedChartData = rawCategoryData.map((item: any) => {
-          const categoryId = item.category;
-          const displayName = labelMapData?.categories?.[categoryId]?.display_name
-            || labelMapData?.categories?.[categoryId]?.default_name
-            || categoryId || 'Unknown';
-          return { category: displayName, count: item.count };
-        });
-        setCategoryChartData(resolvedChartData.length > 0 ? resolvedChartData : [{ category: "No Data", count: 0 }]);
-
-        // Recent surveys from API
-        if (recentSurveysResp?.items && recentSurveysResp.items.length > 0) {
-          setRecentSurveys(recentSurveysResp.items);
-        } else {
-          setRecentSurveys([]);
+        if (topRoadsResp?.items && topRoadsResp.items.length > 0) {
+          setTopAnomalyRoads(topRoadsResp.items);
         }
       } catch (err) {
         console.error("Failed to load dashboard data:", err);
@@ -102,293 +160,500 @@ export default function Dashboard() {
         setLoading(false);
       }
     })();
-  }, [timePeriod, labelMapData]);
+  }, [timePeriod, labelMapData, getCategoryDisplayName]);
 
-  // Load Asset Types Table Data
+  // Load Asset Types Table Data (paginated from API, filtered by category)
   useEffect(() => {
     (async () => {
       try {
         setTableLoading(true);
-        const resp = await api.dashboard.topAssetTypes(assetTypePage, 4);
-        if (resp) {
-            setAssetTypeTableData(resp);
-        }
+        const resp = await api.dashboard.topAssetTypes(assetTypePage, assetTypePageSize, selectedCategoryId || undefined);
+        if (resp) setAssetTypeTableData(resp);
       } catch (err) {
         console.error("Failed to load asset types table:", err);
       } finally {
         setTableLoading(false);
       }
     })();
-  }, [assetTypePage]);
+  }, [assetTypePage, assetTypePageSize, selectedCategoryId]);
 
-  // Helper to get asset display name safely
-  const getAssetDisplayName = (item: any) => {
-      const fromMap = labelMapData?.labels?.[item.asset_id]?.display_name;
-      if (fromMap) return fromMap;
-      return item.display_name || item.type;
-  };
-
+  // Load Anomaly by Asset Type data (top damaged asset types)
+  useEffect(() => {
+    (async () => {
+      try {
+        const resp = await api.dashboard.topAssetTypes(1, 10, selectedCategoryId || undefined, "damaged");
+        if (resp?.items) {
+          setAnomalyByAsset(
+            resp.items.map((item: any) => ({
+              asset_id: item.asset_id,
+              type: getAssetDisplayName(item),
+              category: getCategoryDisplayName(item),
+              anomalies: item.count,
+            }))
+          );
+        }
+      } catch (err) {
+        console.error("Failed to load anomaly data:", err);
+      }
+    })();
+  }, [labelMapData, selectedCategoryId, getCategoryDisplayName, getAssetDisplayName]);
   return (
-    <div className="space-y-6 mb-6">
-      {/* Hero Header */}
-      <div className="relative overflow-hidden bg-primary p-8 shadow-elevated">
-        {/* <div className="absolute bg-primary inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGRlZnM+PHBhdHRlcm4gaWQ9ImdyaWQiIHdpZHRoPSI2MCIgaGVpZ2h0PSI2MCIgcGF0dGVyblVuaXRzPSJ1c2VyU3BhY2VPblVzZSI+PHBhdGggZD0iTSAxMCAwIEwgMCAwIDAgMTAiIGZpbGw9Im5vbmUiIHN0cm9rZT0id2hpdGUiIHN0cm9rZS1vcGFjaXR5PSIwLjEiIHN0cm9rZS13aWR0aD0iMSIvPjwvcGF0dGVybj48L2RlZnM+PHJlY3Qgd2lkdGg9IjEwMCUiIGhlaWdodD0iMTAwJSIgZmlsbD0idXJsKCNncmlkKSIvPjwvc3ZnPg==')] opacity-30"></div> */}
-        <div className="absolute page-header dark:bg-primary inset-0"></div>
-        <div className="relative flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+    <div className="min-h-screen bg-gradient-to-br from-background via-accent/10 to-background">
+      {/* Header */}
+      <div className="border-b border-border bg-header-strip">
+        <div className="px-6 py-2 flex items-end justify-between">
           <div>
-            <h1 className="text-4xl font-bold mb-2 text-white drop-shadow-lg">Dashboard</h1>
-            <p className="text-white/90 text-lg">
-              Overview of road asset inventory and condition monitoring
-            </p>
+            <p className="text-[9px] font-semibold text-muted-foreground uppercase tracking-[0.15em] mb-0.5">Overview</p>
+            <h1 className="text-sm font-bold text-foreground tracking-tight">Network Dashboard</h1>
           </div>
-          <div className="flex items-center gap-2">
-            <Calendar className="h-5 w-5 text-white/80" />
+          {/* <div className="flex items-center gap-2">
+            <Calendar className="h-3 w-3 text-muted-foreground" />
             <Select value={timePeriod} onValueChange={(v) => setTimePeriod(v as "week" | "month")}>
-              <SelectTrigger className="w-32 bg-white/20 border-white/30 text-white backdrop-blur-sm">
+              <SelectTrigger className="w-24 h-6 text-[10px] border-border bg-card/80 backdrop-blur-sm">
                 <SelectValue />
               </SelectTrigger>
-              <SelectContent className="bg-background z-50">
-                <SelectItem value="week">Last Week</SelectItem>
-                <SelectItem value="month">Last Month</SelectItem>
+              <SelectContent className="bg-card z-50">
+                <SelectItem value="week">Last 7 days</SelectItem>
+                <SelectItem value="month">Last 30 days</SelectItem>
               </SelectContent>
             </Select>
-          </div>
+          </div> */}
         </div>
       </div>
 
-      <div className="px-6 space-y-6">
+      <div className="px-8 py-6 space-y-5 bg-grid-subtle">
+        {/* KPI Strip */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <KPICard
+            label="Road Network"
+            value={loading ? "..." : Number(kpis.kmSurveyed).toLocaleString("en-US", { maximumFractionDigits: 1 })}
+            unit="km"
+            icon={<Activity className="h-4 w-4" />}
+            accent="primary"
+            trend={{ value: 12, direction: "up" }}
+            lastSurvey="12 Feb 2025"
+          />
+          <KPICard
+            label="Total Assets"
+            value={loading ? "..." : kpis.totalAssets.toLocaleString()}
+            icon={<Package className="h-4 w-4" />}
+            accent="secondary"
+            trend={{ value: 5, direction: "up" }}
+            lastSurvey="12 Feb 2025"
+          />
+          <KPICard
+            label="Anomalies"
+            value={loading ? "..." : kpis.totalAnomalies.toLocaleString()}
+            icon={<AlertTriangle className="h-4 w-4" />}
+            accent="destructive"
+            trend={{ value: 8, direction: "down" }}
+            lastSurvey="12 Feb 2025"
+          />
+        </div>
 
-        {/* KPI Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-          <Card className="p-6 shadow-elevated border-0 bg-gradient-to-br from-purple-50 to-white dark:from-purple-950/20 dark:to-card animate-fade-in hover:shadow-glow transition-all duration-300">
-            <div className="flex items-start justify-between">
-              <div className="space-y-2">
-                <p className="text-sm font-semibold text-purple-600 dark:text-purple-400 uppercase tracking-wide">
-                  Total road network
-                </p>
-                <p className="text-5xl font-bold bg-gradient-to-br from-purple-600 to-purple-400 bg-clip-text text-transparent">
-                  {loading ? "..." : Number(kpis.kmSurveyed).toLocaleString("en-US", { maximumFractionDigits: 1 })}
-                </p>
-                <p className="text-xs font-medium text-foreground">
-                  KMs Surveyed
-                </p>
+        {/* Charts Row */}
+        <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
+          {/* Donut */}
+          <Card className="lg:col-span-2 p-0 border border-border bg-card overflow-hidden flex flex-col">
+            <div className="px-5 pt-4 pb-1">
+              <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-[0.15em]">Asset Distribution</p>
+              <p className="text-sm font-semibold text-foreground mt-0.5">By Category</p>
+            </div>
+            <div className="flex items-center justify-center px-5" style={{ height: 300 }}>
+              <div className="relative" style={{ width: 300, height: 300 }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      activeIndex={effectiveDonutIndex !== undefined ? effectiveDonutIndex : undefined}
+                      activeShape={effectiveDonutIndex !== undefined ? renderActiveShape : undefined}
+                      data={categoryChartData}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={65}
+                      outerRadius={95}
+                      dataKey="count"
+                      nameKey="category"
+                      paddingAngle={2}
+                      stroke="hsl(var(--card))"
+                      strokeWidth={2}
+                      onMouseEnter={onDonutEnter}
+                      onMouseLeave={() => setActiveDonutIndex(undefined)}
+                      onClick={(_, index) => {
+                        const item = categoryChartData[index];
+                        const cat = item?.category;
+                        const catId = item?.category_id;
+                        if (selectedCategory === cat) {
+                          setSelectedCategory(null);
+                          setSelectedCategoryId(null);
+                        } else {
+                          setSelectedCategory(cat);
+                          setSelectedCategoryId(catId);
+                        }
+                      }}
+                      style={{ cursor: 'pointer' }}
+                    >
+                      {categoryChartData.map((_, i) => (
+                        <Cell key={i} fill={CATEGORY_COLORS[i % CATEGORY_COLORS.length]} />
+                      ))}
+                    </Pie>
+                    {effectiveDonutIndex === undefined && (
+                      <text x="50%" y="46%" textAnchor="middle" fill="currentColor" className="text-foreground" fontSize={22} fontWeight={700}>
+                        {categoryChartData.reduce((sum, d) => sum + d.count, 0)}
+                      </text>
+                    )}
+                    {effectiveDonutIndex === undefined && (
+                      <text x="50%" y="56%" textAnchor="middle" fill="currentColor" className="text-muted-foreground" fontSize={10}>
+                        Total Assets
+                      </text>
+                    )}
+                  </PieChart>
+                </ResponsiveContainer>
               </div>
-              <div className="p-4 rounded-2xl bg-gradient-to-br from-purple-500 to-purple-600 shadow-lg">
-                <TrendingUp className="h-7 w-7 text-white" />
-              </div>
+            </div>
+            {/* Legend — single column, 6 rows, evenly spaced to fill remaining space */}
+            <div className="px-5 pb-2 flex-1 flex flex-col justify-evenly">
+              {categoryChartData.map((d, i) => (
+                <div
+                  key={d.category}
+                  className={cn(
+                    "flex items-center gap-2 text-xs px-2 py-1.5 rounded-md transition-colors cursor-pointer",
+                    selectedCategory === d.category ? "bg-primary/10 ring-1 ring-primary/30" : activeDonutIndex === i ? "bg-muted/80" : "hover:bg-muted/40"
+                  )}
+                  onMouseEnter={() => setActiveDonutIndex(i)}
+                  onMouseLeave={() => setActiveDonutIndex(undefined)}
+                  onClick={() => {
+                    if (selectedCategory === d.category) {
+                      setSelectedCategory(null);
+                      setSelectedCategoryId(null);
+                    } else {
+                      setSelectedCategory(d.category);
+                      setSelectedCategoryId(d.category_id);
+                    }
+                  }}
+                >
+                  <span
+                    className="w-2.5 h-2.5 rounded-full shrink-0"
+                    style={{ backgroundColor: CATEGORY_COLORS[i % CATEGORY_COLORS.length] }}
+                  />
+                  <span className="text-foreground font-medium text-[11px]">{d.category}</span>
+                  <span className="font-bold text-foreground ml-auto tabular-nums text-[11px]">{d.count}</span>
+                </div>
+              ))}
+            </div>
+            <div className="px-5 pb-3">
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-full h-7 text-[11px] gap-1.5"
+                onClick={() => navigate(selectedCategory ? `/gis?type=${encodeURIComponent(selectedCategory)}` : '/gis')}
+              >
+                <MapPin className="h-3 w-3" />
+                {selectedCategory ? `View ${selectedCategory} on Map` : "View All on Map"}
+                <ArrowUpRight className="h-3 w-3" />
+              </Button>
             </div>
           </Card>
 
-          <Card className="p-6 shadow-elevated border-0 bg-gradient-to-br from-green-50 to-white dark:from-green-950/20 dark:to-card animate-fade-in hover:shadow-glow transition-all duration-300">
-            <div className="flex items-start justify-between">
-              <div className="space-y-2">
-                <p className="text-sm font-semibold text-green-600 dark:text-green-400 uppercase tracking-wide">Total Assets</p>
-                <p className="text-5xl font-bold bg-gradient-to-br from-green-600 to-green-400 bg-clip-text text-transparent">
-                  {loading ? "..." : kpis.totalAssets.toLocaleString()}
-                </p>
-                <p className="text-xs font-medium text-foreground">
-                  Detected across network
-                </p>
+          {/* Top Asset Types — filtered by selected category */}
+          <Card className="lg:col-span-3 p-0 border border-border bg-card overflow-hidden flex flex-col">
+            <div className="px-5 pt-5 pb-3 flex items-center justify-between">
+              <div>
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-widest">Asset Types</p>
+                <div className="flex items-center gap-2 mt-0.5">
+                  <p className="text-sm font-semibold text-foreground">
+                    {selectedCategory ? selectedCategory : "All Categories"}
+                  </p>
+                  {selectedCategory && (
+                    <Button variant="ghost" size="sm" className="h-5 px-1.5 text-[10px] text-muted-foreground" onClick={() => { setSelectedCategory(null); setSelectedCategoryId(null); }}>
+                      <X className="h-3 w-3 mr-0.5" /> Clear
+                    </Button>
+                  )}
+                </div>
               </div>
-              <div className="p-4 rounded-2xl bg-gradient-to-br from-green-500 to-green-600 shadow-lg">
-                <Package className="h-7 w-7 text-white" />
-              </div>
+              <span className="text-xs text-muted-foreground tabular-nums">
+                {assetTypePage}/{assetTypeTotalPages || 1}
+              </span>
             </div>
-          </Card>
-
-          <Card className="p-6 shadow-elevated border-0 bg-gradient-to-br from-red-50 to-white dark:from-red-950/20 dark:to-card animate-fade-in hover:shadow-glow transition-all duration-300">
-            <div className="flex items-start justify-between">
-              <div className="space-y-2">
-                <p className="text-sm font-semibold text-red-600 dark:text-red-400 uppercase tracking-wide">Total Anomalies</p>
-                <p className="text-5xl font-bold bg-gradient-to-br from-red-600 to-red-400 bg-clip-text text-transparent">
-                  {loading ? "..." : kpis.totalAnomalies}
-                </p>
-                <p className="text-xs font-medium text-foreground flex items-center gap-1">
-                  Assets in poor condition
-                </p>
-              </div>
-              <div className="p-4 rounded-2xl bg-gradient-to-br from-red-500 to-red-600 shadow-lg">
-                <AlertTriangle className="h-7 w-7 text-white" />
+            <div className="gradient-table-line" />
+            {/* Fixed height table container */}
+            <div className="flex-1 overflow-auto" style={{ height: assetTypePageSize * 36 + 36 }}>
+              <Table>
+                <TableHeader className="sticky top-0 z-10 bg-card">
+                  <TableRow className="border-b border-border hover:bg-transparent">
+                    <TableHead className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground w-10">#</TableHead>
+                    <TableHead className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Type</TableHead>
+                    <TableHead className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Category</TableHead>
+                    <TableHead className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground text-right">Count</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {pagedAssetTypes.map((row: any, idx: number) => (
+                    <TableRow key={row.asset_id || idx} className="hover:bg-muted/40 border-b border-border/50" style={{ height: 36 }}>
+                      <TableCell className="text-xs text-muted-foreground tabular-nums py-2">
+                        {(assetTypePage - 1) * assetTypePageSize + idx + 1}
+                      </TableCell>
+                      <TableCell className="text-xs font-medium py-2">{row.type}</TableCell>
+                      <TableCell className="py-2">
+                        <CategoryBadge category={row.category} />
+                      </TableCell>
+                      <TableCell className="text-right font-semibold text-xs tabular-nums py-2">{row.count}</TableCell>
+                    </TableRow>
+                  ))}
+                  {/* Fill empty rows to keep consistent height
+                  {pagedAssetTypes.length < assetTypePageSize && Array.from({ length: assetTypePageSize - pagedAssetTypes.length }).map((_, i) => (
+                    <TableRow key={`empty-${i}`} className="border-b border-border/50" style={{ height: 36 }}>
+                      <TableCell colSpan={4}>&nbsp;</TableCell>
+                    </TableRow>
+                  ))} */}
+                </TableBody>
+              </Table>
+            </div>
+            <div className="flex items-center justify-between px-4 py-2 border-t border-border">
+              <span className="text-[10px] text-muted-foreground tabular-nums">
+                {(assetTypePage - 1) * assetTypePageSize + 1}–{Math.min(assetTypePage * assetTypePageSize, assetTypeTableData.total)} of {assetTypeTableData.total}
+              </span>
+              <div className="flex items-center gap-1">
+                <span className="text-[10px] text-muted-foreground tabular-nums mr-1">{assetTypePage}/{assetTypeTotalPages || 1}</span>
+                <Button variant="ghost" size="icon" className="h-7 w-7" disabled={assetTypePage <= 1} onClick={() => setAssetTypePage(p => p - 1)}>
+                  <ChevronLeft className="h-3.5 w-3.5" />
+                </Button>
+                <Button variant="ghost" size="icon" className="h-7 w-7" disabled={assetTypePage >= assetTypeTotalPages} onClick={() => setAssetTypePage(p => p + 1)}>
+                  <ChevronRight className="h-3.5 w-3.5" />
+                </Button>
               </div>
             </div>
           </Card>
         </div>
 
-        {/* GIS Map Overview */}
-        <Card className="p-6 sm:p-8 shadow-elevated border-0 gradient-card">
-          <div className="flex items-center justify-between mb-6">
-            <div className="flex items-center gap-3">
-              <div className="p-3 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-500">
-                <MapPin className="h-6 w-6 text-white" />
-              </div>
-              <h3 className="font-bold text-lg sm:text-xl">Geographic Overview</h3>
+        {/* Anomalies by Asset Type */}
+        <Card className="p-0 border border-border bg-card overflow-hidden">
+          <div className="px-5 pt-5 pb-3 flex items-center gap-3">
+            <div className="p-2 rounded-lg bg-destructive/10">
+              <AlertTriangle className="h-4 w-4 text-destructive" />
+            </div>
+            <div className="flex-1">
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-widest">Anomalies</p>
+              <p className="text-sm font-semibold text-foreground mt-0.5">By Asset Type</p>
             </div>
             <Button
               variant="outline"
               size="sm"
-              onClick={() => navigate('/gis')}
-              className="gap-2"
-            >
-              <MapPin className="h-4 w-4" />
-              <span className="hidden sm:inline">View Full Map</span>
-              <span className="sm:hidden">Full View</span>
+              className="h-7 text-[10px] gap-1.5"
+              onClick={() => exportAnomalyByAssetTypeReport()}
+             >
+              <Download className="h-3 w-3" />
+              Export Report
             </Button>
           </div>
-          <div className="relative w-full rounded-xl overflow-hidden border border-border bg-muted/20" style={{ height: '400px' }}>
-            <LeafletMapView selectedRoadNames={[]} roads={roads} />
+          <div className="gradient-table-line" />
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader className="sticky top-0 z-10 bg-card">
+                <TableRow className="border-b border-border hover:bg-transparent">
+                  <TableHead className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Asset Type</TableHead>
+                  <TableHead className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Category</TableHead>
+                  <TableHead className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground text-right">Count</TableHead>
+                  <TableHead className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground text-right w-48">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {anomalyByAsset.map((row) => (
+                  <TableRow key={row.type} className="hover:bg-muted/40 border-b border-border/50" style={{ height: 36 }}>
+                    <TableCell className="text-xs font-medium py-2.5">{row.type}</TableCell>
+                    <TableCell className="py-2.5">
+                      <CategoryBadge category={row.category} />
+                    </TableCell>
+                    <TableCell className="text-right py-2.5">
+                      <span className="inline-flex items-center justify-center rounded-md bg-destructive/10 text-destructive px-2 py-0.5 text-xs font-bold tabular-nums min-w-[2rem]">
+                        {row.anomalies}
+                      </span>
+                    </TableCell>
+                    <TableCell className="text-right py-2.5">
+                      <div className="flex gap-1.5 justify-end">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 text-[11px] gap-1 text-muted-foreground hover:text-foreground"
+                           onClick={() => exportAnomalyByAssetTypeReport(row.type)}
+                         >
+                           <Download className="h-3 w-3" />
+                           Report
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 text-[11px] gap-1 text-muted-foreground hover:text-foreground"
+                          onClick={() => navigate(`/gis?type=${encodeURIComponent(row.type)}&condition=Poor`)}
+                        >
+                          <MapPin className="h-3 w-3" />
+                          Map
+                          <ArrowUpRight className="h-2.5 w-2.5" />
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
           </div>
         </Card>
 
-        {/* Charts & Tables Section */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Asset Distribution (Donut Chart) */}
-          <Card className="p-6 sm:p-8 card pla shadow-elevated border-0 gradient-card">
-            <div className="flex items-center gap-3">
-              <div className="p-3 rounded-xl bg-gradient-to-br from-orange-500 to-amber-500">
-                <Activity className="h-6 w-6 text-white" />
-              </div>
-              <h3 className="font-bold text-lg sm:text-xl">Asset Distribution</h3>
+        {/* Anomalies by Road */}
+        <Card className="p-0 border border-border bg-card overflow-hidden">
+          <div className="px-5 pt-5 pb-3 flex items-center gap-3">
+            <div className="p-2 rounded-lg bg-primary/10">
+              <Map className="h-4 w-4 text-primary" />
             </div>
-             {loading ? (
-               <div className="h-[280px] flex items-center justify-center">
-                  <Skeleton className="w-[200px] h-[200px] rounded-full bg-primary/10" />
-               </div>
-            ) : (
-              <div className="h-full grid place-items-center"> 
-              <ResponsiveContainer width="100%" height={280} className={"grid place-items-center my-auto"}>
-                <PieChart>
-                  <Pie
-                    data={categoryChartData.slice(0, 6)}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={70}
-                    outerRadius={100}
-                    fill="#8884d8"
-                    paddingAngle={0}
-                    dataKey="count"
-                    nameKey="category"
-                  >
-                    {categoryChartData.slice(0, 6).map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                    ))}
-                  </Pie>
-                  <Tooltip content={<CustomTooltip />} />
-                  <Legend 
-                      layout="vertical" 
-                      verticalAlign="middle" 
-                      align="right"
-                      formatter={(value, entry: any) => <span className="text-sm font-medium text-foreground ml-2">{value}</span>}
-                  />
-                </PieChart>
-              </ResponsiveContainer>
-              </div>
-            )}
-          </Card>
-
-          {/* Top Asset Types Table */}
-          <Card className="shadow-elevated border-0 gradient-card overflow-hidden">
-            <div className="p-6 sm:p-8 pb-4">
-                <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-3">
-                    <div className="p-3 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-500">
-                        <TrendingUp className="h-6 w-6 text-white" />
-                    </div>
-                    <h3 className="font-bold text-lg sm:text-xl">Top Asset Types</h3>
-                </div>
-                </div>
+            <div className="flex-1">
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-widest">Anomalies</p>
+              <p className="text-sm font-semibold text-foreground mt-0.5">By Road</p>
             </div>
-            
-            <div className="border-t border-border/50">
-              <Table>
-                <TableHeader className="bg-muted/30">
-                  <TableRow className="hover:bg-transparent border-border/50">
-                    <TableHead className="w-[70%] pl-8">Asset Type</TableHead>
-                    <TableHead className="text-right pr-8">Count</TableHead>
+            <div className="flex gap-1.5">
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 text-[10px] gap-1.5"
+                onClick={() => exportAnomalyByRoadReport()}
+               >
+                <Download className="h-3 w-3" />
+                Export Report
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 text-[10px] gap-1.5"
+                onClick={() => exportRoadWiseAssetTypeReport()}
+              >
+                <Download className="h-3 w-3" />
+                Road × Asset Type
+              </Button>
+            </div>
+          </div>
+          <div className="gradient-table-line" />
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader className="sticky top-0 z-10 bg-card">
+                <TableRow className="border-b border-border hover:bg-transparent">
+                  <TableHead className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Road</TableHead>
+                  <TableHead className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground text-right">Count</TableHead>
+                  <TableHead className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Last Survey</TableHead>
+                  <TableHead className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground text-right w-48">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {topAnomalyRoads.map((row) => (
+                  <TableRow key={row.road} className="hover:bg-muted/40 border-b border-border/50" style={{ height: 36 }}>
+                    <TableCell className="text-xs font-medium py-2.5">{row.road}</TableCell>
+                    <TableCell className="text-right py-2.5">
+                      <span className="inline-flex items-center justify-center rounded-md bg-destructive/10 text-destructive px-2 py-0.5 text-xs font-bold tabular-nums min-w-[2rem]">
+                        {row.count}
+                      </span>
+                    </TableCell>
+                    <TableCell className="text-xs text-muted-foreground py-2.5">
+                      {row.lastSurvey || row.date || "—"}
+                    </TableCell>
+                    <TableCell className="text-right py-2.5">
+                      <div className="flex gap-1.5 justify-end">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 text-[11px] gap-1 text-muted-foreground hover:text-foreground"
+                           onClick={() => exportAnomalyByRoadReport(row.road)}
+                         >
+                           <Download className="h-3 w-3" />
+                           Report
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 text-[11px] gap-1 text-muted-foreground hover:text-foreground"
+                          onClick={() => navigate(`/gis?road=${encodeURIComponent(row.road)}&condition=Poor`)}
+                        >
+                          <MapPin className="h-3 w-3" />
+                          Map
+                          <ArrowUpRight className="h-2.5 w-2.5" />
+                        </Button>
+                      </div>
+                    </TableCell>
                   </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {tableLoading ? (
-                     Array(4).fill(0).map((_, i) => (
-                        <TableRow key={i} className="border-border/50">
-                            <TableCell className="pl-8"><Skeleton className="min-h-5 w-[180px]" /></TableCell>
-                            <TableCell className="text-right pr-8"><Skeleton className="min-h-5 w-[40px] ml-auto" /></TableCell>
-                        </TableRow>
-                     ))
-                  ) : (
-                    <>
-                      {assetTypeTableData.items.length > 0 ? (
-                        assetTypeTableData.items.map((item: any, i: number) => (
-                          <TableRow key={i} className="hover:bg-muted/50 transition-colors border-border/50 group h-5">
-                            <TableCell className="font-medium pl-8 py-4">
-                                <div className="flex items-center gap-3">
-                                    {/* <span className="bg-primary/10 text-primary p-1.5 rounded-md group-hover:bg-primary/20 transition-colors">
-                                        <Hash className="h-4 w-4" />
-                                    </span> */}
-                                    <span className="text-base">{getAssetDisplayName(item)}</span>
-                                </div>
-                            </TableCell>
-                            <TableCell className="text-right font-bold text-base pr-8">
-                                <Badge variant="secondary" className="font-mono text-sm px-2.5 py-0.5">
-                                    {item.count.toLocaleString()}
-                                </Badge>
-                            </TableCell>
-                          </TableRow>
-                        ))
-                      ) : (
-                        <TableRow className="h-[65px]">
-                          <TableCell colSpan={2} className="text-center text-muted-foreground">
-                            No asset types found.
-                          </TableCell>
-                        </TableRow>
-                      )}
-                      
-                      {/* Fill empty rows to maintain height */}
-                      {Array.from({ length: Math.max(0, 4 - assetTypeTableData.items.length) }).map((_, i) => (
-                        <TableRow key={`empty-${i}`} className="border-border/50 !h-2">
-                           <TableCell colSpan={2} className="p-0">&nbsp;</TableCell>
-                        </TableRow>
-                      ))}
-                    </>
-                  )}
-                </TableBody>
-              </Table>
-            </div>
-
-            {/* Pagination */}
-            <div className="flex items-center justify-between px-6 py-4 bg-muted/20 border-t border-border/50">
-               <div className="text-sm font-medium text-muted-foreground">
-                  Page {assetTypeTableData.page} of {assetTypeTableData.pages}
-               </div>
-               <div className="flex items-center gap-2">
-                <Button
-                  variant="outline"
-                  size="icon"
-                  className="h-8 w-8"
-                  onClick={() => setAssetTypePage(prev => Math.max(prev - 1, 1))}
-                  disabled={assetTypePage === 1 || tableLoading}
-                >
-                  <ChevronLeft className="h-4 w-4" />
-                  <span className="sr-only">Previous</span>
-                </Button>
-                <Button
-                  variant="outline"
-                  size="icon"
-                  className="h-8 w-8"
-                  onClick={() => setAssetTypePage(prev => Math.min(prev + 1, assetTypeTableData.pages))}
-                  disabled={assetTypePage >= assetTypeTableData.pages || tableLoading}
-                >
-                  <ChevronRight className="h-4 w-4" />
-                  <span className="sr-only">Next</span>
-                </Button>
-              </div>
-            </div>
-          </Card>
-        </div>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        </Card>
       </div>
     </div>
   );
 }
 
-function cn(...classes: (string | boolean | undefined)[]) {
-  return classes.filter(Boolean).join(" ");
+/* ── KPI Card Component ── */
+function KPICard({ label, value, unit, icon, accent, trend, lastSurvey }: {
+  label: string;
+  value: string;
+  unit?: string;
+  icon: React.ReactNode;
+  accent: "primary" | "secondary" | "destructive";
+  trend?: { value: number; direction: "up" | "down" };
+  lastSurvey?: string;
+}) {
+  const styles = {
+    primary: {
+      border: "border-l-primary",
+      iconBg: "bg-primary/10 text-primary",
+      valueTint: "text-primary",
+      gradFrom: "hsl(217, 64%, 31%)",
+      gradTo: "hsl(198, 99%, 41%)",
+    },
+    secondary: {
+      border: "border-l-secondary",
+      iconBg: "bg-secondary/10 text-secondary",
+      valueTint: "text-secondary",
+      gradFrom: "hsl(198, 99%, 41%)",
+      gradTo: "hsl(187, 85%, 43%)",
+    },
+    destructive: {
+      border: "border-l-destructive",
+      iconBg: "bg-destructive/10 text-destructive",
+      valueTint: "text-destructive",
+      gradFrom: "hsl(0, 84%, 60%)",
+      gradTo: "hsl(38, 92%, 50%)",
+    },
+  };
+  const s = styles[accent];
+
+  return (
+    <Card className={`p-0 border border-border bg-card overflow-hidden border-l-[3px] ${s.border} relative`}>
+      <div className="absolute inset-0 bg-kpi-grid pointer-events-none" />
+      <div className="absolute inset-0 pointer-events-none" style={{
+        background: `linear-gradient(135deg, ${s.gradFrom}30 0%, ${s.gradFrom}12 40%, ${s.gradTo}18 70%, ${s.gradTo}28 100%)`
+      }} />
+      <div className="absolute right-0 top-2 bottom-2 w-[3px] rounded-full pointer-events-none" style={{
+        background: `linear-gradient(180deg, ${s.gradFrom}, ${s.gradTo})`
+      }} />
+      <div className="relative px-5 py-5 flex items-center gap-4">
+        <div className={`p-2.5 rounded-xl ${s.iconBg}`}>
+          {icon}
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-widest">{label}</p>
+          <div className="flex items-baseline gap-1.5 mt-1">
+            <span className={`text-3xl font-bold tabular-nums tracking-tight ${s.valueTint}`}>{value}</span>
+            {unit && <span className="text-sm text-muted-foreground font-medium">{unit}</span>}
+            {/* {trend && (
+              <span className={cn(
+                "inline-flex items-center gap-0.5 text-[10px] font-bold ml-1 px-1.5 py-0.5 rounded-full",
+                trend.direction === "up" ? "bg-emerald-500/10 text-emerald-600" : "bg-destructive/10 text-destructive"
+              )}>
+                {trend.direction === "up" ? <TrendingUp className="h-3 w-3" /> : <TrendingUp className="h-3 w-3 rotate-180" />}
+                {trend.direction === "up" ? "+" : "-"}{Math.abs(trend.value)}%
+              </span>
+            )} */}
+          </div>
+          {lastSurvey && (
+            <p className="text-[9px] text-muted-foreground mt-1">Last Survey: {lastSurvey}</p>
+          )}
+        </div>
+      </div>
+    </Card>
+  );
 }

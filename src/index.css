@@ -134,27 +134,27 @@ All colors MUST be HSL.
     /* Dark Mode */
     --background: 0 0% 13.3%;
     /* #222 */
-    --foreground: 214 59% 85%;
-    /* #c0d4ef */
+    --foreground: 0 0% 95%;
+    /* near white */
 
     --card: 207 7% 24%;
     /* #393e42 */
-    --card-foreground: 214 59% 85%;
+    --card-foreground: 0 0% 93%;
 
     --popover: 207 7% 24%;
-    --popover-foreground: 214 58% 85%;
+    --popover-foreground: 0 0% 93%;
 
-    --primary: 217 64% 31%;
-    /* #1c4280 */
+    --primary: 217 64% 50%;
+    /* brighter blue for dark mode visibility */
     --primary-foreground: 0 0% 100%;
-    --primary-glow: 217 64% 60%;
+    --primary-glow: 217 64% 65%;
 
     --secondary: 198 99% 41%;
     /* #0190cf */
     --secondary-foreground: 0 0% 100%;
 
     --muted: 220 9% 19%;
-    --muted-foreground: 214 58% 60%;
+    --muted-foreground: 214 30% 70%;
 
     --accent: 215 69% 75%;
     --accent-foreground: 217 64% 20%;
@@ -251,6 +251,47 @@ All colors MUST be HSL.
   .gradient-card {
     background: var(--gradient-card);
   }
+
+  .bg-grid {
+    background-image:
+      linear-gradient(hsl(var(--border) / 0.4) 1px, transparent 1px),
+      linear-gradient(90deg, hsl(var(--border) / 0.4) 1px, transparent 1px);
+    background-size: 40px 40px;
+  }
+
+  .bg-grid-subtle {
+    background-image:
+      linear-gradient(hsl(var(--border) / 0.2) 1px, transparent 1px),
+      linear-gradient(90deg, hsl(var(--border) / 0.2) 1px, transparent 1px);
+    background-size: 24px 24px;
+  }
+
+  .bg-header-strip {
+    background: linear-gradient(135deg, hsl(210 20% 96%) 0%, hsl(215 30% 92%) 100%);
+  }
+
+  .dark .bg-header-strip {
+    background: linear-gradient(135deg, hsl(220 12% 18%) 0%, hsl(215 15% 22%) 100%);
+  }
+
+  .gradient-table-line {
+    height: 3px;
+    background: linear-gradient(90deg,
+      hsl(217, 91%, 60%) 0%,
+      hsl(198, 99%, 45%) 25%,
+      hsl(142, 76%, 42%) 50%,
+      hsl(38, 92%, 50%) 75%,
+      hsl(271, 81%, 56%) 100%
+    );
+    border-radius: 2px 2px 0 0;
+  }
+
+  .bg-kpi-grid {
+    background-image:
+      linear-gradient(hsl(var(--primary) / 0.06) 1px, transparent 1px),
+      linear-gradient(90deg, hsl(var(--primary) / 0.06) 1px, transparent 1px);
+    background-size: 20px 20px;
+  }
 }
 
 /* Leaflet Popup Styles */
@@ -276,17 +317,13 @@ All colors MUST be HSL.
   border: 1px solid hsl(var(--border)) !important;
 }
 
-/* Customize the close button for dark mode */
 .leaflet-popup-close-button {
   color: hsl(var(--muted-foreground)) !important;
   font-size: 1.5rem !important;
   font-weight: bold !important;
   padding-top: 0.2rem !important;
   padding-right: 0.8rem !important;
-  /* margin: 1rem !important; */
   transition: color 0.2s ease !important;
-  /* border: 1px solid hsl(var(--muted-foreground)) !important;
-  border-radius: 9999px !important; */
 }
 
 .leaflet-popup-close-button:hover {
@@ -304,3 +341,17 @@ All colors MUST be HSL.
   margin-bottom: 5px;
 }
 
+/* Leaflet custom tooltip */
+.leaflet-tooltip-custom {
+  background: hsl(222 47% 11% / 0.95) !important;
+  border: 1px solid hsl(217 33% 25%) !important;
+  color: #f1f5f9 !important;
+  font-size: 11px !important;
+  line-height: 1.4 !important;
+  padding: 6px 10px !important;
+  border-radius: 6px !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3) !important;
+}
+.leaflet-tooltip-custom::before {
+  border-top-color: hsl(222 47% 11% / 0.95) !important;
+}

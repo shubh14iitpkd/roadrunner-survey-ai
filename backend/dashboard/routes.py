@@ -112,7 +112,7 @@ def assets_by_category():
 	])
 	results = list(agg)
 	print("[DASHBOARD] results", results)
-	items = [{"category": d.get("_id") or "Unknown", "count": d.get("count", 0)} for d in results]
+	items = [{"category_id": d.get("_id") or "Unknown", "count": d.get("count", 0)} for d in results]
 	return jsonify({"items": items})
 
 
@@ -165,7 +165,7 @@ def anomalies_by_category():
 		{"$limit": 10},
 	])
 	
-	items = [{"category": d.get("_id") or "Unknown", "count": d.get("count", 0)} for d in agg]
+	items = [{"category_id": d.get("_id") or "Unknown", "count": d.get("count", 0)} for d in agg]
 	return jsonify({"items": items})
 
 
@@ -191,6 +191,8 @@ def top_asset_types():
 	"""
 	page = request.args.get("page", 1, type=int)
 	limit = request.args.get("limit", 5, type=int)
+	category_id = request.args.get("category_id", None)
+	condition = request.args.get("condition", None)
 	skip = (page - 1) * limit
 
 	db = get_db()
@@ -220,6 +222,14 @@ def top_asset_types():
 			{"video_key": {"$in": demo_video_keys}}
 		]
 	}
+
+	# 4. Optionally filter by category_id
+	if category_id:
+		match_query = {"$and": [match_query, {"category_id": category_id}]}
+
+	# 5. Optionally filter by condition (e.g. "damaged")
+	if condition:
+		match_query = {"$and": [match_query, {"condition": condition}]}
 
 	# Count total types first (for pagination)
 	total_agg = db.assets.aggregate([
@@ -254,16 +264,20 @@ def top_asset_types():
 	if asset_ids:
 		labels = list(db.system_asset_labels.find({"asset_id": {"$in": asset_ids}}))
 		for l in labels:
-			labels_map[l["asset_id"]] = l.get("display_name") or l.get("default_name")
+			labels_map[l["asset_id"]] = { "display_name": l.get("display_name") or l.get("default_name"), "category_id": l.get("category_id")}
 
 	items = []
 	for d in results:
 		aid = d.get("_id")
 		atype = d.get("asset_type") or "Unknown"
-		display_name = labels_map.get(aid, atype)
+		obj = labels_map.get(aid)
+		display_name = obj.get("display_name", atype) if obj else atype
+		category_id_val = obj.get("category_id") if obj else None
+
 		items.append({
 			"asset_id": aid,
 			"type": atype,
+			"category_id": category_id_val,
 			"display_name": display_name,
 			"count": d.get("count", 0)
 		})
