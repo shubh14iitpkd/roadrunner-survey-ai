@@ -346,7 +346,17 @@ def top_anomaly_roads():
 	for d in agg:
 		route_id = d.get("_id")
 		road = db.roads.find_one({"route_id": route_id})
-		items.append({"road": road.get("road_name") if road else f"Route {route_id}", "count": d.get("count", 0)})
+		# Find latest survey date for this route
+		latest_survey = db.surveys.find_one(
+			{"route_id": route_id, "is_latest": True},
+			{"survey_date": 1}
+		)
+		survey_date = latest_survey.get("survey_date") if latest_survey else None
+		items.append({
+			"road": road.get("road_name") if road else f"Route {route_id}",
+			"count": d.get("count", 0),
+			"lastSurvey": survey_date,
+		})
 	return jsonify({"items": items})
 
 

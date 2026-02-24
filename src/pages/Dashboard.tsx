@@ -457,7 +457,7 @@ export default function Dashboard() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {anomalyByAsset.map((row) => (
+                {anomalyByAsset?.length > 0 ? anomalyByAsset.map((row) => (
                   <TableRow key={row.type} className="hover:bg-muted/40 border-b border-border/50" style={{ height: 36 }}>
                     <TableCell className="text-xs font-medium py-2.5">{row.type}</TableCell>
                     <TableCell className="py-2.5">
@@ -492,7 +492,13 @@ export default function Dashboard() {
                       </div>
                     </TableCell>
                   </TableRow>
-                ))}
+                )): (
+                  <TableRow>
+                    <TableCell colSpan={5} className="h-24 text-center">
+                      No data available.
+                    </TableCell>
+                  </TableRow>
+                )}
               </TableBody>
             </Table>
           </div>
@@ -649,9 +655,9 @@ function KPICard({ label, value, unit, icon, accent, trend, lastSurvey }: {
               </span>
             )} */}
           </div>
-          {lastSurvey && (
+          {/* {lastSurvey && (
             <p className="text-[9px] text-muted-foreground mt-1">Last Survey: {lastSurvey}</p>
-          )}
+          )} */}
         </div>
       </div>
     </Card>
