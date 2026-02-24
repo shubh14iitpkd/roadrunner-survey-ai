@@ -125,7 +125,7 @@ def agent_node(state: AgentState) -> dict:
     prompt = AGENT_PROMPT.format(context=context, route_id=route_id)
 
     system = SystemMessage(content=prompt)
-    history = _sanitize_messages_for_gemini(state["messages"][-10:])
+    history = _sanitize_messages_for_gemini(state["messages"][-4:])
 
     response = llm_with_tools.invoke([system] + history)
 
