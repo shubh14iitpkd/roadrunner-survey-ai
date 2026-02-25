@@ -49,7 +49,7 @@ export default function AssetTable({
   idField = "anomalyId",
 }: AssetTableProps) {
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(20);
+  const [pageSize, setPageSize] = useState(10);
 
   // Reset page when items or search change
   useEffect(() => { setPage(1); }, [items.length, searchQuery]);
