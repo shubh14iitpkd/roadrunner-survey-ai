@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect, useCallback } from "react";
 import { useSearchParams, Link } from "react-router-dom";
-import LeafletMapView from "@/components/LeafletMapView";
+import LibraryMapView from "@/components/asset-library/LibraryMapView";
 import FrameComparisonPopup from "@/components/FrameComparisonPopup";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -210,10 +210,7 @@ export default function AnomalyLibrary() {
     }
   }, [selectedAnomaly, filteredAnomalies]);
 
-  const mapSelectedRoadNames = useMemo(() => {
-    const roadParam = searchParams.get("road");
-    return roadParam ? [roadParam] : [];
-  }, [searchParams]);
+
 
   const handleRowClick = useCallback((anomaly: AssetRecord) => {
     setSelectedAnomaly(anomaly);
@@ -342,10 +339,10 @@ export default function AnomalyLibrary() {
       {/* Map + Sidebar */}
       <div className="flex min-h-0" style={{ flex: "1 1 45%" }}>
         <div className="flex-1 relative min-w-0" style={{ zIndex: 0, isolation: 'isolate' }}>
-          <LeafletMapView
-            selectedRoadNames={mapSelectedRoadNames}
-            roads={roads}
-            selectedAssetTypes={selectedAssetTypes}
+          <LibraryMapView
+            assets={filteredAnomalies}
+            selectedId={selectedAnomaly?.anomalyId ?? null}
+            onSelect={handleRowClick}
           />
         </div>
 
