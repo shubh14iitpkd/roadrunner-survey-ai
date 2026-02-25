@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import type { AssetRecord } from "@/types/asset";
+import { getCategoryColorCode } from "@/components/CategoryBadge";
 
 interface MarkerPopupData {
   frameData: any;
@@ -108,9 +109,10 @@ export default function AssetDetailSidebar({
     const y = box.y * scaleY + offsetY;
     const w = box.width * scaleX;
     const h = box.height * scaleY;
+    const color = getCategoryColorCode(selectedAsset.category_id || 'Other');
 
     // Draw bounding box
-    ctx.strokeStyle = "#ef4444";
+    ctx.strokeStyle = color;
     ctx.lineWidth = 2;
     ctx.strokeRect(x, y, w, h);
 
@@ -122,7 +124,7 @@ export default function AssetDetailSidebar({
     const labelH = fontSize + 6;
     const labelY = y > labelH + 2 ? y - labelH - 2 : y + h + 2;
 
-    ctx.fillStyle = "rgba(239, 68, 68, 0.85)";
+    ctx.fillStyle = color
     ctx.fillRect(x, labelY, textMetrics.width + 8, labelH);
     ctx.fillStyle = "#ffffff";
     ctx.textBaseline = "middle";

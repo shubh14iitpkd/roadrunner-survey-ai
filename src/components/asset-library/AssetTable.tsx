@@ -10,7 +10,6 @@ import {
 } from "@/components/ui/select";
 import { Search, X, RefreshCw, AlertCircle, ChevronLeft, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { CategoryBadge } from "@/components/CategoryBadge";
 import type { AssetRecord } from "@/types/asset";
 
 export interface ColumnDef {
@@ -179,7 +178,7 @@ export default function AssetTable({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent className="bg-card z-50">
-                {[10, 25, 50].map((n) => (
+                {[5, 10, 25, 50].map((n) => (
                   <SelectItem key={n} value={String(n)} className="text-xs">{n}</SelectItem>
                 ))}
               </SelectContent>

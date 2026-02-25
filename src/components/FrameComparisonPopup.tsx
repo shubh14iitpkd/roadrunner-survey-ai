@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { ANNOTATION_CATEGORIES } from '@/services/demoDataService';
 import { Layers, Eye, EyeOff, ZoomIn, ZoomOut } from 'lucide-react';
-import { getCategoryBadgeStyle } from '@/components/CategoryBadge';
+import { getCategoryColorCode } from '@/components/CategoryBadge';
 
 interface Detection {
   class_name: string;
@@ -17,6 +17,7 @@ interface Detection {
   };
   condition?: string;
   category?: string;
+  category_id?: string;
 }
 
 interface FrameComparisonPopupProps {
@@ -41,16 +42,6 @@ interface FrameComparisonPopupProps {
   onNavigate?: (direction: 'prev' | 'next') => void;
 }
 
-// Category colors for bounding boxes
-const CATEGORY_COLORS: Record<string, string> = {
-  [ANNOTATION_CATEGORIES.OIA]: '#22c55e',           // Green
-  [ANNOTATION_CATEGORIES.ITS]: '#3b82f6',           // Blue
-  [ANNOTATION_CATEGORIES.ROADWAY_LIGHTING]: '#f59e0b', // Amber
-  [ANNOTATION_CATEGORIES.STRUCTURES]: '#8b5cf6',    // Purple
-  [ANNOTATION_CATEGORIES.DIRECTIONAL_SIGNAGE]: '#ec4899', // Pink
-  [ANNOTATION_CATEGORIES.CORRIDOR_PAVEMENT]: '#06b6d4', // Cyan
-};
-
 export default function FrameComparisonPopup({
   frameData,
   trackTitle,
@@ -67,27 +58,6 @@ export default function FrameComparisonPopup({
   const [imageLoaded, setImageLoaded] = useState(false);
   const [zoom, setZoom] = useState(1);
 
-  // Group detections by category
-  const detectionsByCategory = frameData.detections?.reduce((acc, d) => {
-    const category = d.category || 'Other';
-    if (!acc[category]) acc[category] = [];
-    acc[category].push(d);
-    return acc;
-  }, {} as Record<string, Detection[]>) || {};
-
-  // Toggle category visibility
-  const toggleCategory = useCallback((category: string) => {
-    setSelectedCategories(prev => {
-      const next = new Set(prev);
-      if (next.has(category)) {
-        next.delete(category);
-      } else {
-        next.add(category);
-      }
-      return next;
-    });
-  }, []);
-
   // Draw bounding boxes on canvas
   useEffect(() => {
     if (!canvasRef.current || !imgRef.current || !imageLoaded) return;
@@ -103,20 +73,15 @@ export default function FrameComparisonPopup({
 
     // Clear canvas
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-
     // Draw bounding boxes for visible categories
     frameData.detections?.forEach((d) => {
-      const category = d.category || 'Other';
-      if (!selectedCategories.has(category)) return;
-
-      const color = CATEGORY_COLORS[category] || '#ffffff';
-
+      const color = getCategoryColorCode(d.category_id || 'Other');
       // Scale bbox coordinates to canvas size
       // bbox values are in percentage (0-100)
-      const x = (d.bbox.x / 100) * canvas.width;
-      const y = (d.bbox.y / 100) * canvas.height;
-      const w = (d.bbox.width / 100) * canvas.width;
-      const h = (d.bbox.height / 100) * canvas.height;
+      const x = d.bbox.x * canvas.width / frameData.width;
+      const y = d.bbox.y * canvas.height / frameData.height;
+      const w = d.bbox.width * canvas.width / frameData.width;
+      const h = d.bbox.height * canvas.height / frameData.height;
 
       // Draw bounding box
       ctx.strokeStyle = color;
@@ -174,7 +139,7 @@ export default function FrameComparisonPopup({
           </div>
           {frameData.gpx_point && (
             <div style={{ fontSize: '10px', color: '#64748b', marginTop: '2px' }}>
-              📍 {frameData.gpx_point.lat.toFixed(5)}, {frameData.gpx_point.lon.toFixed(5)}
+             {frameData.gpx_point.lat.toFixed(5)}, {frameData.gpx_point.lon.toFixed(5)}
             </div>
           )}
         </div>

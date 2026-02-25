@@ -38,7 +38,7 @@ const ANOMALY_COLUMNS: ColumnDef[] = [
   { key: "anomalyId", header: "Anomaly ID", className: "font-mono text-[11px] font-semibold py-1.5 px-1.5 whitespace-nowrap text-center", render: (a) => a.anomalyId },
   { key: "assetId", header: "Asset ID", className: "font-mono text-[11px] py-1.5 px-1.5 whitespace-nowrap text-center", render: (a) => a.assetId },
   { key: "assetType", header: "Asset Type", className: "text-[10px] leading-tight py-1.5 px-1.5 min-w-[180px] max-w-[220px] text-center", render: (a) => <span className="line-clamp-2">{a.assetType}</span> },
-  { key: "category", header: "Category", className: "py-1.5 px-1.5 text-center", render: (a) => <CategoryBadge category={a.assetCategory} /> },
+  { key: "category", header: "Category", className: "py-1.5 px-1.5 text-center", render: (a) => <CategoryBadge category={a.assetCategory} categoryId={a.category_id} /> },
   { key: "coords", header: "Coordinates", className: "font-mono text-[10px] py-1.5 px-1.5 whitespace-nowrap text-center", render: (a) => `${a.lat.toFixed(4)}, ${a.lng.toFixed(4)}` },
   { key: "road", header: "Road", className: "text-[11px] py-1.5 px-1.5 whitespace-nowrap text-center", render: (a) => a.roadName },
   { key: "side", header: "Road Side", className: "text-[11px] py-1.5 px-1.5 text-center", render: (a) => a.side },
@@ -141,6 +141,7 @@ export default function AnomalyLibrary() {
           return {
             anomalyId: asset.anomaly_id || `ANM-${String(idx + 1).padStart(4, '0')}`,
             assetId: asset.asset_id || `AST-${idx}`,
+            category_id: asset.category_id,
             assetType: assetTypeName,
             assetCategory: categoryName,
             lat,
@@ -246,7 +247,15 @@ export default function AnomalyLibrary() {
   }, [anomalies, categoryFilter]);
 
   const categoryOptions = useMemo(() => {
-    return [...new Set(anomalies.map(a => a.assetCategory))].sort();
+    const unique = [
+      ...new Map(
+        anomalies.map(a => [
+          `${a.assetCategory}-${a.category_id}`,
+          { name: a.assetCategory, id: a.category_id }
+        ])
+      ).values()
+    ].sort((a, b) => a.name.localeCompare(b.name));
+    return unique;
   }, [anomalies]);
 
   const selectedRoadName = searchParams.get("road");
@@ -405,6 +414,8 @@ export default function AnomalyLibrary() {
                       },
                       condition: selectedAnomaly.issue,
                       category: selectedAnomaly.assetCategory,
+                      category_id: selectedAnomaly.category_id,
+                      asset_id: selectedAnomaly.asset_id,
                     },
                   ] : [],
                 };

@@ -14,5 +14,7 @@ export interface AssetRecord {
   severity: string;
   videoId?: string;
   frameNumber?: number;
+  asset_id?: string;
+  category_id?: string;
   box?: { x: number; y: number; width: number; height: number };
 }

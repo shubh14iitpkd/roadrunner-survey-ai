@@ -21,7 +21,7 @@ interface AssetFilterStripProps {
   onAssetTypesChange: (v: string[]) => void;
   searchQuery: string;
   onSearchChange: (v: string) => void;
-  categoryOptions: string[];
+  categoryOptions: {id: string, name: string}[];
   assetTypeOptions: string[];
   selectedRoadName: string | null;
   selectedRoadCount: number;
@@ -147,10 +147,10 @@ export default function AssetFilterStrip({
         <SelectContent className="bg-card z-50 max-h-64">
           <SelectItem value="all">All Categories</SelectItem>
           {categoryOptions.map((c) => (
-            <SelectItem key={c} value={c} className="text-xs">
+            <SelectItem key={c.id} value={c.id} className="text-xs">
               <span className="flex items-center gap-1.5">
-                <span className={`h-2 w-2 rounded-full ${getCategoryDotColor(c)}`} />
-                {c}
+                <span className={`h-2 w-2 rounded-full ${getCategoryDotColor(c.id)}`} />
+                {c.name}
               </span>
             </SelectItem>
           ))}

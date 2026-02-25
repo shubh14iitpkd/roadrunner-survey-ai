@@ -12,6 +12,7 @@ import { ResolvedMap, useLabelMap } from '@/contexts/LabelMapContext';
 import { MapPin, Loader2 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useToast } from "@/hooks/use-toast";
+import { getCategoryBadgeStyle, getCategoryDotColor } from "./CategoryBadge";
 
 interface Detection {
   class_name: string;

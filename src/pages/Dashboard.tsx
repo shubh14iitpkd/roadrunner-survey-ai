@@ -13,7 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
-import { CategoryBadge } from "@/components/CategoryBadge";
+import { CategoryBadge, getCategoryColorCode } from "@/components/CategoryBadge";
 import { useLabelMap } from "@/contexts/LabelMapContext";
 import {
   exportAnomalyByAssetTypeReport,
@@ -120,6 +120,7 @@ export default function Dashboard() {
       asset_id: item.asset_id,
       type: getAssetDisplayName(item),
       category: getCategoryDisplayName(item),
+      category_id: item.category_id,
       count: item.count,
     }));
   }, [assetTypeTableData, getAssetDisplayName, getCategoryDisplayName]);
@@ -188,6 +189,7 @@ export default function Dashboard() {
               asset_id: item.asset_id,
               type: getAssetDisplayName(item),
               category: getCategoryDisplayName(item),
+              category_id: item.category_id,
               anomalies: item.count,
             }))
           );
@@ -292,8 +294,8 @@ export default function Dashboard() {
                       }}
                       style={{ cursor: 'pointer' }}
                     >
-                      {categoryChartData.map((_, i) => (
-                        <Cell key={i} fill={CATEGORY_COLORS[i % CATEGORY_COLORS.length]} />
+                      {categoryChartData.map((item, i) => (
+                        <Cell key={i} fill={getCategoryColorCode(item.category_id)} />
                       ))}
                     </Pie>
                     {effectiveDonutIndex === undefined && (
@@ -333,7 +335,7 @@ export default function Dashboard() {
                 >
                   <span
                     className="w-2.5 h-2.5 rounded-full shrink-0"
-                    style={{ backgroundColor: CATEGORY_COLORS[i % CATEGORY_COLORS.length] }}
+                    style={{ backgroundColor: getCategoryColorCode(d.category_id) }}
                   />
                   <span className="text-foreground font-medium text-[11px]">{d.category}</span>
                   <span className="font-bold text-foreground ml-auto tabular-nums text-[11px]">{d.count}</span>
@@ -394,7 +396,7 @@ export default function Dashboard() {
                       </TableCell>
                       <TableCell className="text-xs font-medium py-2">{row.type}</TableCell>
                       <TableCell className="py-2">
-                        <CategoryBadge category={row.category} />
+                        <CategoryBadge category={row.category} categoryId={row.category_id}/>
                       </TableCell>
                       <TableCell className="text-right font-semibold text-xs tabular-nums py-2">{row.count}</TableCell>
                     </TableRow>
@@ -461,7 +463,7 @@ export default function Dashboard() {
                   <TableRow key={row.type} className="hover:bg-muted/40 border-b border-border/50" style={{ height: 36 }}>
                     <TableCell className="text-xs font-medium py-2.5">{row.type}</TableCell>
                     <TableCell className="py-2.5">
-                      <CategoryBadge category={row.category} />
+                      <CategoryBadge category={row.category} categoryId={row.category_id} />
                     </TableCell>
                     <TableCell className="text-right py-2.5">
                       <span className="inline-flex items-center justify-center rounded-md bg-destructive/10 text-destructive px-2 py-0.5 text-xs font-bold tabular-nums min-w-[2rem]">
