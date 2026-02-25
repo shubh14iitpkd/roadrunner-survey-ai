@@ -25,6 +25,7 @@ const Login = lazy(() => import("./pages/Login"));
 const SignUp = lazy(() => import("./pages/SignUp"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 const ModelTest = lazy(() => import("./pages/ModelTest"));
+const AnomalyLibrary = lazy(() => import("./pages/AnomalyLibrary"));
 
 const queryClient = new QueryClient();
 
@@ -61,7 +62,7 @@ const App = () => (
                             <Route path="/upload" element={<SurveyUpload />} />
                             <Route path="/videos" element={<VideoLibrary />} />
                             <Route path="/assets" element={<AssetRegister />} />
-                            <Route path="/gis" element={<GISView />} />
+                            <Route path="/gis" element={<AnomalyLibrary />} />
                             <Route path="/ask-ai" element={<AskAI />} />
                             <Route path="/settings" element={<Settings />} />
                             <Route path="*" element={<NotFound />} />

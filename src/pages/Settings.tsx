@@ -26,6 +26,10 @@ export default function Settings() {
   const [email, setEmail] = useState("");
   const [organization, setOrganization] = useState("");
   const [darkMode, setDarkMode] = useState(resolvedTheme === "dark");
+  const [wantsIcons, setWantsIcons] = useState(() => {
+    const stored = localStorage.getItem('wants_icons');
+    return stored === null ? true : stored === 'true';
+  });
 
   useEffect(() => {
     if (user) {
@@ -40,10 +44,25 @@ export default function Settings() {
     setDarkMode(resolvedTheme === "dark");
   }, [resolvedTheme]);
 
-  const handleSave = () => {
-    // Apply dark mode setting
-    setTheme(darkMode ? "dark" : "light");
+  const handleToggleDarkMode = (checked: boolean) => {
+    setDarkMode(checked);
+    setTheme(checked ? "dark" : "light");
+    toast({
+      title: checked ? "Dark mode enabled" : "Light mode enabled",
+      description: "Theme updated.",
+    });
+  };
 
+  const handleToggleIcons = (checked: boolean) => {
+    setWantsIcons(checked);
+    localStorage.setItem('wants_icons', String(checked));
+    toast({
+      title: checked ? "Map icons enabled" : "Map icons disabled",
+      description: "Map will update on next render.",
+    });
+  };
+
+  const handleSave = () => {
     toast({
       title: "Settings saved",
       description: "Your settings have been updated successfully.",
@@ -226,9 +245,17 @@ export default function Settings() {
                       Enable dark theme for the interface
                     </p>
                   </div>
-                  <Switch checked={darkMode} onCheckedChange={setDarkMode} />
+                  <Switch checked={darkMode} onCheckedChange={handleToggleDarkMode} />
                 </div>
-                <Button onClick={handleSave} className="mt-4">Save Changes</Button>
+                <div className="flex items-center justify-between">
+                  <div className="space-y-0.5">
+                    <Label>Show Map Icons</Label>
+                    <p className="text-sm text-muted-foreground">
+                      Display asset-specific icons on the map instead of circles
+                    </p>
+                  </div>
+                  <Switch checked={wantsIcons} onCheckedChange={handleToggleIcons} />
+                </div>
               </div>
             </AccordionContent>
           </Card>
