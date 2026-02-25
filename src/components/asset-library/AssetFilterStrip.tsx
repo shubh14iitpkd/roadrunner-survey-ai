@@ -6,15 +6,15 @@ import { cn } from "@/lib/utils";
 import { getCategoryDotColor } from "@/components/CategoryBadge";
 
 type DirectionFilter = "all" | "LHS" | "RHS";
-type SideFilter = "all" | "Shoulder" | "Median" | "Pavement" | "Overhead";
+type zoneFilter = "all" | "shoulder" | "median" | "pavement" | "overhead";
 
 interface AssetFilterStripProps {
   filteredCount: number;
   countLabel?: string; // "anomalies" | "assets" etc.
   directionFilter: DirectionFilter;
   onDirectionChange: (v: DirectionFilter) => void;
-  sideFilter: SideFilter;
-  onSideChange: (v: SideFilter) => void;
+  zoneFilter: zoneFilter;
+  onZoneChange: (v: zoneFilter) => void;
   categoryFilter: string;
   onCategoryChange: (v: string) => void;
   selectedAssetTypes: string[];
@@ -33,8 +33,8 @@ export default function AssetFilterStrip({
   countLabel = "anomalies",
   directionFilter,
   onDirectionChange,
-  sideFilter,
-  onSideChange,
+  zoneFilter,
+  onZoneChange,
   categoryFilter,
   onCategoryChange,
   selectedAssetTypes,
@@ -51,13 +51,17 @@ export default function AssetFilterStrip({
     categoryFilter !== "all" ||
     selectedAssetTypes.length > 0 ||
     directionFilter !== "all" ||
-    sideFilter !== "all" ||
+    zoneFilter !== "all" ||
     searchQuery !== "";
 
-  const sideOptions = ["all", "Shoulder", "Median", "Pavement", "Overhead"] as const;
-  const sideLabels: Record<string, string> = { all: "All", Shoulder: "Shoulder", Median: "Median", Pavement: "Pavement", Overhead: "Overhead" };
-  const activeIdx = sideOptions.indexOf(sideFilter);
+  const zoneOptions = ["all", "shoulder", "median", "pavement", "overhead"] as const;
+  const zoneLabels: Record<string, string> = { all: "all", shoulder: "shoulder", median: "median", pavement: "pavement", overhead: "overhead" };
+  const activeIdx = zoneOptions.indexOf(zoneFilter);
   const stepWidth = 56;
+
+  const directionOptions = ["all", "LHS", "RHS"] as const;
+  const directionActiveIdx = directionOptions.indexOf(directionFilter);
+  const directionStepWidth = 40;
 
   return (
     <div className="px-4 py-1.5 border-b border-border bg-gradient-to-r from-card to-muted/30 shrink-0 flex items-center gap-2 flex-nowrap min-w-0">
@@ -67,16 +71,16 @@ export default function AssetFilterStrip({
           {filteredCount}
         </span>
         <span className="text-[9px] text-muted-foreground">{countLabel}</span>
-        {(directionFilter !== "all" || sideFilter !== "all") && (
+        {(directionFilter !== "all" || zoneFilter !== "all") && (
           <div className="flex items-center gap-1 ml-1">
             {directionFilter !== "all" && (
               <span className="inline-flex items-center rounded-full bg-primary/10 text-primary px-1.5 py-0.5 text-[9px] font-semibold border border-primary/20">
                 {directionFilter}
               </span>
             )}
-            {sideFilter !== "all" && (
+            {zoneFilter !== "all" && (
               <span className="inline-flex items-center rounded-full bg-primary/10 text-primary px-1.5 py-0.5 text-[9px] font-semibold border border-primary/20">
-                {sideFilter}
+                {zoneFilter}
               </span>
             )}
           </div>
@@ -86,40 +90,48 @@ export default function AssetFilterStrip({
       <div className="h-5 w-px bg-border/60 shrink-0" />
 
       {/* LHS / RHS toggle */}
-      <div className="flex items-center gap-1.5 shrink-0">
-        <span className={cn("text-[10px] font-semibold transition-colors", directionFilter === "LHS" ? "text-primary" : "text-muted-foreground/60")}>LHS</span>
-        <button
-          onClick={() => onDirectionChange(directionFilter === "LHS" ? "RHS" : directionFilter === "RHS" ? "all" : "LHS")}
-          className="relative w-9 h-5 rounded-full bg-muted border border-border shadow-inner transition-colors shrink-0"
-        >
-          <span className={cn(
-            "absolute top-[3px] h-3.5 w-3.5 rounded-full bg-primary shadow-md transition-all duration-200",
-            directionFilter === "LHS" ? "left-[3px]" : directionFilter === "RHS" ? "left-[16px]" : "left-[9px]"
-          )} />
-        </button>
-        <span className={cn("text-[10px] font-semibold transition-colors", directionFilter === "RHS" ? "text-primary" : "text-muted-foreground/60")}>RHS</span>
+      <div className="flex items-center shrink-0">
+        <div className="relative flex rounded-full bg-muted/80 border border-border p-[3px] shrink-0 shadow-sm" style={{ width: directionOptions.length * directionStepWidth + 6 }}>
+          <span
+            className="absolute top-[3px] rounded-full bg-primary shadow-md z-10 transition-all duration-300 ease-in-out"
+            style={{ left: 3 + directionActiveIdx * directionStepWidth, width: directionStepWidth, height: 18 }}
+          />
+          {directionOptions.map((d) => (
+            <button
+              key={d}
+              onClick={() => onDirectionChange(d)}
+              className={cn(
+                "relative z-20 flex items-center justify-center text-[9px] font-semibold uppercase tracking-wide transition-colors duration-200 whitespace-nowrap",
+                directionFilter === d ? "text-primary-foreground" : "text-muted-foreground hover:text-foreground"
+              )}
+              style={{ width: directionStepWidth, height: 18 }}
+            >
+              {d}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="h-5 w-px bg-border/60 shrink-0" />
 
       {/* Side sliding pill toggle */}
       <div className="flex items-center shrink-0">
-        <div className="relative flex rounded-full bg-muted/80 border border-border p-[3px] shrink-0 shadow-sm" style={{ width: sideOptions.length * stepWidth + 6 }}>
+        <div className="relative flex rounded-full bg-muted/80 border border-border p-[3px] shrink-0 shadow-sm" style={{ width: zoneOptions.length * stepWidth + 6 }}>
           <span
             className="absolute top-[3px] rounded-full bg-primary shadow-md z-10 transition-all duration-300 ease-in-out"
             style={{ left: 3 + activeIdx * stepWidth, width: stepWidth, height: 18 }}
           />
-          {sideOptions.map((s) => (
+          {zoneOptions.map((s) => (
             <button
               key={s}
-              onClick={() => onSideChange(s)}
+              onClick={() => onZoneChange(s)}
               className={cn(
-                "relative z-20 flex items-center justify-center text-[9px] font-semibold uppercase tracking-wide transition-colors duration-200 whitespace-nowrap",
-                sideFilter === s ? "text-primary-foreground" : "text-muted-foreground hover:text-foreground"
+                "relative z-20 flex items-center text-center pl-0.5 justify-center text-[9px] font-semibold uppercase tracking-wide transition-colors duration-200 whitespace-nowrap",
+                zoneFilter === s ? "text-primary-foreground" : "text-muted-foreground hover:text-foreground"
               )}
               style={{ width: stepWidth, height: 18 }}
             >
-              {sideLabels[s]}
+              {zoneLabels[s]}
             </button>
           ))}
         </div>

@@ -60,7 +60,7 @@ export default function AnomalyLibrary() {
   const [selectedAssetTypes, setSelectedAssetTypes] = useState<string[]>([]);
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
   const [directionFilter, setDirectionFilter] = useState<"all" | "LHS" | "RHS">("all");
-  const [sideFilter, setSideFilter] = useState<"all" | "Shoulder" | "Median" | "Pavement" | "Overhead">("all");
+  const [zoneFilter, setZoneFilter] = useState<"all" | "shoulder" | "median" | "pavement" | "overhead">("all");
   const [surveyYear, setSurveyYear] = useState<string>("2025");
 
   const [selectedAnomaly, setSelectedAnomaly] = useState<AssetRecord | null>(null);
@@ -183,8 +183,9 @@ export default function AnomalyLibrary() {
     const q = searchQuery.toLowerCase().trim();
     return anomalies.filter((a) => {
       if (categoryFilter !== "all" && a.assetCategory !== categoryFilter) return false;
+      if (directionFilter !== "all" && a.side !== directionFilter) return false;
       if (selectedAssetTypes.length > 0 && !selectedAssetTypes.includes(a.assetType)) return false;
-      if (sideFilter !== "all" && a.side !== sideFilter) return false;
+      if (zoneFilter !== "all" && a.zone !== zoneFilter) return false;
       if (q && !(
         a.anomalyId.toLowerCase().includes(q) ||
         a.assetId.toLowerCase().includes(q) ||
@@ -194,7 +195,7 @@ export default function AnomalyLibrary() {
       )) return false;
       return true;
     });
-  }, [anomalies, categoryFilter, selectedAssetTypes, directionFilter, sideFilter, searchQuery]);
+  }, [anomalies, categoryFilter, selectedAssetTypes, directionFilter, zoneFilter, searchQuery]);
 
   // ── Navigation ──
   const navigateAnomaly = useCallback((direction: 'prev' | 'next') => {
@@ -261,7 +262,7 @@ export default function AnomalyLibrary() {
     setCategoryFilter("all");
     setSelectedAssetTypes([]);
     setDirectionFilter("all");
-    setSideFilter("all");
+    setZoneFilter("all");
     setSearchQuery("");
   }, []);
 
@@ -323,8 +324,8 @@ export default function AnomalyLibrary() {
         countLabel="anomalies"
         directionFilter={directionFilter}
         onDirectionChange={setDirectionFilter}
-        sideFilter={sideFilter}
-        onSideChange={setSideFilter}
+        zoneFilter={zoneFilter}
+        onZoneChange={setZoneFilter}
         categoryFilter={categoryFilter}
         onCategoryChange={setCategoryFilter}
         selectedAssetTypes={selectedAssetTypes}
