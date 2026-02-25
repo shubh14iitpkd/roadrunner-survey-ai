@@ -239,52 +239,7 @@ export default function AssetDetailSidebar({
         expanded ? "w-96" : "w-72"
       )}
     >
-      {markerPopup ? (
-        /* ── Marker Popup View ── */
-        <div className="flex flex-col h-full">
-          <div className="flex-1 relative min-h-0 bg-muted">
-            {markerPopup.frameData?.raw_image_url || markerPopup.frameData?.image_data ? (
-              <img
-                src={markerPopup.frameData.raw_image_url || markerPopup.frameData.image_data}
-                alt="Road view"
-                className="w-full h-full object-cover"
-              />
-            ) : (
-              <div className="flex items-center justify-center h-full">
-                <Eye className="h-8 w-8 text-muted-foreground/30" />
-              </div>
-            )}
-            <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/80 via-black/50 to-transparent p-2.5 pt-8">
-              <p className="text-[10px] text-white/70 uppercase tracking-wider font-semibold mb-0.5">Road</p>
-              <p className="text-xs text-white font-semibold truncate">{markerPopup.trackTitle}</p>
-            </div>
-            <button
-              className="absolute top-1.5 right-1.5 bg-black/50 hover:bg-black/70 text-white rounded-full p-1 transition-colors"
-              onClick={onCloseMarker}
-            >
-              <X className="h-3 w-3" />
-            </button>
-          </div>
-          <div className="p-2 space-y-1.5 shrink-0">
-            <div className="grid grid-cols-2 gap-x-2 gap-y-0.5">
-              {([
-                ["Frame", `${markerPopup.pointIndex + 1}/${markerPopup.totalPoints}`],
-                ["Detections", `${markerPopup.frameData?.detections?.length || 0}`],
-                ["Position", markerPopup.frameData?.gpx_point ? `${markerPopup.frameData.gpx_point.lat.toFixed(4)}, ${markerPopup.frameData.gpx_point.lon.toFixed(4)}` : "—"],
-              ] as [string, string][]).map(([label, val]) => (
-                <div key={label}>
-                  <p className="text-[7px] text-muted-foreground uppercase tracking-wider">{label}</p>
-                  <p className="text-[10px] font-mono font-medium text-foreground leading-tight">{val}</p>
-                </div>
-              ))}
-            </div>
-            <Button variant="default" size="sm" className="w-full h-6 text-[10px] gap-1" onClick={onShowFullView}>
-              <Maximize2 className="h-3 w-3" />
-              Full View
-            </Button>
-          </div>
-        </div>
-      ) : selectedAsset ? (
+      {selectedAsset ? (
         /* ── Selected Asset Detail ── */
         <div className="flex flex-col h-full">
           {/* Image area with canvas overlay for annotation */}

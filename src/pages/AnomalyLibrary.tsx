@@ -3,7 +3,7 @@ import { useSearchParams, Link } from "react-router-dom";
 import LeafletMapView from "@/components/LeafletMapView";
 import FrameComparisonPopup from "@/components/FrameComparisonPopup";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
@@ -372,53 +372,63 @@ export default function AnomalyLibrary() {
           }}
           onCloseMarker={() => setMarkerPopup(null)}
           onShowFullView={() => setShowFullView(true)}
-          emptyLabel="anomaly"
+          emptyLabel="defect"
         />
       </div>
 
       {/* Full Road View Dialog */}
-      <Dialog open={showFullView && !!markerPopup} onOpenChange={(open) => !open && setShowFullView(false)}>
+      <Dialog open={showFullView} onOpenChange={(open) => !open && setShowFullView(false)}>
+        <DialogHeader className="hidden">
+          <DialogTitle>Full Asset View</DialogTitle>
+          <DialogDescription>
+            Full description of an asset
+          </DialogDescription>
+        </DialogHeader>
         <DialogContent className="max-w-3xl w-[90vw] max-h-[90vh] overflow-auto p-0" style={{ zIndex: 9999 }}>
-          {markerPopup && (
-            <>
-              {(() => {
-                const baseDate = selectedAnomaly ? new Date(selectedAnomaly.lastSurveyDate) : new Date();
-                const surveyHistory = selectedAnomaly ? [
-                  { surveyId: "SRV-2025-Q3-01", date: selectedAnomaly.lastSurveyDate, detected: true, issue: selectedAnomaly.issue },
-                  { surveyId: "SRV-2025-Q3-02", date: new Date(baseDate.getTime() + 14 * 86400000).toISOString().slice(0, 10), detected: true, issue: selectedAnomaly.issue },
-                  { surveyId: "SRV-2025-Q4-01", date: new Date(baseDate.getTime() + 42 * 86400000).toISOString().slice(0, 10), detected: false, issue: selectedAnomaly.issue },
-                ] : [];
-                const currentSurvey = surveyHistory[selectedSurveyIdx] || surveyHistory[0];
-                const isDetected = currentSurvey?.detected ?? true;
-
-                const surveyFrameData = {
-                  ...markerPopup.frameData,
-                  detections: isDetected ? (markerPopup.frameData.detections || [
-                    { class_name: selectedAnomaly?.issue || "Anomaly", confidence: 0.92, bbox: { x: 20, y: 30, width: 25, height: 20 }, condition: "Detected", category: "Overhead Infrastructure Assets" },
-                  ]) : [],
-                  timestamp: currentSurvey?.date || markerPopup.frameData.timestamp,
+              {selectedAnomaly && (() => {
+                const assetFrameData = {
+                  videoId: selectedAnomaly.videoId || "",
+                  frame_number: selectedAnomaly.frameNumber ?? 0,
+                  baseUrl: "",
+                  width: frameWidth ?? 0,
+                  height: frameHeight ?? 0,
+                  image_data: imageUrl ?? undefined,
+                  timestamp: selectedAnomaly.lastSurveyDate,
+                  gpx_point: { lat: selectedAnomaly.lat, lon: selectedAnomaly.lng },
+                  detections: selectedAnomaly.box ? [
+                    {
+                      class_name: selectedAnomaly.assetType,
+                      confidence: 0.92,
+                      bbox: {
+                        x: selectedAnomaly.box.x,
+                        y: selectedAnomaly.box.y,
+                        width: selectedAnomaly.box.width,
+                        height: selectedAnomaly.box.height,
+                      },
+                      condition: selectedAnomaly.issue,
+                      category: selectedAnomaly.assetCategory,
+                    },
+                  ] : [],
                 };
 
                 return (
                   <div className="p-1">
                     <FrameComparisonPopup
-                      frameData={surveyFrameData}
-                      trackTitle={markerPopup.trackTitle}
-                      pointIndex={markerPopup.pointIndex}
-                      totalPoints={markerPopup.totalPoints}
+                      frameData={assetFrameData}
+                      trackTitle={selectedAnomaly.roadName}
+                      pointIndex={0}
+                      totalPoints={1}
                       onClose={() => setShowFullView(false)}
                     />
                   </div>
                 );
               })()}
 
-              {/* Survey History Timeline */}
+              {/* Survey Information */}
               {selectedAnomaly && (() => {
                 const baseDate = new Date(selectedAnomaly.lastSurveyDate);
                 const surveyHistory = [
                   { surveyId: "SRV-2025-Q3-01", date: selectedAnomaly.lastSurveyDate, detected: true, issue: selectedAnomaly.issue },
-                  { surveyId: "SRV-2025-Q3-02", date: new Date(baseDate.getTime() + 14 * 86400000).toISOString().slice(0, 10), detected: true, issue: selectedAnomaly.issue },
-                  { surveyId: "SRV-2025-Q4-01", date: new Date(baseDate.getTime() + 42 * 86400000).toISOString().slice(0, 10), detected: false, issue: selectedAnomaly.issue },
                 ];
                 const reversed = [...surveyHistory].reverse();
 
@@ -463,17 +473,10 @@ export default function AnomalyLibrary() {
                                   isSelected && "ring-2 ring-primary/30 shadow-sm"
                                 )}
                               >
-                                {isSelected && (
-                                  <div className="text-[8px] font-semibold text-primary uppercase tracking-wider mb-1.5">▸ Currently Viewing</div>
-                                )}
-                                <div className="grid grid-cols-6 gap-3 text-xs">
+                                <div className="grid grid-cols-5 gap-3 text-xs">
                                   <div>
                                     <p className="text-muted-foreground text-[9px] uppercase tracking-wider">Survey</p>
                                     <p className="font-mono font-semibold text-foreground">{survey.surveyId}</p>
-                                  </div>
-                                  <div>
-                                    <p className="text-muted-foreground text-[9px] uppercase tracking-wider">Anomaly</p>
-                                    <p className={cn("font-semibold", statusClass)}>{statusLabel}</p>
                                   </div>
                                   <div>
                                     <p className="text-muted-foreground text-[9px] uppercase tracking-wider">Issue</p>
@@ -501,8 +504,6 @@ export default function AnomalyLibrary() {
                   </div>
                 );
               })()}
-            </>
-          )}
         </DialogContent>
       </Dialog>
 

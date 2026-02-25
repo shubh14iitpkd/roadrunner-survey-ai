@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { ANNOTATION_CATEGORIES } from '@/services/demoDataService';
 import { Layers, Eye, EyeOff, ZoomIn, ZoomOut } from 'lucide-react';
+import { getCategoryBadgeStyle } from '@/components/CategoryBadge';
 
 interface Detection {
   class_name: string;
@@ -154,7 +155,7 @@ export default function FrameComparisonPopup({
   const imageUrl = frameData.image_data || frameData.ai_image_url || frameData.raw_image_url;
 
   return (
-    <div style={{ width: '100%', maxWidth: '800px', fontSize: '13px' }}>
+    <div className="p-2" style={{ width: '100%', fontSize: '13px' }}>
       {/* Header */}
       <div style={{ 
         display: 'flex', 
@@ -204,38 +205,6 @@ export default function FrameComparisonPopup({
         </div>
       </div>
 
-      {/* Category Filters */}
-      <div style={{ 
-        display: 'flex', 
-        gap: '6px', 
-        marginBottom: '12px', 
-        flexWrap: 'wrap',
-        alignItems: 'center',
-      }}>
-        <Layers className="h-4 w-4 text-muted-foreground" />
-        {Object.entries(CATEGORY_COLORS).map(([category, color]) => {
-          const count = detectionsByCategory[category]?.length || 0;
-          const isActive = selectedCategories.has(category);
-          return (
-            <Button
-              key={category}
-              size="sm"
-              variant={isActive ? 'default' : 'outline'}
-              onClick={() => toggleCategory(category)}
-              className="h-7 px-2 text-xs rounded-full"
-              style={{
-                borderColor: color,
-                backgroundColor: isActive ? color : 'transparent',
-                color: isActive ? '#ffffff' : color,
-                opacity: count > 0 ? 1 : 0.5,
-              }}
-            >
-              {category} ({count})
-            </Button>
-          );
-        })}
-      </div>
-
       {/* Controls */}
       <div style={{ display: 'flex', gap: '8px', marginBottom: '10px', justifyContent: 'space-between' }}>
         <div style={{ display: 'flex', gap: '6px' }}>
@@ -249,291 +218,163 @@ export default function FrameComparisonPopup({
             Labels
           </Button>
         </div>
-        
-        <Badge variant="secondary" className="bg-primary/20">
-          {visibleDetections} detections visible
-        </Badge>
       </div>
 
       {/* Frame Comparison View */}
-      {frameData.is_demo ? (
-        // Demo mode - Show detection summary
-        <div style={{ 
-          background: 'linear-gradient(135deg, #1e3a5f 0%, #0d1b2a 100%)',
-          padding: '20px',
-          borderRadius: '8px',
-        }}>
-          <div style={{ 
-            display: 'flex', 
-            alignItems: 'center', 
-            gap: '8px', 
-            marginBottom: '16px',
-            color: '#60a5fa',
-          }}>
-            <Layers className="h-5 w-5" />
-            <span style={{ fontWeight: 600 }}>Detection Summary</span>
-          </div>
-          
-          {Object.entries(detectionsByCategory).length > 0 ? (
-            <div style={{ display: 'grid', gap: '8px' }}>
-              {Object.entries(detectionsByCategory)
-                .filter(([cat]) => selectedCategories.has(cat))
-                .map(([category, detections]) => (
-                <div key={category} style={{ 
-                  background: 'rgba(255,255,255,0.05)',
-                  borderRadius: '8px',
-                  padding: '12px',
-                  borderLeft: `3px solid ${CATEGORY_COLORS[category] || '#fff'}`,
-                }}>
+      <Tabs value={activeTab} className='w-full' onValueChange={(v) => setActiveTab(v as any)}>
+        <TabsList className="mb-3">
+          <TabsTrigger value="comparison">Side by Side</TabsTrigger>
+          <TabsTrigger value="detections">AI Analysis</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="comparison">
+          <div style={{ display: 'flex', gap: '10px' }}>
+            {/* Raw Frame */}
+            <div style={{ flex: 1 }}>
+              <div style={{ 
+                fontSize: '10px', 
+                fontWeight: 600, 
+                marginBottom: '4px',
+                color: '#94a3b8',
+                textTransform: 'uppercase',
+              }}>
+                Raw Frame
+              </div>
+              <div style={{ 
+                background: '#0f172a', 
+                borderRadius: '6px', 
+                overflow: 'hidden',
+                aspectRatio: '16/9',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}>
+                {imageUrl ? (
+                  <img
+                    src={imageUrl}
+                    alt="Raw frame"
+                    style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+                  />
+                ) : (
+                  <div style={{ color: '#64748b', fontSize: '12px' }}>
+                    Frame not available
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* AI Analyzed Frame */}
+            <div style={{ flex: 1 }}>
+              <div style={{ 
+                fontSize: '10px', 
+                fontWeight: 600, 
+                marginBottom: '4px',
+                color: '#3b82f6',
+                textTransform: 'uppercase',
+              }}>
+                AI Analyzed
+              </div>
+              <div style={{ 
+                position: 'relative',
+                background: '#0f172a', 
+                borderRadius: '6px', 
+                overflow: 'hidden',
+                aspectRatio: '16/9',
+              }}>
+                {imageUrl ? (
+                  <>
+                    <img
+                      ref={imgRef}
+                      src={imageUrl}
+                      alt="AI analyzed frame"
+                      style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+                      onLoad={() => setImageLoaded(true)}
+                    />
+                    <canvas
+                      ref={canvasRef}
+                      style={{
+                        position: 'absolute',
+                        top: 0,
+                        left: 0,
+                        width: '100%',
+                        height: '100%',
+                        pointerEvents: 'none',
+                      }}
+                    />
+                  </>
+                ) : (
                   <div style={{ 
-                    fontWeight: 600, 
-                    color: CATEGORY_COLORS[category] || '#fff',
-                    marginBottom: '8px',
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    justifyContent: 'center',
+                    height: '100%',
+                    color: '#64748b', 
                     fontSize: '12px',
                   }}>
-                    {category}
+                    Frame not available
                   </div>
-                  <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                    {detections.map((d, i) => (
-                      <Badge 
-                        key={i}
-                        variant="secondary"
-                        className="text-xs"
-                        style={{ 
-                          backgroundColor: `${CATEGORY_COLORS[category]}20`,
-                          color: CATEGORY_COLORS[category],
-                        }}
-                      >
-                        {d.class_name} • {(d.confidence * 100).toFixed(0)}%
-                        {d.condition && ` • ${d.condition}`}
-                      </Badge>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div style={{ textAlign: 'center', color: '#94a3b8', padding: '16px' }}>
-              No detections at this location
-            </div>
-          )}
-        </div>
-      ) : (
-        // Real mode - Show frame comparison with bounding boxes
-        <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as any)}>
-          <TabsList className="mb-3">
-            <TabsTrigger value="comparison">Side by Side</TabsTrigger>
-            <TabsTrigger value="detections">AI Analysis</TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="comparison">
-            <div style={{ display: 'flex', gap: '10px' }}>
-              {/* Raw Frame */}
-              <div style={{ flex: 1 }}>
-                <div style={{ 
-                  fontSize: '10px', 
-                  fontWeight: 600, 
-                  marginBottom: '4px',
-                  color: '#94a3b8',
-                  textTransform: 'uppercase',
+                )}
+                <div style={{
+                  position: 'absolute',
+                  top: '6px',
+                  right: '6px',
+                  background: 'rgba(59, 130, 246, 0.9)',
+                  color: 'white',
+                  padding: '2px 6px',
+                  borderRadius: '3px',
+                  fontSize: '9px',
+                  fontWeight: 600,
                 }}>
-                  Raw Frame
-                </div>
-                <div style={{ 
-                  background: '#0f172a', 
-                  borderRadius: '6px', 
-                  overflow: 'hidden',
-                  aspectRatio: '16/9',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}>
-                  {imageUrl ? (
-                    <img
-                      src={imageUrl}
-                      alt="Raw frame"
-                      style={{ width: '100%', height: '100%', objectFit: 'contain' }}
-                    />
-                  ) : (
-                    <div style={{ color: '#64748b', fontSize: '12px' }}>
-                      Frame not available
-                    </div>
-                  )}
+                  AI DETECTED
                 </div>
               </div>
+            </div>
+          </div>
+        </TabsContent>
 
-              {/* AI Analyzed Frame */}
-              <div style={{ flex: 1 }}>
-                <div style={{ 
-                  fontSize: '10px', 
-                  fontWeight: 600, 
-                  marginBottom: '4px',
-                  color: '#3b82f6',
-                  textTransform: 'uppercase',
-                }}>
-                  AI Analyzed
-                </div>
-                <div style={{ 
-                  position: 'relative',
-                  background: '#0f172a', 
-                  borderRadius: '6px', 
-                  overflow: 'hidden',
-                  aspectRatio: '16/9',
-                }}>
-                  {imageUrl ? (
-                    <>
-                      <img
-                        ref={imgRef}
-                        src={imageUrl}
-                        alt="AI analyzed frame"
-                        style={{ width: '100%', height: '100%', objectFit: 'contain' }}
-                        onLoad={() => setImageLoaded(true)}
-                      />
-                      <canvas
-                        ref={canvasRef}
-                        style={{
-                          position: 'absolute',
-                          top: 0,
-                          left: 0,
-                          width: '100%',
-                          height: '100%',
-                          pointerEvents: 'none',
-                        }}
-                      />
-                    </>
-                  ) : (
-                    <div style={{ 
-                      display: 'flex', 
-                      alignItems: 'center', 
-                      justifyContent: 'center',
-                      height: '100%',
-                      color: '#64748b', 
-                      fontSize: '12px',
-                    }}>
-                      Frame not available
-                    </div>
-                  )}
-                  <div style={{
+        <TabsContent value="detections">
+          <div style={{ 
+            position: 'relative',
+            background: '#0f172a', 
+            borderRadius: '6px', 
+            overflow: 'hidden',
+          }}>
+            {imageUrl ? (
+              <>
+                <img
+                  ref={imgRef}
+                  src={imageUrl}
+                  alt="AI analyzed frame"
+                  style={{ width: '100%', height: 'auto' }}
+                  onLoad={() => setImageLoaded(true)}
+                />
+                <canvas
+                  ref={canvasRef}
+                  style={{
                     position: 'absolute',
-                    top: '6px',
-                    right: '6px',
-                    background: 'rgba(59, 130, 246, 0.9)',
-                    color: 'white',
-                    padding: '2px 6px',
-                    borderRadius: '3px',
-                    fontSize: '9px',
-                    fontWeight: 600,
-                  }}>
-                    AI DETECTED
-                  </div>
-                </div>
+                    top: 0,
+                    left: 0,
+                    width: '100%',
+                    height: '100%',
+                    pointerEvents: 'none',
+                  }}
+                />
+              </>
+            ) : (
+              <div style={{ 
+                aspectRatio: '16/9',
+                display: 'flex', 
+                alignItems: 'center', 
+                justifyContent: 'center',
+                color: '#64748b', 
+                fontSize: '12px',
+              }}>
+                Frame not available
               </div>
-            </div>
-          </TabsContent>
-
-          <TabsContent value="detections">
-            <div style={{ 
-              position: 'relative',
-              background: '#0f172a', 
-              borderRadius: '6px', 
-              overflow: 'hidden',
-            }}>
-              {imageUrl ? (
-                <>
-                  <img
-                    ref={imgRef}
-                    src={imageUrl}
-                    alt="AI analyzed frame"
-                    style={{ width: '100%', height: 'auto' }}
-                    onLoad={() => setImageLoaded(true)}
-                  />
-                  <canvas
-                    ref={canvasRef}
-                    style={{
-                      position: 'absolute',
-                      top: 0,
-                      left: 0,
-                      width: '100%',
-                      height: '100%',
-                      pointerEvents: 'none',
-                    }}
-                  />
-                </>
-              ) : (
-                <div style={{ 
-                  aspectRatio: '16/9',
-                  display: 'flex', 
-                  alignItems: 'center', 
-                  justifyContent: 'center',
-                  color: '#64748b', 
-                  fontSize: '12px',
-                }}>
-                  Frame not available
-                </div>
-              )}
-            </div>
-          </TabsContent>
-        </Tabs>
-      )}
-
-      {/* Detection Details Table */}
-      {frameData.detections?.length > 0 && (
-        <div style={{ marginTop: '12px' }}>
-          <div style={{ 
-            fontSize: '11px', 
-            fontWeight: 600, 
-            marginBottom: '6px',
-            color: '#94a3b8',
-          }}>
-            Detection Details
+            )}
           </div>
-          <div style={{ 
-            background: 'rgba(255,255,255,0.05)', 
-            borderRadius: '6px',
-            maxHeight: '120px',
-            overflowY: 'auto',
-          }}>
-            <table style={{ width: '100%', fontSize: '10px', borderCollapse: 'collapse' }}>
-              <thead>
-                <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
-                  <th style={{ padding: '6px 8px', textAlign: 'left', color: '#94a3b8' }}>Asset</th>
-                  <th style={{ padding: '6px 8px', textAlign: 'left', color: '#94a3b8' }}>Category</th>
-                  <th style={{ padding: '6px 8px', textAlign: 'left', color: '#94a3b8' }}>Confidence</th>
-                  <th style={{ padding: '6px 8px', textAlign: 'left', color: '#94a3b8' }}>Condition</th>
-                </tr>
-              </thead>
-              <tbody>
-                {frameData.detections
-                  .filter(d => selectedCategories.has(d.category || 'Other'))
-                  .map((d, i) => (
-                  <tr key={i} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-                    <td style={{ padding: '4px 8px', color: '#e2e8f0' }}>{d.class_name}</td>
-                    <td style={{ padding: '4px 8px' }}>
-                      <span style={{ 
-                        color: CATEGORY_COLORS[d.category || 'Other'],
-                        fontWeight: 500,
-                      }}>
-                        {d.category || 'Other'}
-                      </span>
-                    </td>
-                    <td style={{ padding: '4px 8px', color: '#e2e8f0' }}>
-                      {(d.confidence * 100).toFixed(0)}%
-                    </td>
-                    <td style={{ padding: '4px 8px' }}>
-                      <span style={{
-                        color: d.condition === 'good' ? '#22c55e' : 
-                               d.condition === 'fair' ? '#f59e0b' : '#e2e8f0',
-                      }}>
-                        {d.condition || '—'}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }
