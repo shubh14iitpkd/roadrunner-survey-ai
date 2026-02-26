@@ -100,7 +100,7 @@ export default function FrameComparisonPopup({
       ctx.globalAlpha = 1;
       // Draw label
       if (showLabels) {
-        const label = `${d.class_name} ${(d.confidence * 100).toFixed(0)}%`;
+        const label = d.class_name;
         ctx.font = 'bold 10px Arial';
         const textMetrics = ctx.measureText(label);
         

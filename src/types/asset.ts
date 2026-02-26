@@ -2,6 +2,8 @@
 export interface AssetRecord {
   id?: string;
   surveyId?: string;
+  condition?: string;
+  markerColor?: string;
   anomalyId: string;
   assetId: string;
   assetType: string;

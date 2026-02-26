@@ -144,7 +144,7 @@ export default function LibraryMapView({
             pathOptions={{
               color: "#fff",
               stroke: true,
-              fillColor: isSelected ? SELECTED_COLOR : "red",
+              fillColor: isSelected ? SELECTED_COLOR : (asset.markerColor ?? "red"),
               fillOpacity: isSelected ? 0.9 : 0.7,
               weight: isSelected ? 1.8 : 1.5,
             }}

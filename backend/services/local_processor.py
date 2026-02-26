@@ -3,6 +3,8 @@ import time
 import os
 import json
 import cv2
+import re
+from ulid import ULID
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional
 import numpy as np
@@ -45,7 +47,7 @@ class LocalVideoProcessor:
 
         # Max concurrent workers for processing
         self.max_concurrency = int(self.config.get("max_concurrency", "5"))
-
+        self.damaged_conditions = {'overgrown', 'fadedpaint', 'dirty', 'missing', 'broken', 'bent', 'damaged'}
         # Inference image size (YOLO standard)
         self.inference_size = 640
         
@@ -461,13 +463,12 @@ class LocalVideoProcessor:
                                 if db is not None:
                                     # Look up asset_id and category_id from label map
                                     label_info = self.label_map.get(class_name, {})
-                                    condition = (
-                                                "damaged"
-                                                if confidence < 0.3
-                                                else "good"
-                                            )
+                                    cond = re.sub(r"\w+_AssetCondition_|\w+_VerticalClearance_", "", class_name).lower()
+                                    condition = cond if cond in self.damaged_conditions else "good"
                                     
-                                    summary[condition] += 1
+                                    # Update summary (consolidate all damaged types into 'damaged' key)
+                                    summary_key = "good" if condition == "good" else "damaged"
+                                    summary[summary_key] += 1
                                     summary["total_assets"] += 1
                                     
                                     zone = self.zone_mapper.resolve_zone(class_name, t_box, width, height)
@@ -478,6 +479,7 @@ class LocalVideoProcessor:
                                             "track_id": track_id,
                                             "asset_type": class_name,
                                             "type": class_name,
+                                            "defect_id": str(ULID()) if condition != "good" else None,
                                             "asset_id": label_info.get("asset_id"),
                                             "category_id": label_info.get("category_id"),
                                             "confidence": confidence,

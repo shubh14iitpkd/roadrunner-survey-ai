@@ -56,9 +56,21 @@ export default function AssetDetailSidebar({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   // Counter incremented on image onLoad to trigger canvas re-draw
   const [drawTrigger, setDrawTrigger] = useState(0);
+  const prevImageUrl = useRef<string | null>(null);
+
+  // When the selected asset changes but the image URL stays the same (same video
+  // frame shared by multiple assets), the <img> onLoad won't fire because src is
+  // unchanged. Detect this and manually bump drawTrigger so the canvas redraws.
+  useEffect(() => {
+    if (imageUrl && imageUrl === prevImageUrl.current && selectedAsset?.box) {
+      // Same image, different asset — force redraw
+      setDrawTrigger((n) => n + 1);
+    }
+    prevImageUrl.current = imageUrl;
+  }, [imageUrl, selectedAsset?.id]);
 
   const selectedIdx = selectedAsset
-    ? filteredAssets.findIndex((a) => a.anomalyId === selectedAsset.anomalyId)
+    ? filteredAssets.findIndex((a) => a.id === selectedAsset.id)
     : -1;
 
   // ── Draw bounding box annotation on canvas overlay ──
@@ -282,8 +294,8 @@ export default function AssetDetailSidebar({
                 <Eye className="h-8 w-8 text-muted-foreground/30" />
               </div>
             )}
-            <span className="absolute top-1.5 left-1.5 inline-flex items-center rounded bg-destructive/90 text-destructive-foreground px-1 py-0.5 text-[9px] font-semibold z-10">
-              {selectedAsset.issue}
+            <span className={cn(selectedAsset.condition == "good" ? "bg-green-500/90" : "capitalize bg-destructive/90 text-destructive-foreground", "absolute top-1.5 left-1.5 inline-flex items-center rounded px-1 py-0.5 text-[9px] font-semibold z-10")}>
+              {selectedAsset.condition}
             </span>
             <button
               className="absolute top-1.5 right-1.5 bg-black/50 hover:bg-black/70 text-white rounded-full p-0.5 transition-colors z-10"

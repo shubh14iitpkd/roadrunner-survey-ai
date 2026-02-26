@@ -147,7 +147,7 @@ export default function AnomalyLibrary() {
             : `SUR-${idx}`;
           return {
             id: mongoId,
-            anomalyId: asset.anomaly_id || `ANM-${String(idx + 1).padStart(4, '0')}`,
+            anomalyId: asset.defect_id || `ANM-${String(idx + 1).padStart(4, '0')}`,
             assetId: asset.asset_id,
             category_id: asset.category_id,
             assetType: assetTypeName,
@@ -505,7 +505,7 @@ export default function AnomalyLibrary() {
                                     <p className="font-semibold text-foreground">{selectedAnomaly.assetType}</p>
                                   </div>
                                   <div>
-                                    <p className="text-muted-foreground text-[9px] uppercase tracking-wider">Direction / Side</p>
+                                    <p className="text-muted-foreground text-[9px] uppercase tracking-wider">Side / Zone</p>
                                     <p className="font-semibold text-foreground">{selectedAnomaly.side} · {selectedAnomaly.zone}</p>
                                   </div>
                                   <div>

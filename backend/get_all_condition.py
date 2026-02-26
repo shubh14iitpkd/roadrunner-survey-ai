@@ -19,6 +19,6 @@ conditions = set()
 for a in assets:
     name = a.get("type", "")
     p = re.sub(r"\w+_AssetCondition_|\w+_VerticalClearance_", "", name)
-    conditions.add(p)
+    conditions.add(p.lower())
 
 print(conditions)

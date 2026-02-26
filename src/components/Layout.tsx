@@ -14,6 +14,7 @@ import {
   LogOut,
   ChevronsLeft,
   ChevronsRight,
+  Layers,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -24,7 +25,7 @@ import logo from "@/assets/roadsight-logo.jpg";
 const navigation = [
   { name: "Dashboard", href: "/", icon: LayoutDashboard },
   { name: "Anomaly Library", href: "/gis", icon: AlertTriangle },
-  { name: "Master Assets Library", href: "/assets", icon: Database },
+  { name: "Asset Library", href: "/asset-library", icon: Database },
   { name: "Ask AI", href: "/ask-ai", icon: MessageSquare },
   { name: "Project Management", href: null, icon: null, isHeading: true },
   { name: "Road Register", href: "/roads", icon: Map },
