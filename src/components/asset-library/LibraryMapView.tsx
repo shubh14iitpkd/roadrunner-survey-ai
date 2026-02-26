@@ -1,4 +1,4 @@
-import { useEffect, useRef, useMemo } from "react";
+import { useEffect, useRef, useMemo, useCallback } from "react";
 import { isAssetIconExist, getAssetIconFromId } from "@/components/settings/iconConfig";
 import {
   MapContainer,
@@ -11,6 +11,20 @@ import {
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import type { AssetRecord } from "@/types/asset";
+
+/* ── Helper: build a selected variant of an icon (larger) ── */
+function getSelectedIcon(baseIcon: L.Icon): L.Icon {
+  const opts = (baseIcon as any).options;
+  const [w, h] = opts.iconSize as [number, number];
+  const [ax, ay] = opts.iconAnchor as [number, number];
+  const scale = 1.45;
+  return L.icon({
+    ...opts,
+    iconSize: [Math.round(w * scale), Math.round(h * scale)] as [number, number],
+    iconAnchor: [Math.round(ax * scale), Math.round(ay * scale)] as [number, number],
+    className: `${opts.className ?? ''} leaflet-marker-selected`.trim(),
+  });
+}
 
 /* ── Props ──────────────────────────────────────────────── */
 interface LibraryMapViewProps {
@@ -95,25 +109,34 @@ export default function LibraryMapView({
 
       {assets.map((asset) => {
         const isSelected = asset.anomalyId === selectedId;
-        return (
-          ( wantsIcons && isAssetIconExist(asset.assetId) ?
+        const useIcon = wantsIcons && isAssetIconExist(asset.assetId);
+
+        if (useIcon) {
+          const baseIcon = getAssetIconFromId(asset.assetId);
+          const icon = isSelected ? getSelectedIcon(baseIcon) : baseIcon;
+          return (
             <Marker
-            key={asset.anomalyId}
-            position={[asset.lat, asset.lng]}
-            icon={getAssetIconFromId(asset.assetId)}
-            eventHandlers={{
-              click: () => onSelect(asset),
-            }}
-          >
-            <Tooltip direction="top" offset={[0, -8]} opacity={0.95}>
-              <div className="text-xs leading-tight">
-                <div className="font-semibold">{asset.assetType}</div>
-                <div className="text-[10px] text-muted-foreground font-mono">
-                  {asset.lat.toFixed(5)}, {asset.lng.toFixed(5)}
+              key={asset.anomalyId}
+              position={[asset.lat, asset.lng]}
+              icon={icon}
+              zIndexOffset={isSelected ? 1000 : 0}
+              eventHandlers={{
+                click: () => onSelect(asset),
+              }}
+            >
+              <Tooltip direction="top" offset={[0, -8]} opacity={0.95}>
+                <div className="text-xs leading-tight">
+                  <div className="font-semibold">{asset.assetType}</div>
+                  <div className="text-[10px] text-muted-foreground font-mono">
+                    {asset.lat.toFixed(5)}, {asset.lng.toFixed(5)}
+                  </div>
                 </div>
-              </div>
-            </Tooltip>
-          </Marker>:
+              </Tooltip>
+            </Marker>
+          );
+        }
+
+        return (
           <CircleMarker
             key={asset.anomalyId}
             center={[asset.lat, asset.lng]}
@@ -121,9 +144,7 @@ export default function LibraryMapView({
             pathOptions={{
               color: "#fff",
               stroke: true,
-              fillColor: isSelected
-                ? SELECTED_COLOR
-                : "red",
+              fillColor: isSelected ? SELECTED_COLOR : "red",
               fillOpacity: isSelected ? 0.9 : 0.7,
               weight: isSelected ? 1.8 : 1.5,
             }}
@@ -139,7 +160,7 @@ export default function LibraryMapView({
                 </div>
               </div>
             </Tooltip>
-          </CircleMarker>)
+          </CircleMarker>
         );
       })}
     </MapContainer>
