@@ -108,7 +108,7 @@ export default function LibraryMapView({
       <FlyToSelected assets={assets} selectedId={selectedId} />
 
       {assets.map((asset) => {
-        const isSelected = asset.defectId === selectedId;
+        const isSelected = asset.id === selectedId;
         const useIcon = wantsIcons && isAssetIconExist(asset.assetId);
 
         if (useIcon) {
@@ -116,7 +116,7 @@ export default function LibraryMapView({
           const icon = isSelected ? getSelectedIcon(baseIcon) : baseIcon;
           return (
             <Marker
-              key={asset.defectId}
+              key={asset.id}
               position={[asset.lat, asset.lng]}
               icon={icon}
               zIndexOffset={isSelected ? 1000 : 0}

@@ -347,7 +347,7 @@ export default function AssetLibrary() {
         <div className="flex-1 relative min-w-0" style={{ zIndex: 0, isolation: 'isolate' }}>
           <LibraryMapView
             assets={filteredAssets}
-            selectedId={selectedAsset?.defectId ?? null}
+            selectedId={selectedAsset?.id ?? null}
             onSelect={handleRowClick}
           />
         </div>
@@ -517,9 +517,10 @@ export default function AssetLibrary() {
         loadError={loadError}
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
-        selectedId={selectedAsset?.defectId ?? null}
+        selectedId={selectedAsset?.id ?? null}
         onRowClick={handleRowClick}
         onRetry={loadData}
+        idField="id"
         onClearFilters={clearFilters}
         columns={ASSET_COLUMNS}
       />

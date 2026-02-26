@@ -361,7 +361,7 @@ export default function DefectLibrary() {
         <div className="flex-1 relative min-w-0" style={{ zIndex: 0, isolation: 'isolate' }}>
           <LibraryMapView
             assets={filteredDefects}
-            selectedId={selectedDefect?.defectId ?? null}
+            selectedId={selectedDefect?.id ?? null}
             onSelect={handleRowClick}
           />
         </div>
