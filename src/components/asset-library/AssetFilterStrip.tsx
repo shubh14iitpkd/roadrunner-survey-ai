@@ -147,7 +147,7 @@ export default function AssetFilterStrip({
         <SelectContent className="bg-card z-50 max-h-64">
           <SelectItem value="all">All Categories</SelectItem>
           {categoryOptions.map((c) => (
-            <SelectItem key={c.id} value={c.id} className="text-xs">
+            <SelectItem key={c.id} value={c.name} className="text-xs">
               <span className="flex items-center gap-1.5">
                 <span className={`h-2 w-2 rounded-full ${getCategoryDotColor(c.id)}`} />
                 {c.name}

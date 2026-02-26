@@ -185,7 +185,9 @@ export default function DefectLibrary() {
 
   useEffect(() => {
     const typeParam = searchParams.get("type");
+    const categoryParam = searchParams.get("category");
     if (typeParam) setSelectedAssetTypes([typeParam]);
+    if (categoryParam) setCategoryFilter(categoryParam);
   }, [searchParams]);
 
   // ── Filtering ──

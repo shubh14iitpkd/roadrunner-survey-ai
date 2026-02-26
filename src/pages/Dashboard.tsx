@@ -347,7 +347,7 @@ export default function Dashboard() {
                 variant="outline"
                 size="sm"
                 className="w-full h-7 text-[11px] gap-1.5"
-                onClick={() => navigate(selectedCategory ? `/gis?type=${encodeURIComponent(selectedCategory)}` : '/gis')}
+                onClick={() => navigate(selectedCategory ? `/asset-library?category=${encodeURIComponent(selectedCategory)}` : '/asset-library')}
               >
                 <MapPin className="h-3 w-3" />
                 {selectedCategory ? `View ${selectedCategory} on Map` : "View All on Map"}
@@ -485,7 +485,7 @@ export default function Dashboard() {
                           variant="ghost"
                           size="sm"
                           className="h-7 text-[11px] gap-1 text-muted-foreground hover:text-foreground"
-                          onClick={() => navigate(`/gis?type=${encodeURIComponent(row.type)}&condition=Poor`)}
+                          onClick={() => navigate(`/defect-library?type=${encodeURIComponent(row.type)}`)}
                         >
                           <MapPin className="h-3 w-3" />
                           Map
@@ -575,7 +575,7 @@ export default function Dashboard() {
                           variant="ghost"
                           size="sm"
                           className="h-7 text-[11px] gap-1 text-muted-foreground hover:text-foreground"
-                          onClick={() => navigate(`/gis?road=${encodeURIComponent(row.road)}&condition=Poor`)}
+                          onClick={() => navigate(`/defect-library?road=${encodeURIComponent(row.road)}`)}
                         >
                           <MapPin className="h-3 w-3" />
                           Map
