@@ -1,5 +1,7 @@
 /** Shared record shape used by Anomaly Library and Asset Library pages */
 export interface AssetRecord {
+  id?: string;
+  surveyId?: string;
   anomalyId: string;
   assetId: string;
   assetType: string;

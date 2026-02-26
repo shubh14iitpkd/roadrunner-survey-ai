@@ -301,7 +301,7 @@ export default function AssetDetailSidebar({
             <div className="flex items-center gap-x-2">
               {([
                 ["ID", selectedAsset.anomalyId],
-                ["Asset", selectedAsset.assetId],
+                ["Asset ID", selectedAsset.id],
                 ["Type", selectedAsset.assetType],
                 ["Road Side", selectedAsset.side],
                 ["Zone", selectedAsset.zone],

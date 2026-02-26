@@ -58,10 +58,15 @@ export default function FrameComparisonPopup({
   const [imageLoaded, setImageLoaded] = useState(false);
   const [zoom, setZoom] = useState(1);
 
+  // When the tab switches, the img element is remounted so we must wait for
+  // the new onLoad before drawing. Reset imageLoaded to trigger that wait.
+  useEffect(() => {
+    setImageLoaded(false);
+  }, [activeTab]);
+
   // Draw bounding boxes on canvas
   useEffect(() => {
     if (!canvasRef.current || !imgRef.current || !imageLoaded) return;
-
     const canvas = canvasRef.current;
     const img = imgRef.current;
     const ctx = canvas.getContext('2d');
@@ -93,7 +98,6 @@ export default function FrameComparisonPopup({
       ctx.globalAlpha = 0.1;
       ctx.fillRect(x, y, w, h);
       ctx.globalAlpha = 1;
-
       // Draw label
       if (showLabels) {
         const label = `${d.class_name} ${(d.confidence * 100).toFixed(0)}%`;

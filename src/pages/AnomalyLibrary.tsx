@@ -36,7 +36,7 @@ const DUMMY_ISSUES: Record<string, string[]> = {
 // ── Table columns for Anomaly Library ──────────────────────
 const ANOMALY_COLUMNS: ColumnDef[] = [
   { key: "anomalyId", header: "Anomaly ID", className: "font-mono text-[11px] font-semibold py-1.5 px-1.5 whitespace-nowrap text-center", render: (a) => a.anomalyId },
-  { key: "assetId", header: "Asset ID", className: "font-mono text-[11px] py-1.5 px-1.5 whitespace-nowrap text-center", render: (a) => a.assetId },
+  { key: "assetId", header: "Asset ID", className: "font-mono text-[11px] py-1.5 px-1.5 whitespace-nowrap text-center", render: (a) => a.id },
   { key: "assetType", header: "Asset Type", className: "text-[10px] leading-tight py-1.5 px-1.5 min-w-[180px] max-w-[220px] text-center", render: (a) => <span className="line-clamp-2">{a.assetType}</span> },
   { key: "category", header: "Category", className: "py-1.5 px-1.5 text-center", render: (a) => <CategoryBadge category={a.assetCategory} categoryId={a.category_id} /> },
   { key: "coords", header: "Coordinates", className: "font-mono text-[10px] py-1.5 px-1.5 whitespace-nowrap text-center", render: (a) => `${a.lat.toFixed(4)}, ${a.lng.toFixed(4)}` },
@@ -138,14 +138,23 @@ export default function AnomalyLibrary() {
               : asset.video_id)
             : asset.video_key;
 
+          const mongoId = asset._id
+            ? (typeof asset._id === 'object' && (asset._id as any)?.$oid ? (asset._id as any).$oid : String(asset._id))
+            : `AST-${idx}`;
+
+          const surveyId = asset.survey_id
+            ? (typeof asset.survey_id === 'object' && (asset.survey_id as any)?.$oid ? (asset.survey_id as any).$oid : String(asset.survey_id))
+            : `SUR-${idx}`;
           return {
+            id: mongoId,
             anomalyId: asset.anomaly_id || `ANM-${String(idx + 1).padStart(4, '0')}`,
-            assetId: asset.asset_id || `AST-${idx}`,
+            assetId: asset.asset_id,
             category_id: asset.category_id,
             assetType: assetTypeName,
             assetCategory: categoryName,
             lat,
             lng,
+            surveyId: surveyId,
             roadName: routeMap[asset.route_id] || `Route ${asset.route_id || '?'}`,
             side: asset.side || 'Shoulder',
             zone: asset.zone || 'Unknown',
@@ -307,7 +316,7 @@ export default function AnomalyLibrary() {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <Select value={surveyYear} onValueChange={setSurveyYear}>
+            {/* <Select value={surveyYear} onValueChange={setSurveyYear}>
               <SelectTrigger className="h-7 w-[120px] text-[11px]">
                 <SelectValue />
               </SelectTrigger>
@@ -315,7 +324,7 @@ export default function AnomalyLibrary() {
                 <SelectItem value="2025">Survey 2025</SelectItem>
                 <SelectItem value="2026">Survey 2026</SelectItem>
               </SelectContent>
-            </Select>
+            </Select> */}
             <Button variant="outline" size="sm" className="h-7 text-[11px] gap-1.5" onClick={handleExportExcel}>
               <Download className="h-3 w-3" />
               Export Report
@@ -437,7 +446,7 @@ export default function AnomalyLibrary() {
               {selectedAnomaly && (() => {
                 const baseDate = new Date(selectedAnomaly.lastSurveyDate);
                 const surveyHistory = [
-                  { surveyId: "SRV-2025-Q3-01", date: selectedAnomaly.lastSurveyDate, detected: true, issue: selectedAnomaly.issue },
+                  { surveyId: selectedAnomaly.surveyId ?? "SRV-2025-Q3-01", date: selectedAnomaly.lastSurveyDate, detected: true, issue: selectedAnomaly.issue },
                 ];
                 const reversed = [...surveyHistory].reverse();
 
@@ -485,7 +494,7 @@ export default function AnomalyLibrary() {
                                 <div className="grid grid-cols-5 gap-3 text-xs">
                                   <div>
                                     <p className="text-muted-foreground text-[9px] uppercase tracking-wider">Survey</p>
-                                    <p className="font-mono font-semibold text-foreground">{survey.surveyId}</p>
+                                    <p className="font-mono font-semibold text-foreground">{survey.surveyId?.slice(-8)}</p>
                                   </div>
                                   <div>
                                     <p className="text-muted-foreground text-[9px] uppercase tracking-wider">Issue</p>

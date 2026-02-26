@@ -646,7 +646,7 @@ export default function SurveyUpload() {
                       <th className="text-left p-3 font-semibold text-sm w-20">Surveyor</th>
                       <th className="text-left p-3 font-semibold text-sm w-20">GPS</th>
                       <th className="text-left p-3 font-semibold text-sm w-32">Status</th>
-                      <th className="text-left p-3 font-semibold text-sm">Actions</th>
+                      <th className="text-center p-3 font-semibold text-sm">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -770,7 +770,7 @@ export default function SurveyUpload() {
 
                           {/* Actions column */}
                           <td className="p-3">
-                            <div className="flex items-center gap-1.5 flex-wrap">
+                            <div className="flex items-center justify-center gap-1.5 flex-wrap">
                               {video.status === "uploaded" && (
                                 <Button
                                   size="sm"
