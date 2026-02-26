@@ -49,7 +49,7 @@ export default function AssetDetailSidebar({
   onCloseMarker,
   getAssetDisplayName,
   onShowFullView,
-  emptyLabel = "anomaly",
+  emptyLabel = "defect",
 }: AssetDetailSidebarProps) {
   const expanded = !!(markerPopup || selectedAsset);
   const imgRef = useRef<HTMLImageElement>(null);
@@ -295,7 +295,7 @@ export default function AssetDetailSidebar({
               </div>
             )}
             <span className={cn(selectedAsset.condition == "good" ? "bg-green-500/90" : "capitalize bg-destructive/90 text-destructive-foreground", "absolute top-1.5 left-1.5 inline-flex items-center rounded px-1 py-0.5 text-[9px] font-semibold z-10")}>
-              {selectedAsset.condition}
+              {selectedAsset.condition == "good" ? "Good" : selectedAsset.issue}
             </span>
             <button
               className="absolute top-1.5 right-1.5 bg-black/50 hover:bg-black/70 text-white rounded-full p-0.5 transition-colors z-10"
@@ -312,7 +312,7 @@ export default function AssetDetailSidebar({
           <div className="px-1.5 py-1.5 space-y-1 shrink-0">
             <div className="flex items-center gap-x-2">
               {([
-                ["ID", selectedAsset.anomalyId],
+                ["ID", selectedAsset.defectId],
                 ["Asset ID", selectedAsset.id],
                 ["Type", selectedAsset.assetType],
                 ["Road Side", selectedAsset.side],

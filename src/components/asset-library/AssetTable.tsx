@@ -45,7 +45,7 @@ export default function AssetTable({
   onRetry,
   onClearFilters,
   columns,
-  idField = "anomalyId",
+  idField = "defectId",
 }: AssetTableProps) {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);

@@ -23,7 +23,7 @@ import AssetFilterStrip from "@/components/asset-library/AssetFilterStrip";
 import AssetDetailSidebar from "@/components/asset-library/AssetDetailSidebar";
 import AssetTable, { type ColumnDef } from "@/components/asset-library/AssetTable";
 
-// Dummy issue types by category (until DB has real anomaly data)
+// Dummy issue types by category (until DB has real defect data)
 const DUMMY_ISSUES: Record<string, string[]> = {
   "DIRECTIONAL SIGNAGE": ["Faded text/symbol", "Sign face damaged", "Post tilted >15°"],
   "ITS": ["Device offline", "Lens obscured", "Housing damaged"],
@@ -33,9 +33,9 @@ const DUMMY_ISSUES: Record<string, string[]> = {
   "BEAUTIFICATION": ["Tree dead/dying", "Planter damaged", "Fence broken"],
 };
 
-// ── Table columns for Anomaly Library ──────────────────────
-const ANOMALY_COLUMNS: ColumnDef[] = [
-  { key: "anomalyId", header: "Anomaly ID", className: "font-mono text-[11px] font-semibold py-1.5 px-1.5 whitespace-nowrap text-center", render: (a) => a.anomalyId },
+// ── Table columns for Defect Library ──────────────────────
+const DEFECT_COLUMNS: ColumnDef[] = [
+  { key: "defectId", header: "Defect ID", className: "font-mono text-[11px] font-semibold py-1.5 px-1.5 whitespace-nowrap text-center", render: (a) => a.defectId },
   { key: "assetId", header: "Asset ID", className: "font-mono text-[11px] py-1.5 px-1.5 whitespace-nowrap text-center", render: (a) => a.id?.toUpperCase() },
   { key: "assetType", header: "Asset Type", className: "text-[10px] leading-tight py-1.5 px-1.5 min-w-[180px] max-w-[220px] text-center", render: (a) => <span className="line-clamp-2">{a.assetType}</span> },
   { key: "category", header: "Category", className: "py-1.5 px-1.5 text-center", render: (a) => <CategoryBadge category={a.assetCategory} categoryId={a.category_id} /> },
@@ -49,7 +49,7 @@ const ANOMALY_COLUMNS: ColumnDef[] = [
   )},
 ];
 
-export default function AnomalyLibrary() {
+export default function DefectLibrary() {
   const [searchParams] = useSearchParams();
   const [roads, setRoads] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -63,7 +63,7 @@ export default function AnomalyLibrary() {
   const [zoneFilter, setZoneFilter] = useState<"all" | "shoulder" | "median" | "pavement" | "overhead">("all");
   const [surveyYear, setSurveyYear] = useState<string>("2025");
 
-  const [selectedAnomaly, setSelectedAnomaly] = useState<AssetRecord | null>(null);
+  const [selectedDefect, setSelectedDefect] = useState<AssetRecord | null>(null);
   const [selectedSurveyIdx, setSelectedSurveyIdx] = useState(0);
 
   const [markerPopup, setMarkerPopup] = useState<{
@@ -74,13 +74,13 @@ export default function AnomalyLibrary() {
   } | null>(null);
   const [showFullView, setShowFullView] = useState(false);
 
-  // Dynamic anomaly data from API
-  const [anomalies, setAnomalies] = useState<AssetRecord[]>([]);
+  // Dynamic defect data from API
+  const [defects, setDefects] = useState<AssetRecord[]>([]);
 
   // ── Cached frame image via hook ──
   const { imageUrl, frameWidth, frameHeight, loading: imageLoading } = useFrameImage({
-    videoId: selectedAnomaly?.videoId,
-    frameNumber: selectedAnomaly?.frameNumber,
+    videoId: selectedDefect?.videoId,
+    frameNumber: selectedDefect?.frameNumber,
   });
 
   // ── Helpers using labelMap ──
@@ -147,7 +147,7 @@ export default function AnomalyLibrary() {
             : `SUR-${idx}`;
           return {
             id: mongoId,
-            anomalyId: asset.defect_id || `ANM-${String(idx + 1).padStart(4, '0')}`,
+            defectId: asset.defect_id || `ANM-${String(idx + 1).padStart(4, '0')}`,
             assetId: asset.asset_id,
             category_id: asset.category_id,
             assetType: assetTypeName,
@@ -171,7 +171,7 @@ export default function AnomalyLibrary() {
             } : undefined,
           };
         });
-        setAnomalies(mapped);
+        setDefects(mapped);
       }
     } catch (err: any) {
       console.error("Failed to load data:", err);
@@ -189,15 +189,15 @@ export default function AnomalyLibrary() {
   }, [searchParams]);
 
   // ── Filtering ──
-  const filteredAnomalies = useMemo(() => {
+  const filteredDefects = useMemo(() => {
     const q = searchQuery.toLowerCase().trim();
-    return anomalies.filter((a) => {
+    return defects.filter((a) => {
       if (categoryFilter !== "all" && a.assetCategory !== categoryFilter) return false;
       if (directionFilter !== "all" && a.side !== directionFilter) return false;
       if (selectedAssetTypes.length > 0 && !selectedAssetTypes.includes(a.assetType)) return false;
       if (zoneFilter !== "all" && a.zone !== zoneFilter) return false;
       if (q && !(
-        a.anomalyId.toLowerCase().includes(q) ||
+        a.defectId.toLowerCase().includes(q) ||
         a.assetId.toLowerCase().includes(q) ||
         a.assetType.toLowerCase().includes(q) ||
         a.roadName.toLowerCase().includes(q) ||
@@ -205,73 +205,73 @@ export default function AnomalyLibrary() {
       )) return false;
       return true;
     });
-  }, [anomalies, categoryFilter, selectedAssetTypes, directionFilter, zoneFilter, searchQuery]);
+  }, [defects, categoryFilter, selectedAssetTypes, directionFilter, zoneFilter, searchQuery]);
 
   // ── Navigation ──
-  const navigateAnomaly = useCallback((direction: 'prev' | 'next') => {
-    if (!selectedAnomaly) return;
-    const idx = filteredAnomalies.findIndex(a => a.anomalyId === selectedAnomaly.anomalyId);
+  const navigateDefects = useCallback((direction: 'prev' | 'next') => {
+    if (!selectedDefect) return;
+    const idx = filteredDefects.findIndex(a => a.defectId === selectedDefect.defectId);
     if (idx === -1) return;
     const nextIdx = direction === 'prev' ? idx - 1 : idx + 1;
-    if (nextIdx >= 0 && nextIdx < filteredAnomalies.length) {
-      setSelectedAnomaly(filteredAnomalies[nextIdx]);
+    if (nextIdx >= 0 && nextIdx < filteredDefects.length) {
+      setSelectedDefect(filteredDefects[nextIdx]);
       setSelectedSurveyIdx(0);
       setMarkerPopup(null);
     }
-  }, [selectedAnomaly, filteredAnomalies]);
+  }, [selectedDefect, filteredDefects]);
 
 
 
-  const handleRowClick = useCallback((anomaly: AssetRecord) => {
-    setSelectedAnomaly(anomaly);
+  const handleRowClick = useCallback((defect: AssetRecord) => {
+    setSelectedDefect(defect);
     setSelectedSurveyIdx(0);
     setMarkerPopup(null);
   }, []);
 
   const handleExportExcel = () => {
     const headers = [
-      "Anomaly ID", "Asset ID", "Asset Type", "Category", "Latitude", "Longitude",
+      "Defect ID", "Asset ID", "Asset Type", "Category", "Latitude", "Longitude",
       "Road Name", "Direction (LHS/RHS)", "Side", "Last Survey Date", "Issue Type",
     ];
-    const rows = filteredAnomalies.map((a) => [
-      a.anomalyId, a.assetId, a.assetType, a.assetCategory,
+    const rows = filteredDefects.map((a) => [
+      a.defectId, a.assetId, a.assetType, a.assetCategory,
       a.lat, a.lng, a.roadName, a.side,
       a.zone, a.lastSurveyDate, a.issue,
     ]);
     exportToExcel({
-      filename: "Anomaly_Library_Report.xlsx",
-      sheetName: "Anomalies",
-      title: "RoadSight AI — Anomaly Library Report",
-      subtitle: `Generated: ${new Date().toLocaleDateString()} | ${filteredAnomalies.length} anomalies`,
+      filename: "Defects_Library_Report.xlsx",
+      sheetName: "Defects",
+      title: "RoadSight AI — Defect Library Report",
+      subtitle: `Generated: ${new Date().toLocaleDateString()} | ${filteredDefects.length} defects`,
       headers,
       rows,
     });
-    toast.success("Anomaly report exported as Excel");
+    toast.success("Defects report exported as Excel");
   };
 
   const assetTypeOptions = useMemo(() => {
-    let source = anomalies;
+    let source = defects;
     if (categoryFilter !== "all") source = source.filter(a => a.assetCategory === categoryFilter);
     return [...new Set(source.map((a) => a.assetType))].sort();
-  }, [anomalies, categoryFilter]);
+  }, [defects, categoryFilter]);
 
   const categoryOptions = useMemo(() => {
     const unique = [
       ...new Map(
-        anomalies.map(a => [
+        defects.map(a => [
           `${a.assetCategory}-${a.category_id}`,
           { name: a.assetCategory, id: a.category_id }
         ])
       ).values()
     ].sort((a, b) => a.name.localeCompare(b.name));
     return unique;
-  }, [anomalies]);
+  }, [defects]);
 
   const selectedRoadName = searchParams.get("road");
-  const selectedRoadAnomalies = useMemo(() => {
+  const selectedRoadDefects = useMemo(() => {
     if (!selectedRoadName) return [];
-    return filteredAnomalies.filter(a => a.roadName === selectedRoadName);
-  }, [filteredAnomalies, selectedRoadName]);
+    return filteredDefects.filter(a => a.roadName === selectedRoadName);
+  }, [filteredDefects, selectedRoadName]);
 
   const clearFilters = useCallback(() => {
     setCategoryFilter("all");
@@ -294,17 +294,17 @@ export default function AnomalyLibrary() {
                 </BreadcrumbItem>
                 <BreadcrumbSeparator />
                 <BreadcrumbItem>
-                  {selectedAnomaly ? (
-                    <BreadcrumbLink className="cursor-pointer" onClick={() => setSelectedAnomaly(null)}>Anomaly Library</BreadcrumbLink>
+                  {selectedDefect ? (
+                    <BreadcrumbLink className="cursor-pointer" onClick={() => setSelectedDefect(null)}>Defect Library</BreadcrumbLink>
                   ) : (
-                    <BreadcrumbPage>Anomaly Library</BreadcrumbPage>
+                    <BreadcrumbPage>Defect Library</BreadcrumbPage>
                   )}
                 </BreadcrumbItem>
-                {selectedAnomaly && (
+                {selectedDefect && (
                   <>
                     <BreadcrumbSeparator />
                     <BreadcrumbItem>
-                      <BreadcrumbPage>{selectedAnomaly.roadName}</BreadcrumbPage>
+                      <BreadcrumbPage>{selectedDefect.roadName}</BreadcrumbPage>
                     </BreadcrumbItem>
                   </>
                 )}
@@ -312,7 +312,7 @@ export default function AnomalyLibrary() {
             </Breadcrumb>
             <div className="flex items-center gap-2">
               <AlertTriangle className="h-4 w-4 text-destructive" />
-              <h1 className="text-sm font-bold text-foreground tracking-tight">Anomaly Library</h1>
+              <h1 className="text-sm font-bold text-foreground tracking-tight">Defect Library</h1>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -335,8 +335,8 @@ export default function AnomalyLibrary() {
 
       {/* Filter Strip */}
       <AssetFilterStrip
-        filteredCount={filteredAnomalies.length}
-        countLabel="anomalies"
+        filteredCount={filteredDefects.length}
+        countLabel="defects"
         directionFilter={directionFilter}
         onDirectionChange={setDirectionFilter}
         zoneFilter={zoneFilter}
@@ -350,7 +350,7 @@ export default function AnomalyLibrary() {
         categoryOptions={categoryOptions}
         assetTypeOptions={assetTypeOptions}
         selectedRoadName={selectedRoadName}
-        selectedRoadCount={selectedRoadAnomalies.length}
+        selectedRoadCount={selectedRoadDefects.length}
         onClearFilters={clearFilters}
       />
 
@@ -358,28 +358,28 @@ export default function AnomalyLibrary() {
       <div className="flex min-h-0" style={{ flex: "1 1 45%" }}>
         <div className="flex-1 relative min-w-0" style={{ zIndex: 0, isolation: 'isolate' }}>
           <LibraryMapView
-            assets={filteredAnomalies}
-            selectedId={selectedAnomaly?.anomalyId ?? null}
+            assets={filteredDefects}
+            selectedId={selectedDefect?.defectId ?? null}
             onSelect={handleRowClick}
           />
         </div>
 
         <AssetDetailSidebar
           markerPopup={markerPopup}
-          selectedAsset={selectedAnomaly}
+          selectedAsset={selectedDefect}
           imageUrl={imageUrl}
           frameWidth={frameWidth}
           frameHeight={frameHeight}
           imageLoading={imageLoading}
-          filteredAssets={filteredAnomalies}
-          onCloseAsset={() => setSelectedAnomaly(null)}
+          filteredAssets={filteredDefects}
+          onCloseAsset={() => setSelectedDefect(null)}
           getAssetDisplayName={getAssetDisplayName}
-          onNavigate={navigateAnomaly}
+          onNavigate={navigateDefects}
           onFullView={() => {
-            if (selectedAnomaly) {
+            if (selectedDefect) {
               setMarkerPopup({
-                frameData: { gpx_point: { lat: selectedAnomaly.lat, lon: selectedAnomaly.lng } },
-                trackTitle: selectedAnomaly.roadName,
+                frameData: { gpx_point: { lat: selectedDefect.lat, lon: selectedDefect.lng } },
+                trackTitle: selectedDefect.roadName,
                 pointIndex: 0,
                 totalPoints: 1,
               });
@@ -401,30 +401,30 @@ export default function AnomalyLibrary() {
           </DialogDescription>
         </DialogHeader>
         <DialogContent className="max-w-3xl w-[90vw] max-h-[90vh] overflow-auto p-0" style={{ zIndex: 9999 }}>
-              {selectedAnomaly && (() => {
+              {selectedDefect && (() => {
                 const assetFrameData = {
-                  videoId: selectedAnomaly.videoId || "",
-                  frame_number: selectedAnomaly.frameNumber ?? 0,
+                  videoId: selectedDefect.videoId || "",
+                  frame_number: selectedDefect.frameNumber ?? 0,
                   baseUrl: "",
                   width: frameWidth ?? 0,
                   height: frameHeight ?? 0,
                   image_data: imageUrl ?? undefined,
-                  timestamp: selectedAnomaly.lastSurveyDate,
-                  gpx_point: { lat: selectedAnomaly.lat, lon: selectedAnomaly.lng },
-                  detections: selectedAnomaly.box ? [
+                  timestamp: selectedDefect.lastSurveyDate,
+                  gpx_point: { lat: selectedDefect.lat, lon: selectedDefect.lng },
+                  detections: selectedDefect.box ? [
                     {
-                      class_name: selectedAnomaly.assetType,
+                      class_name: selectedDefect.assetType,
                       confidence: 0.92,
                       bbox: {
-                        x: selectedAnomaly.box.x,
-                        y: selectedAnomaly.box.y,
-                        width: selectedAnomaly.box.width,
-                        height: selectedAnomaly.box.height,
+                        x: selectedDefect.box.x,
+                        y: selectedDefect.box.y,
+                        width: selectedDefect.box.width,
+                        height: selectedDefect.box.height,
                       },
-                      condition: selectedAnomaly.issue,
-                      category: selectedAnomaly.assetCategory,
-                      category_id: selectedAnomaly.category_id,
-                      asset_id: selectedAnomaly.asset_id,
+                      condition: selectedDefect.issue,
+                      category: selectedDefect.assetCategory,
+                      category_id: selectedDefect.category_id,
+                      asset_id: selectedDefect.asset_id,
                     },
                   ] : [],
                 };
@@ -433,7 +433,7 @@ export default function AnomalyLibrary() {
                   <div className="p-1">
                     <FrameComparisonPopup
                       frameData={assetFrameData}
-                      trackTitle={selectedAnomaly.roadName}
+                      trackTitle={selectedDefect.roadName}
                       pointIndex={0}
                       totalPoints={1}
                       onClose={() => setShowFullView(false)}
@@ -443,10 +443,10 @@ export default function AnomalyLibrary() {
               })()}
 
               {/* Survey Information */}
-              {selectedAnomaly && (() => {
-                const baseDate = new Date(selectedAnomaly.lastSurveyDate);
+              {selectedDefect && (() => {
+                const baseDate = new Date(selectedDefect.lastSurveyDate);
                 const surveyHistory = [
-                  { surveyId: selectedAnomaly.surveyId ?? "SRV-2025-Q3-01", date: selectedAnomaly.lastSurveyDate, detected: true, issue: selectedAnomaly.issue },
+                  { surveyId: selectedDefect.surveyId ?? "SRV-2025-Q3-01", date: selectedDefect.lastSurveyDate, detected: true, issue: selectedDefect.issue },
                 ];
                 const reversed = [...surveyHistory].reverse();
 
@@ -459,9 +459,9 @@ export default function AnomalyLibrary() {
                         <div className="flex items-center gap-2 mb-3">
                           <AlertTriangle className={cn("h-3.5 w-3.5", isDetected ? "text-destructive" : "text-emerald-600")} />
                           <span className={cn("text-xs font-semibold", isDetected ? "text-destructive" : "text-emerald-600")}>
-                            {isDetected ? `Anomaly Detected — ${latestSurvey.issue}` : `No Anomaly Detected`}
+                            {isDetected ? `Defect Detected — ${latestSurvey.issue}` : `No Defect Detected`}
                           </span>
-                          <span className="text-[9px] text-muted-foreground ml-auto">Asset: {selectedAnomaly.assetId} · {selectedAnomaly.anomalyId}</span>
+                          <span className="text-[9px] text-muted-foreground ml-auto">Asset: {selectedDefect.assetId} · {selectedDefect.defectId}</span>
                         </div>
                       );
                     })()}
@@ -502,11 +502,11 @@ export default function AnomalyLibrary() {
                                   </div>
                                   <div>
                                     <p className="text-muted-foreground text-[9px] uppercase tracking-wider">Asset Type</p>
-                                    <p className="font-semibold text-foreground">{selectedAnomaly.assetType}</p>
+                                    <p className="font-semibold text-foreground">{selectedDefect.assetType}</p>
                                   </div>
                                   <div>
                                     <p className="text-muted-foreground text-[9px] uppercase tracking-wider">Side / Zone</p>
-                                    <p className="font-semibold text-foreground">{selectedAnomaly.side} · {selectedAnomaly.zone}</p>
+                                    <p className="font-semibold text-foreground">{selectedDefect.side} · {selectedDefect.zone}</p>
                                   </div>
                                   <div>
                                     <p className="text-muted-foreground text-[9px] uppercase tracking-wider">Survey Date</p>
@@ -527,16 +527,16 @@ export default function AnomalyLibrary() {
 
       {/* Bottom Table */}
       <AssetTable
-        items={filteredAnomalies}
+        items={filteredDefects}
         loading={loading}
         loadError={loadError}
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
-        selectedId={selectedAnomaly?.anomalyId ?? null}
+        selectedId={selectedDefect?.defectId ?? null}
         onRowClick={handleRowClick}
         onRetry={loadData}
         onClearFilters={clearFilters}
-        columns={ANOMALY_COLUMNS}
+        columns={DEFECT_COLUMNS}
       />
     </div>
   );

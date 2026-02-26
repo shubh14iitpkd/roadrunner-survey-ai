@@ -76,7 +76,7 @@ export default function Dashboard() {
     totalAssets: 0, totalAnomalies: 0, kmSurveyed: 0,
   });
   const [categoryChartData, setCategoryChartData] = useState<any[]>([]);
-  const [topAnomalyRoads, setTopAnomalyRoads] = useState<any[]>([]);
+  const [topDefectRoads, setTopDefectRoads] = useState<any[]>([]);
 
   // Compute the selected category's donut index
   const selectedDonutIndex = useMemo(() => {
@@ -96,7 +96,7 @@ export default function Dashboard() {
   const [tableLoading, setTableLoading] = useState(false);
 
   // Anomaly data from API
-  const [anomalyByAsset, setAnomalyByAsset] = useState<any[]>([]);
+  const [defectByAsset, setDefectByAsset] = useState<any[]>([]);
 
   // Helper to get category display name from labelMap
   const getCategoryDisplayName = useCallback((item) => {
@@ -153,7 +153,7 @@ export default function Dashboard() {
         }
 
         if (topRoadsResp?.items && topRoadsResp.items.length > 0) {
-          setTopAnomalyRoads(topRoadsResp.items);
+          setTopDefectRoads(topRoadsResp.items);
         }
       } catch (err) {
         console.error("Failed to load dashboard data:", err);
@@ -184,13 +184,13 @@ export default function Dashboard() {
       try {
         const resp = await api.dashboard.topAssetTypes(1, 10, selectedCategoryId || undefined, "damaged");
         if (resp?.items) {
-          setAnomalyByAsset(
+          setDefectByAsset(
             resp.items.map((item: any) => ({
               asset_id: item.asset_id,
               type: getAssetDisplayName(item),
               category: getCategoryDisplayName(item),
               category_id: item.category_id,
-              anomalies: item.count,
+              defects: item.count,
             }))
           );
         }
@@ -244,7 +244,7 @@ export default function Dashboard() {
             lastSurvey="12 Feb 2025"
           />
           <KPICard
-            label="Anomalies"
+            label="Defects"
             value={loading ? "..." : kpis.totalAnomalies.toLocaleString()}
             icon={<AlertTriangle className="h-4 w-4" />}
             accent="destructive"
@@ -380,7 +380,7 @@ export default function Dashboard() {
             {/* Fixed height table container */}
             <div className="flex-1 overflow-auto" style={{ height: assetTypePageSize * 36 + 36 }}>
               <Table>
-                <TableHeader className="sticky top-0 z-10 bg-card">
+                <TableHeader className="top-0 z-10 bg-card">
                   <TableRow className="border-b border-border hover:bg-transparent">
                     <TableHead className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground w-10">#</TableHead>
                     <TableHead className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Type</TableHead>
@@ -427,14 +427,14 @@ export default function Dashboard() {
           </Card>
         </div>
 
-        {/* Anomalies by Asset Type */}
+        {/* Defects by Asset Type */}
         <Card className="p-0 border border-border bg-card overflow-hidden">
           <div className="px-5 pt-5 pb-3 flex items-center gap-3">
             <div className="p-2 rounded-lg bg-destructive/10">
               <AlertTriangle className="h-4 w-4 text-destructive" />
             </div>
             <div className="flex-1">
-              <p className="text-xs font-medium text-muted-foreground uppercase tracking-widest">Anomalies</p>
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-widest">Defects</p>
               <p className="text-sm font-semibold text-foreground mt-0.5">By Asset Type</p>
             </div>
             <Button
@@ -450,16 +450,16 @@ export default function Dashboard() {
           <div className="gradient-table-line" />
           <div className="overflow-x-auto">
             <Table>
-              <TableHeader className="sticky top-0 z-10 bg-card">
-                <TableRow className="border-b border-border hover:bg-transparent">
-                  <TableHead className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Asset Type</TableHead>
+              <TableHeader className="top-0 z-10 bg-card">
+                <TableRow className="border-b hover:bg-transparent">
+                  <TableHead className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Defect Type</TableHead>
                   <TableHead className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Category</TableHead>
                   <TableHead className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground text-right">Count</TableHead>
                   <TableHead className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground text-right w-48">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {anomalyByAsset?.length > 0 ? anomalyByAsset.map((row) => (
+                {defectByAsset?.length > 0 ? defectByAsset.map((row) => (
                   <TableRow key={row.type} className="hover:bg-muted/40 border-b border-border/50" style={{ height: 36 }}>
                     <TableCell className="text-xs font-medium py-2.5">{row.type}</TableCell>
                     <TableCell className="py-2.5">
@@ -467,7 +467,7 @@ export default function Dashboard() {
                     </TableCell>
                     <TableCell className="text-right py-2.5">
                       <span className="inline-flex items-center justify-center rounded-md bg-destructive/10 text-destructive px-2 py-0.5 text-xs font-bold tabular-nums min-w-[2rem]">
-                        {row.anomalies}
+                        {row.defects}
                       </span>
                     </TableCell>
                     <TableCell className="text-right py-2.5">
@@ -513,7 +513,7 @@ export default function Dashboard() {
               <Map className="h-4 w-4 text-primary" />
             </div>
             <div className="flex-1">
-              <p className="text-xs font-medium text-muted-foreground uppercase tracking-widest">Anomalies</p>
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-widest">Defects</p>
               <p className="text-sm font-semibold text-foreground mt-0.5">By Road</p>
             </div>
             <div className="flex gap-1.5">
@@ -540,7 +540,7 @@ export default function Dashboard() {
           <div className="gradient-table-line" />
           <div className="overflow-x-auto">
             <Table>
-              <TableHeader className="sticky top-0 z-10 bg-card">
+              <TableHeader className="top-0 z-10 bg-card">
                 <TableRow className="border-b border-border hover:bg-transparent">
                   <TableHead className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Road</TableHead>
                   <TableHead className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground text-right">Count</TableHead>
@@ -549,7 +549,7 @@ export default function Dashboard() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {topAnomalyRoads.map((row) => (
+                {topDefectRoads.map((row) => (
                   <TableRow key={row.road} className="hover:bg-muted/40 border-b border-border/50" style={{ height: 36 }}>
                     <TableCell className="text-xs font-medium py-2.5">{row.road}</TableCell>
                     <TableCell className="text-right py-2.5">

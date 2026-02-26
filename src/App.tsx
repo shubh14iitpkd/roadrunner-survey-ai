@@ -18,14 +18,14 @@ const RoadRegister = lazy(() => import("./pages/RoadRegister"));
 const SurveyUpload = lazy(() => import("./pages/SurveyUpload"));
 const VideoLibrary = lazy(() => import("./pages/VideoLibrary"));
 const AssetRegister = lazy(() => import("./pages/AssetRegister"));
-const GISView = lazy(() => import("./pages/GISView"));
+// const GISView = lazy(() => import("./pages/GISView"));
 const AskAI = lazy(() => import("./pages/AskAI"));
 const Settings = lazy(() => import("./pages/Settings"));
 const Login = lazy(() => import("./pages/Login"));
 const SignUp = lazy(() => import("./pages/SignUp"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 const ModelTest = lazy(() => import("./pages/ModelTest"));
-const AnomalyLibrary = lazy(() => import("./pages/AnomalyLibrary"));
+const AnomalyLibrary = lazy(() => import("./pages/DefectLibrary"));
 const AssetLibrary = lazy(() => import("./pages/AssetLibrary"));
 
 const queryClient = new QueryClient();
@@ -63,7 +63,7 @@ const App = () => (
                             <Route path="/upload" element={<SurveyUpload />} />
                             <Route path="/videos" element={<VideoLibrary />} />
                             <Route path="/assets" element={<AssetRegister />} />
-                            <Route path="/gis" element={<AnomalyLibrary />} />
+                            <Route path="/defect-library" element={<AnomalyLibrary />} />
                             <Route path="/asset-library" element={<AssetLibrary />} />
                             <Route path="/ask-ai" element={<AskAI />} />
                             <Route path="/settings" element={<Settings />} />

@@ -68,7 +68,7 @@ function FlyToSelected({
 
   useEffect(() => {
     if (!selectedId) return;
-    const asset = assets.find((a) => a.anomalyId === selectedId);
+    const asset = assets.find((a) => a.defectId === selectedId);
     if (!asset) return;
     map.flyTo([asset.lat, asset.lng], Math.max(map.getZoom(), 15), {
       duration: 0.6,
@@ -108,7 +108,7 @@ export default function LibraryMapView({
       <FlyToSelected assets={assets} selectedId={selectedId} />
 
       {assets.map((asset) => {
-        const isSelected = asset.anomalyId === selectedId;
+        const isSelected = asset.defectId === selectedId;
         const useIcon = wantsIcons && isAssetIconExist(asset.assetId);
 
         if (useIcon) {
@@ -116,7 +116,7 @@ export default function LibraryMapView({
           const icon = isSelected ? getSelectedIcon(baseIcon) : baseIcon;
           return (
             <Marker
-              key={asset.anomalyId}
+              key={asset.defectId}
               position={[asset.lat, asset.lng]}
               icon={icon}
               zIndexOffset={isSelected ? 1000 : 0}
@@ -138,7 +138,7 @@ export default function LibraryMapView({
 
         return (
           <CircleMarker
-            key={asset.anomalyId}
+            key={asset.defectId}
             center={[asset.lat, asset.lng]}
             radius={isSelected ? SELECTED_RADIUS : DEFAULT_RADIUS}
             pathOptions={{

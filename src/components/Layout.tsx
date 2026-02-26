@@ -24,7 +24,7 @@ import logo from "@/assets/roadsight-logo.jpg";
 
 const navigation = [
   { name: "Dashboard", href: "/", icon: LayoutDashboard },
-  { name: "Anomaly Library", href: "/gis", icon: AlertTriangle },
+  { name: "Defect Library", href: "/defect-library", icon: AlertTriangle },
   { name: "Asset Library", href: "/asset-library", icon: Database },
   { name: "Ask AI", href: "/ask-ai", icon: MessageSquare },
   { name: "Project Management", href: null, icon: null, isHeading: true },

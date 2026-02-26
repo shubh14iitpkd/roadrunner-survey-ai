@@ -196,7 +196,7 @@ export default function AssetLibrary() {
       if (selectedAssetTypes.length > 0 && !selectedAssetTypes.includes(a.assetType)) return false;
       if (zoneFilter !== "all" && a.zone !== zoneFilter) return false;
       if (q && !(
-        a.anomalyId.toLowerCase().includes(q) ||
+        a.defectId.toLowerCase().includes(q) ||
         (a.id ?? '').toLowerCase().includes(q) ||
         a.assetId.toLowerCase().includes(q) ||
         a.assetType.toLowerCase().includes(q) ||
@@ -208,7 +208,7 @@ export default function AssetLibrary() {
 
   const navigateAsset = useCallback((direction: 'prev' | 'next') => {
     if (!selectedAsset) return;
-    const idx = filteredAssets.findIndex(a => a.anomalyId === selectedAsset.anomalyId);
+    const idx = filteredAssets.findIndex(a => a.defectId === selectedAsset.defectId);
     if (idx === -1) return;
     const nextIdx = direction === 'prev' ? idx - 1 : idx + 1;
     if (nextIdx >= 0 && nextIdx < filteredAssets.length) {
@@ -345,7 +345,7 @@ export default function AssetLibrary() {
         <div className="flex-1 relative min-w-0" style={{ zIndex: 0, isolation: 'isolate' }}>
           <LibraryMapView
             assets={filteredAssets}
-            selectedId={selectedAsset?.anomalyId ?? null}
+            selectedId={selectedAsset?.defectId ?? null}
             onSelect={handleRowClick}
           />
         </div>
@@ -515,7 +515,7 @@ export default function AssetLibrary() {
         loadError={loadError}
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
-        selectedId={selectedAsset?.anomalyId ?? null}
+        selectedId={selectedAsset?.defectId ?? null}
         onRowClick={handleRowClick}
         onRetry={loadData}
         onClearFilters={clearFilters}

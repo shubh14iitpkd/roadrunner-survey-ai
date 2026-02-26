@@ -4,7 +4,7 @@ export interface AssetRecord {
   surveyId?: string;
   condition?: string;
   markerColor?: string;
-  anomalyId: string;
+  defectId: string;
   assetId: string;
   assetType: string;
   assetCategory: string;
