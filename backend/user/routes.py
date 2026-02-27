@@ -97,17 +97,23 @@ def update_label_preferences(user_id: str):
         description: Internal server error
     """
     data = request.get_json(silent=True) or {}
+    asset_ids = data.get("asset_ids") or []
     asset_id = data.get("asset_id")
+    if asset_id and not asset_ids:
+        asset_ids = [asset_id]
     display_name = data.get("display_name")
     
     try:
         db = get_db()
+        update_fields = {f"label_overrides.{aid}.display_name": display_name for aid in asset_ids}
         db.user_preferences.update_one(
             {"user_id": ObjectId(user_id)},
-            {"$set": {f"label_overrides.{asset_id}.display_name": display_name}},
+            {"$set": update_fields},
             upsert=True
         )
         return jsonify({"ok": True})
     except Exception as e:
         print(f"[PREFS] {e}")
         return jsonify({"error": str(e)}), 500
+
+

@@ -220,8 +220,8 @@ export const api = {
 	},
 	user: {
 		getResolvedLabelMap: (userId: string) => apiFetch(`/api/assets/${userId}/resolved-map`),
-		updateLabelPreference: (userId: string, assetId: string, displayName: string) =>
-			apiFetch(`/api/users/${userId}/preferences/label`, { method: "PUT", body: JSON.stringify({ asset_id: assetId, display_name: displayName }) }),
+		updateLabelPreference: (userId: string, assetIds: string[], displayName: string) =>
+			apiFetch(`/api/users/${userId}/preferences/label`, { method: "PUT", body: JSON.stringify({ asset_ids: assetIds, display_name: displayName }) }),
 		updateCategoryPreference: (userId: string, categoryId: string, displayName: string) =>
 			apiFetch(`/api/users/${userId}/preferences/category`, { method: "PUT", body: JSON.stringify({ category_id: categoryId, display_name: displayName }) }),
 	},

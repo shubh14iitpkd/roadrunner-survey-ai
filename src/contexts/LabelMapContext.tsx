@@ -5,6 +5,7 @@ import { useAuth } from "./AuthContext";
 interface ResolvedItem {
   category_id?: string;
   asset_id?: string;
+  group_id?: string;
   default_name: string;
   display_name: string;
   original_display_name: string;
@@ -20,7 +21,7 @@ export interface LabelMapContextType {
   loading: boolean;
   error: Error | null;
   updateCategoryLabel: (categoryId: string, displayName: string) => Promise<void>;
-  updateAssetLabel: (assetId: string, displayName: string) => Promise<void>;
+  updateAssetLabel: (assetIds: string[], displayName: string) => Promise<void>;
   refreshData: () => Promise<void>;
 }
 
@@ -76,24 +77,21 @@ export function LabelMapProvider({ children }: { children: ReactNode }) {
     });
   };
 
-  const updateAssetLabel = async (assetId: string, displayName: string) => {
+  const updateAssetLabel = async (assetIds: string[], displayName: string) => {
     if (!user?.id) throw new Error("User not authenticated");
 
-    await api.user.updateLabelPreference(user.id, assetId, displayName);
+    await api.user.updateLabelPreference(user.id, assetIds, displayName);
 
-    // Update local state
+    // Update local state for all member IDs
     setData((prev) => {
       if (!prev) return prev;
-      return {
-        ...prev,
-        labels: {
-          ...prev.labels,
-          [assetId]: {
-            ...prev.labels[assetId],
-            display_name: displayName,
-          },
-        },
-      };
+      const updatedLabels = { ...prev.labels };
+      for (const aid of assetIds) {
+        if (updatedLabels[aid]) {
+          updatedLabels[aid] = { ...updatedLabels[aid], display_name: displayName };
+        }
+      }
+      return { ...prev, labels: updatedLabels };
     });
   };
 

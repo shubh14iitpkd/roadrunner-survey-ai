@@ -231,10 +231,13 @@ def top_asset_types():
 	if condition:
 		match_query = {"$and": [match_query, {"condition": condition}]}
 
-	# Count total types first (for pagination)
+	# Group by group_id (fall back to asset_id when group_id is absent)
+	group_key = {"$ifNull": ["$group_id", "$asset_id"]}
+
+	# Count total distinct groups (for pagination)
 	total_agg = db.assets.aggregate([
 		{"$match": match_query},
-		{"$group": {"_id": "$asset_id"}},
+		{"$group": {"_id": group_key}},
 		{"$count": "total"}
 	])
 	
@@ -243,11 +246,12 @@ def top_asset_types():
 	except StopIteration:
 		total_count = 0
 
-	# Get paginated data
+	# Get paginated data — keep first asset_id per group for label lookup
 	agg = db.assets.aggregate([
 		{"$match": match_query},
 		{"$group": {
-			"_id": "$asset_id", 
+			"_id": group_key,
+			"asset_id": {"$first": "$asset_id"},
 			"asset_type": {"$first": "$asset_type"}, 
 			"count": {"$sum": 1}
 		}},
@@ -258,8 +262,8 @@ def top_asset_types():
 	
 	results = list(agg)
 	
-	# Fetch display names from system_asset_labels
-	asset_ids = [r["_id"] for r in results if r["_id"]]
+	# Fetch display names from system_asset_labels using the first asset_id per group
+	asset_ids = [r["asset_id"] for r in results if r.get("asset_id")]
 	labels_map = {}
 	if asset_ids:
 		labels = list(db.system_asset_labels.find({"asset_id": {"$in": asset_ids}}))
@@ -268,7 +272,7 @@ def top_asset_types():
 
 	items = []
 	for d in results:
-		aid = d.get("_id")
+		aid = d.get("asset_id")
 		atype = d.get("asset_type") or "Unknown"
 		obj = labels_map.get(aid)
 		display_name = obj.get("display_name", atype) if obj else atype

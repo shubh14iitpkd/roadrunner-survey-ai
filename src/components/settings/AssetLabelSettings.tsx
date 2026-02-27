@@ -57,12 +57,12 @@ export default function AssetLabelSettings() {
     }
   };
 
-  const handleSaveLabel = async (assetId: string) => {
+  const handleSaveLabel = async (assetIds: string[]) => {
     if (!editValue.trim()) return;
 
     setSaving(true);
     try {
-      await updateAssetLabel(assetId, editValue.trim());
+      await updateAssetLabel(assetIds, editValue.trim());
 
       toast({
         title: "Saved",
@@ -104,9 +104,49 @@ export default function AssetLabelSettings() {
   }
 
   const categories = Object.values(data.categories);
-  const labels = Object.values(data.labels).filter(label => 
-    label.display_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    label.original_display_name.toLowerCase().includes(searchQuery.toLowerCase())
+  const allLabels = Object.values(data.labels);
+
+  // Group labels by group_id; labels without group_id stay individual
+  const groupedLabels: { groupKey: string; displayName: string; groupId: string | null; assetIds: string[]; originalDisplayName: string }[] = [];
+  const groupMap = new Map<string, { displayName: string; groupId: string; assetIds: string[]; originalDisplayName: string }>();
+
+  for (const label of allLabels) {
+    const gid = (label as any).group_id as string | undefined;
+    if (gid) {
+      if (!groupMap.has(gid)) {
+        groupMap.set(gid, {
+          displayName: label.display_name,
+          groupId: gid,
+          assetIds: [],
+          originalDisplayName: label.original_display_name,
+        });
+      }
+      groupMap.get(gid)!.assetIds.push(label.asset_id!);
+    } else {
+      groupedLabels.push({
+        groupKey: label.asset_id!,
+        displayName: label.display_name,
+        groupId: null,
+        assetIds: [label.asset_id!],
+        originalDisplayName: label.original_display_name,
+      });
+    }
+  }
+  for (const [gid, group] of groupMap) {
+    groupedLabels.push({
+      groupKey: `group-${gid}`,
+      displayName: group.displayName,
+      groupId: gid,
+      assetIds: group.assetIds,
+      originalDisplayName: group.originalDisplayName,
+    });
+  }
+
+  // Filter by search query
+  const filteredGroups = groupedLabels.filter((g) =>
+    g.displayName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    (g.groupId || "").toLowerCase().includes(searchQuery.toLowerCase()) ||
+    g.originalDisplayName.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   return (
@@ -192,7 +232,7 @@ export default function AssetLabelSettings() {
           <div className="flex items-center gap-2">
             <h3 className="text-base font-semibold tracking-tight">Assets</h3>
             <Badge variant="secondary" className="font-normal">
-              {labels.length}
+              {filteredGroups.length}
             </Badge>
           </div>
           <div className="relative">
@@ -208,21 +248,21 @@ export default function AssetLabelSettings() {
 
         <ScrollArea className="h-[400px] border rounded-lg bg-muted/10 p-1">
           <div className="p-2 space-y-1">
-            {labels.length === 0 ? (
+            {filteredGroups.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-12 text-center text-muted-foreground">
                 <Tag className="h-8 w-8 mb-2 opacity-20" />
                 <p className="text-sm">No assets found</p>
               </div>
             ) : (
               <Accordion type="single" collapsible className="space-y-1">
-              {labels.map((label) => {
-                const id = label.asset_id!;
-                const isEditing = editingId === `label-${id}`;
+              {filteredGroups.map((group) => {
+                const key = group.groupKey;
+                const isEditing = editingId === `label-${key}`;
 
                 return (
                   <AccordionItem 
-                    key={id} 
-                    value={id} 
+                    key={key} 
+                    value={key} 
                     className={`border rounded-md px-3 bg-card transition-colors hover:bg-accent/5 ${isEditing ? 'border-primary/50 ring-1 ring-primary/20 bg-accent/10' : ''}`}
                   >
                     <div className="flex items-center justify-between py-2.5">
@@ -234,7 +274,7 @@ export default function AssetLabelSettings() {
                             className="h-8 text-sm"
                             autoFocus
                             onKeyDown={(e) => {
-                              if (e.key === "Enter") handleSaveLabel(id);
+                              if (e.key === "Enter") handleSaveLabel(group.assetIds);
                               if (e.key === "Escape") handleCancel();
                             }}
                           />
@@ -242,7 +282,7 @@ export default function AssetLabelSettings() {
                             size="icon"
                             variant="ghost"
                             className="h-8 w-8 hover:bg-green-500/10 hover:text-green-600"
-                            onClick={() => handleSaveLabel(id)}
+                            onClick={() => handleSaveLabel(group.assetIds)}
                             disabled={saving}
                           >
                             <Check className="h-4 w-4" />
@@ -261,12 +301,17 @@ export default function AssetLabelSettings() {
                         <>
                           <div className="flex-1 min-w-0 pr-4">
                             <div className="flex items-center gap-2">
-                              <span className="font-medium text-sm">{label.display_name}</span>
-                              {label.display_name !== label.original_display_name && (
+                              <span className="font-medium text-sm">{group.displayName}</span>
+                              {group.displayName !== group.originalDisplayName && (
                                 <Badge variant="outline" className="text-xs h-5 px-1.5 font-normal text-muted-foreground">
-                                  Default: {label.original_display_name}
+                                  Default: {group.originalDisplayName}
                                 </Badge>
                               )}
+                              {/* {group.assetIds.length > 1 && (
+                                <Badge variant="secondary" className="text-xs h-5 px-1.5 font-normal">
+                                  {group.assetIds.length} variants
+                                </Badge>
+                              )} */}
                             </div>
                           </div>
                           <Button
@@ -275,7 +320,7 @@ export default function AssetLabelSettings() {
                             className="h-7 w-7 text-muted-foreground hover:text-foreground"
                             onClick={(e) => {
                               e.stopPropagation();
-                              handleEdit(`label-${id}`, label.display_name);
+                              handleEdit(`label-${key}`, group.displayName);
                             }}
                           >
                             <Pencil className="h-3.5 w-3.5" />
