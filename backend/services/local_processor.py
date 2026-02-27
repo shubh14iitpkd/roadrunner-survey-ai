@@ -138,6 +138,7 @@ class LocalVideoProcessor:
                 if default_name:
                     label_map[default_name] = {
                         "asset_id": label.get("asset_id"),
+                        "group_id": label.get("group_id"),
                         "category_id": label.get("category_id")
                     }
             print(f"[LOCAL] Loaded label map with {len(label_map)} entries")
@@ -482,6 +483,7 @@ class LocalVideoProcessor:
                                             "defect_id": str(ULID()) if condition != "good" else None,
                                             "asset_id": label_info.get("asset_id"),
                                             "category_id": label_info.get("category_id"),
+                                            "group_id": label_info.get("group_id"),
                                             "confidence": confidence,
                                             "condition": condition,
                                             "frame_number": frame_num,
