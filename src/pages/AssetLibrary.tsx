@@ -150,7 +150,7 @@ export default function AssetLibrary() {
             roadName: asset.route_name,
             side: asset.side || 'Shoulder',
             zone: asset.zone || 'Unknown',
-            lastSurveyDate: asset.created_at?.split('T')[0] || asset.time?.split('T')[0] || '—',
+            lastSurveyDate: asset.survey_date || asset.created_at?.split('T')[0] || '—',
             issue: asset.issue || '',
             severity: asset.severity || 'Low',
             videoId: rawVideoId ? String(rawVideoId) : undefined,
@@ -221,11 +221,11 @@ export default function AssetLibrary() {
 
   const handleExportExcel = () => {
     const headers = [
-      "Asset ID", "Asset Type ID", "Asset Type", "Category", "Condition",
+      "Asset ID", "Asset Type", "Category", "Condition",
       "Latitude", "Longitude", "Road Name", "Side", "Zone", "Survey Date",
     ];
     const rows = filteredAssets.map((a) => [
-      a.id, a.assetId, a.assetType, a.assetCategory, a.condition,
+      a.id?.toUpperCase(), a.assetType, a.assetCategory, a.condition,
       a.lat, a.lng, a.roadName, a.side, a.zone, a.lastSurveyDate,
     ]);
     exportToExcel({

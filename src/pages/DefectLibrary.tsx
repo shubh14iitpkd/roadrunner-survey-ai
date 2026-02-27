@@ -151,7 +151,7 @@ export default function DefectLibrary() {
             roadName: asset.route_name,
             side: asset.side || 'Shoulder',
             zone: asset.zone || 'Unknown',
-            lastSurveyDate: asset.created_at?.split('T')[0] || asset.time?.split('T')[0] || '—',
+            lastSurveyDate: asset.survey_date || asset.created_at?.split('T')[0] || '—',
             issue: asset.issue || getDummyIssue(categoryId, idx),
             severity: asset.severity || (idx % 3 === 0 ? 'High' : idx % 3 === 1 ? 'Medium' : 'Low'),
             videoId: rawVideoId ? String(rawVideoId) : undefined,
@@ -226,15 +226,15 @@ export default function DefectLibrary() {
   const handleExportExcel = () => {
     const headers = [
       "Defect ID", "Asset ID", "Asset Type", "Category", "Latitude", "Longitude",
-      "Road Name", "Direction (LHS/RHS)", "Side", "Last Survey Date", "Issue Type",
+      "Road Name", "Side", "Zone", "Last Survey Date", "Issue Type",
     ];
     const rows = filteredDefects.map((a) => [
-      a.defectId, a.assetId, a.assetType, a.assetCategory,
+      a.defectId, a.id?.toUpperCase(), a.assetType, a.assetCategory,
       a.lat, a.lng, a.roadName, a.side,
       a.zone, a.lastSurveyDate, a.issue,
     ]);
     exportToExcel({
-      filename: "Defects_Library_Report.xlsx",
+      filename: `Defects Library Report.xlsx`,
       sheetName: "Defects",
       title: "RoadSight AI — Defect Library Report",
       subtitle: `Generated: ${new Date().toLocaleDateString()} | ${filteredDefects.length} defects`,
