@@ -14,11 +14,9 @@ async function fetchDamagedAssets(filterAssetType?: string): Promise<any[]> {
 
   // The master endpoint may return an array or { items: [] }
   const items: any[] = Array.isArray(resp) ? resp : (resp?.items ?? resp?.assets ?? []);
-
   if (filterAssetType) {
     return items.filter(
       (a: any) =>
-        (a.display_name || a.type || "").toLowerCase() === filterAssetType.toLowerCase() ||
         (a.asset_id || "").toLowerCase() === filterAssetType.toLowerCase()
     );
   }
@@ -82,12 +80,12 @@ export async function exportDefectByAssetTypeReport(filterAssetType?: string, la
     r.roadName, r.side, r.zone, r.lastSurveyDate, r.issueType,
   ]);
 
-  const suffix = filterAssetType ? filterAssetType.replace(/\s+/g, "_") : "All_Types";
+  const suffix = labelMap?.labels?.[filterAssetType]?.display_name || "All_Types";
   exportToExcel({
     filename: `Defect_Report_AssetType_${suffix}.xlsx`,
     sheetName: "By Asset Type",
     title: "RoadSight AI — Defect Report by Asset Type",
-    subtitle: `Filter: ${filterAssetType || "All Types"} | Generated: ${new Date().toLocaleDateString()} | ${data.length} records`,
+    subtitle: `Filter: ${suffix} | Generated: ${new Date().toLocaleDateString()} | ${data.length} records`,
     headers,
     rows: data,
   });

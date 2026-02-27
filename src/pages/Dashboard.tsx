@@ -188,6 +188,7 @@ export default function Dashboard() {
             resp.items.map((item: any) => ({
               asset_id: item.asset_id,
               type: getAssetDisplayName(item),
+              type_id: item.asset_id,
               category: getCategoryDisplayName(item),
               category_id: item.category_id,
               defects: item.count,
@@ -476,7 +477,7 @@ export default function Dashboard() {
                           variant="ghost"
                           size="sm"
                           className="h-7 text-[11px] gap-1 text-muted-foreground hover:text-foreground"
-                           onClick={() => { exportDefectByAssetTypeReport(row.type, labelMapData).catch(console.error); }}
+                           onClick={() => { exportDefectByAssetTypeReport(row.type_id, labelMapData).catch(console.error); }}
                          >
                            <Download className="h-3 w-3" />
                            Report
@@ -526,7 +527,7 @@ export default function Dashboard() {
                 <Download className="h-3 w-3" />
                 Export Report
               </Button>
-              <Button
+              {/* <Button
                 variant="outline"
                 size="sm"
                 className="h-7 text-[10px] gap-1.5"
@@ -534,7 +535,7 @@ export default function Dashboard() {
               >
                 <Download className="h-3 w-3" />
                 Road × Asset Type
-              </Button>
+              </Button> */}
             </div>
           </div>
           <div className="gradient-table-line" />
