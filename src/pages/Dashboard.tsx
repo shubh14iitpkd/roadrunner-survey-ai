@@ -16,8 +16,8 @@ import { api } from "@/lib/api";
 import { CategoryBadge, getCategoryColorCode } from "@/components/CategoryBadge";
 import { useLabelMap } from "@/contexts/LabelMapContext";
 import {
-  exportAnomalyByAssetTypeReport,
-  exportAnomalyByRoadReport,
+  exportDefectByAssetTypeReport,
+  exportDefectByRoadReport,
   exportRoadWiseAssetTypeReport,
 } from "@/lib/reportGenerator";
 
@@ -441,7 +441,7 @@ export default function Dashboard() {
               variant="outline"
               size="sm"
               className="h-7 text-[10px] gap-1.5"
-              onClick={() => exportAnomalyByAssetTypeReport()}
+              onClick={() => { exportDefectByAssetTypeReport(undefined, labelMapData).catch(console.error); }}
              >
               <Download className="h-3 w-3" />
               Export Report
@@ -476,7 +476,7 @@ export default function Dashboard() {
                           variant="ghost"
                           size="sm"
                           className="h-7 text-[11px] gap-1 text-muted-foreground hover:text-foreground"
-                           onClick={() => exportAnomalyByAssetTypeReport(row.type)}
+                           onClick={() => { exportDefectByAssetTypeReport(row.type, labelMapData).catch(console.error); }}
                          >
                            <Download className="h-3 w-3" />
                            Report
@@ -521,7 +521,7 @@ export default function Dashboard() {
                 variant="outline"
                 size="sm"
                 className="h-7 text-[10px] gap-1.5"
-                onClick={() => exportAnomalyByRoadReport()}
+                onClick={() => { exportDefectByRoadReport(undefined, labelMapData).catch(console.error); }}
                >
                 <Download className="h-3 w-3" />
                 Export Report
@@ -530,7 +530,7 @@ export default function Dashboard() {
                 variant="outline"
                 size="sm"
                 className="h-7 text-[10px] gap-1.5"
-                onClick={() => exportRoadWiseAssetTypeReport()}
+                onClick={() => { exportRoadWiseAssetTypeReport(labelMapData).catch(console.error); }}
               >
                 <Download className="h-3 w-3" />
                 Road × Asset Type
@@ -566,7 +566,7 @@ export default function Dashboard() {
                           variant="ghost"
                           size="sm"
                           className="h-7 text-[11px] gap-1 text-muted-foreground hover:text-foreground"
-                           onClick={() => exportAnomalyByRoadReport(row.road)}
+                           onClick={() => { exportDefectByRoadReport(row.road, labelMapData).catch(console.error); }}
                          >
                            <Download className="h-3 w-3" />
                            Report

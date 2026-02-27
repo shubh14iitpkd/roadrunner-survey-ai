@@ -317,7 +317,39 @@ def get_master_assets():
 	if road_side:
 		query["side"] = road_side
 
-	all_assets = list(db.assets.find(query))
+	# Add route name to assets
+	pipeline = [
+		{"$match": query},
+		{
+			"$lookup": {
+				"from": "roads",
+				"localField": "route_id",
+				"foreignField": "route_id",
+				"as": "road_info"
+			}
+		},
+		{
+			"$lookup": {
+				"from": "surveys",
+				"localField": "survey_id",
+				"foreignField": "_id",
+				"as": "survey_info"
+			}
+		},
+		{
+			"$addFields": {
+				"route_name": { "$arrayElemAt": ["$road_info.road_name", 0] },
+				"survey_date": { "$arrayElemAt": ["$survey_info.survey_date", 0] }
+			}
+		},
+		{
+			"$project": {
+				"road_info": 0,
+				"survey_info": 0
+			}
+		}
+	]
+	all_assets = list(db.assets.aggregate(pipeline))
 	
 	return mongo_response({
 		"items": all_assets, 

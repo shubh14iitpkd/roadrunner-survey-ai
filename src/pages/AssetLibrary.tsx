@@ -106,13 +106,6 @@ export default function AssetLibrary() {
         api.assets.getMaster({}), // no condition filter = all assets
       ]);
 
-      const routeMap: Record<number, string> = {};
-      if (masterResp?.routes) {
-        for (const r of masterResp.routes) {
-          if (r.route_id != null) routeMap[r.route_id] = r.road_name || `Route ${r.route_id}`;
-        }
-      }
-
       if (masterResp?.items) {
         const mapped: AssetRecord[] = masterResp.items.map((asset: any, idx: number) => {
           const coords = asset.location?.coordinates || [];
@@ -154,7 +147,7 @@ export default function AssetLibrary() {
             lat,
             lng,
             surveyId,
-            roadName: routeMap[asset.route_id] || `Route ${asset.route_id || '?'}`,
+            roadName: asset.route_name,
             side: asset.side || 'Shoulder',
             zone: asset.zone || 'Unknown',
             lastSurveyDate: asset.created_at?.split('T')[0] || asset.time?.split('T')[0] || '—',

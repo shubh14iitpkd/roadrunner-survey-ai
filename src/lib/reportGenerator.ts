@@ -1,148 +1,134 @@
 // Report generation utilities for anomaly/asset reports
-// Generates formatted Excel files with specified formats
+// Generates formatted Excel files with actual data from the API
 
-import { assetTypes, assetCategories } from "@/data/assetCategories";
 import { exportToExcel } from "@/lib/excelExport";
+import { apiFetch } from "@/lib/api";
+import type { ResolvedMap } from "@/contexts/LabelMapContext";
 
-// Deterministic seeded random helper
-function seededRandom(seed: number) {
-  const x = Math.sin(seed) * 10000;
-  return x - Math.floor(x);
-}
+// ── helpers ──────────────────────────────────────────────────────────────────
 
-const ROADS = [
-  "Al Shamal Road", "Al Corniche Street", "West Bay Road", "Salwa Road",
-  "C Ring Road", "Lusail Expressway", "Dukhan Highway", "Al Wakra Road",
-  "Industrial Area Road", "Airport Road",
-];
+/** Fetch ALL damaged assets from the master endpoint (no pagination). */
+async function fetchDamagedAssets(filterAssetType?: string): Promise<any[]> {
+  const qs = new URLSearchParams({ condition: "damaged" });
+  const resp = await apiFetch(`/api/assets/master?${qs.toString()}`, { method: "POST" });
 
-const DIRECTIONS = ["LHS", "RHS"] as const;
-const SIDES = ["Shoulder", "Median", "Pavement", "Overhead"] as const;
-const ISSUE_TYPES = [
-  "Faded text", "Structural crack", "Corrosion", "Missing component",
-  "Concrete spalling", "Paint peeling", "Tilt/Lean", "Obstruction",
-  "Electrical fault", "Surface damage", "Deformation", "Vandalism",
-];
+  // The master endpoint may return an array or { items: [] }
+  const items: any[] = Array.isArray(resp) ? resp : (resp?.items ?? resp?.assets ?? []);
 
-interface AnomalyRecord {
-  anomalyId: string;
-  assetId: string;
-  assetType: string;
-  assetCategory: string;
-  lat: number;
-  lon: number;
-  roadName: string;
-  direction: string;
-  side: string;
-  lastSurveyDate: string;
-  issueType: string;
-}
-
-// Generate deterministic demo anomaly records
-function generateAnomalyRecords(): AnomalyRecord[] {
-  const records: AnomalyRecord[] = [];
-  let idx = 0;
-  
-  for (const at of assetTypes) {
-    const anomalyCount = ((idx * 23 + 7) % 15);
-    for (let j = 0; j < anomalyCount; j++) {
-      const seed = idx * 100 + j;
-      const road = ROADS[Math.floor(seededRandom(seed) * ROADS.length)];
-      const dir = DIRECTIONS[Math.floor(seededRandom(seed + 1) * 2)];
-      const side = SIDES[Math.floor(seededRandom(seed + 2) * SIDES.length)];
-      const issue = ISSUE_TYPES[Math.floor(seededRandom(seed + 3) * ISSUE_TYPES.length)];
-      const lat = 25.2 + seededRandom(seed + 4) * 0.3;
-      const lon = 51.4 + seededRandom(seed + 5) * 0.2;
-      const dayOffset = Math.floor(seededRandom(seed + 6) * 60);
-      const date = new Date(2025, 10 - Math.floor(dayOffset / 30), 28 - (dayOffset % 28));
-
-      records.push({
-        anomalyId: `ANO-${String(records.length + 1).padStart(5, "0")}`,
-        assetId: `AST-${at.code}-${String(j + 1).padStart(3, "0")}`,
-        assetType: at.type,
-        assetCategory: at.category,
-        lat: parseFloat(lat.toFixed(6)),
-        lon: parseFloat(lon.toFixed(6)),
-        roadName: road,
-        direction: dir,
-        side: side,
-        lastSurveyDate: date.toISOString().split("T")[0],
-        issueType: issue,
-      });
-    }
-    idx++;
+  if (filterAssetType) {
+    return items.filter(
+      (a: any) =>
+        (a.display_name || a.type || "").toLowerCase() === filterAssetType.toLowerCase() ||
+        (a.asset_id || "").toLowerCase() === filterAssetType.toLowerCase()
+    );
   }
-  return records;
+  return items;
 }
 
-/**
- * Report 1: Per Asset-Type
- */
-export function exportAnomalyByAssetTypeReport(filterAssetType?: string) {
-  const records = generateAnomalyRecords();
-  const filtered = filterAssetType
-    ? records.filter(r => r.assetType === filterAssetType)
-    : records;
+/** Fetch top anomaly roads from the dashboard endpoint. */
+async function fetchTopAnomalyRoads(): Promise<any[]> {
+  const resp = await apiFetch("/api/dashboard/tables/top-anomaly-roads");
+  return Array.isArray(resp) ? resp : (resp?.items ?? []);
+}
+
+/** Map a raw asset record to a normalised row, resolving category_id via labelMap. */
+function assetToRow(asset: any, labelMap?: ResolvedMap | null) {
+  const mongoId = asset._id
+    ? (typeof asset._id === 'object' && (asset._id as any).$oid ? (asset._id as any).$oid : String(asset._id))
+    : "—";
+
+  const categoryId: string | undefined = asset.category_id ?? asset.category;
+  const categoryName =
+    (categoryId && labelMap?.categories?.[categoryId]?.display_name) ||
+    (categoryId && labelMap?.categories?.[categoryId]?.default_name) ||
+    categoryId ||
+    "—";
+
+  const assetIdKey: string | undefined = asset.asset_id;
+  const assetTypeName =
+    (assetIdKey && labelMap?.labels?.[assetIdKey]?.display_name) ||
+    (assetIdKey && labelMap?.labels?.[assetIdKey]?.default_name) ||
+    asset.display_name ||
+    asset.type ||
+    "—";
+
+  return {
+    id: mongoId.toUpperCase(),
+    anomalyId: asset.defect_id ?? mongoId,
+    assetId: asset.asset_id ?? asset.id ?? "—",
+    assetType: assetTypeName,
+    assetCategory: categoryName,
+    lat: asset?.location?.coordinates[1] ?? "—",
+    lon: asset?.location?.coordinates[0] ?? "—",
+    roadName: asset.road_name ?? asset.road ?? asset.route_name ?? "—",
+    side: asset.side ?? "—",
+    zone: asset.zone ?? "—",
+    lastSurveyDate: asset.survey_date ?? asset.last_survey_date ?? asset.date ?? "—",
+    issueType: asset.issue ?? asset.condition_detail ?? asset.condition ?? "damaged",
+  };
+}
+
+export async function exportDefectByAssetTypeReport(filterAssetType?: string, labelMap?: ResolvedMap | null) {
+  const assets = await fetchDamagedAssets(filterAssetType);
+  const rows = assets.map(a => assetToRow(a, labelMap));
 
   const headers = [
-    "Anomaly ID", "Asset ID", "Latitude", "Longitude",
-    "Road Name", "Direction (LHS/RHS)", "Side", "Last Survey Date", "Issue Type",
+    "Defect ID", "Asset ID", "Latitude", "Longitude",
+    "Road Name", "Side", "Zone", "Last Survey Date", "Issue Type",
   ];
 
-  const rows = filtered.map(r => [
-    r.anomalyId, r.assetId, r.lat, r.lon,
-    r.roadName, r.direction, r.side, r.lastSurveyDate, r.issueType,
+  const data = rows.map(r => [
+    r.anomalyId, r.id, r.lat, r.lon,
+    r.roadName, r.side, r.zone, r.lastSurveyDate, r.issueType,
   ]);
 
   const suffix = filterAssetType ? filterAssetType.replace(/\s+/g, "_") : "All_Types";
   exportToExcel({
-    filename: `Anomaly_Report_AssetType_${suffix}.xlsx`,
+    filename: `Defect_Report_AssetType_${suffix}.xlsx`,
     sheetName: "By Asset Type",
-    title: "RoadSight AI — Anomaly Report by Asset Type",
-    subtitle: `Filter: ${filterAssetType || "All Types"} | Generated: ${new Date().toLocaleDateString()} | ${filtered.length} records`,
+    title: "RoadSight AI — Defect Report by Asset Type",
+    subtitle: `Filter: ${filterAssetType || "All Types"} | Generated: ${new Date().toLocaleDateString()} | ${data.length} records`,
     headers,
-    rows,
+    rows: data,
   });
 }
 
-/**
- * Report 2: Per Road
- */
-export function exportAnomalyByRoadReport(filterRoad?: string) {
-  const records = generateAnomalyRecords();
+export async function exportDefectByRoadReport(filterRoad?: string, labelMap?: ResolvedMap | null) {
+  const assets = await fetchDamagedAssets();
+  const all = assets.map(a => assetToRow(a, labelMap));
+
   const filtered = filterRoad
-    ? records.filter(r => r.roadName === filterRoad)
-    : records;
+    ? all.filter(r => r.roadName === filterRoad)
+    : all;
 
   const headers = [
-    "Anomaly ID", "Asset ID", "Asset Type", "Asset Category",
-    "Latitude", "Longitude", "Direction (LHS/RHS)", "Side",
+    "Defect ID", "Asset ID", "Asset Type", "Asset Category",
+    "Latitude", "Longitude", "Side", "Zone",
     "Last Survey Date", "Issue Type",
   ];
 
-  const rows = filtered.map(r => [
-    r.anomalyId, r.assetId, r.assetType, r.assetCategory,
-    r.lat, r.lon, r.direction, r.side,
+  const data = filtered.map(r => [
+    r.anomalyId, r.id, r.assetType, r.assetCategory,
+    r.lat, r.lon, r.side, r.zone,
     r.lastSurveyDate, r.issueType,
   ]);
 
   const suffix = filterRoad ? filterRoad.replace(/\s+/g, "_") : "All_Roads";
   exportToExcel({
-    filename: `Anomaly_Report_Road_${suffix}.xlsx`,
+    filename: `Defect_Report_Road_${suffix}.xlsx`,
     sheetName: "By Road",
-    title: "RoadSight AI — Anomaly Report by Road",
-    subtitle: `Filter: ${filterRoad || "All Roads"} | Generated: ${new Date().toLocaleDateString()} | ${filtered.length} records`,
+    title: "RoadSight AI — Defect Report by Road",
+    subtitle: `Filter: ${filterRoad || "All Roads"} | Generated: ${new Date().toLocaleDateString()} | ${data.length} records`,
     headers,
-    rows,
+    rows: data,
   });
 }
 
-/**
- * Report 3: Road-wise Asset-Type
- */
-export function exportRoadWiseAssetTypeReport() {
-  const records = generateAnomalyRecords();
-  const sorted = [...records].sort((a, b) => {
+// ── Report 3: Road-wise Asset-Type ────────────────────────────────────────────
+
+export async function exportRoadWiseAssetTypeReport(labelMap?: ResolvedMap | null) {
+  const assets = await fetchDamagedAssets();
+  const rows = assets.map(a => assetToRow(a, labelMap)).sort((a, b) => {
     const roadCmp = a.roadName.localeCompare(b.roadName);
     if (roadCmp !== 0) return roadCmp;
     return a.assetType.localeCompare(b.assetType);
@@ -150,22 +136,22 @@ export function exportRoadWiseAssetTypeReport() {
 
   const headers = [
     "Road Name", "Asset Type", "Asset Category", "Anomaly ID", "Asset ID",
-    "Latitude", "Longitude", "Direction (LHS/RHS)", "Side",
+    "Latitude", "Longitude", "Side", "Zone",
     "Last Survey Date", "Issue Type",
   ];
 
-  const rows = sorted.map(r => [
-    r.roadName, r.assetType, r.assetCategory, r.anomalyId, r.assetId,
-    r.lat, r.lon, r.direction, r.side,
+  const data = rows.map(r => [
+    r.roadName, r.assetType, r.assetCategory, r.anomalyId, r.id,
+    r.lat, r.lon, r.side, r.zone,
     r.lastSurveyDate, r.issueType,
   ]);
 
   exportToExcel({
-    filename: "Anomaly_Report_RoadWise_AssetType.xlsx",
+    filename: "Defect_Report_RoadWise_AssetType.xlsx",
     sheetName: "Road × Asset Type",
     title: "RoadSight AI — Road-wise Asset Type Report",
-    subtitle: `Generated: ${new Date().toLocaleDateString()} | ${sorted.length} records | Sorted by Road → Asset Type`,
+    subtitle: `Generated: ${new Date().toLocaleDateString()} | ${data.length} records | Sorted by Road → Asset Type`,
     headers,
-    rows,
+    rows: data,
   });
 }
