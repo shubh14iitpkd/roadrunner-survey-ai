@@ -10,8 +10,9 @@ def get_now_iso() -> str:
 	return datetime.utcnow().isoformat() + "Z"
 
 
-def next_sequence(sequence_name: str) -> int:
-	db = get_db()
+def next_sequence(sequence_name: str, db=None) -> int:
+	if db is None:
+		db = get_db()
 	counters = db["counters"]
 	res: Any = counters.find_one_and_update(
 		{"_id": sequence_name},
@@ -21,3 +22,12 @@ def next_sequence(sequence_name: str) -> int:
 	)
 	return int(res.get("seq", 1))
 
+
+def generate_defect_id(db=None) -> str:
+	seq = next_sequence("defectId", db=db)
+	return f"DEF-{str(seq).rjust(6, '0')}"
+
+
+def generate_asset_display_id(db=None) -> str:
+	seq = next_sequence("asset_display_id", db=db)
+	return f"AST-{str(seq).rjust(6, '0')}"

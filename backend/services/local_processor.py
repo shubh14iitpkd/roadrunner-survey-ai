@@ -14,6 +14,7 @@ import subprocess
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from services.LatLongEstimator import LatLongEstimator
 from services.ZoneMapper import ZoneMapper
+from utils.ids import generate_defect_id, generate_asset_display_id
 
 from deep_sort_realtime.deepsort_tracker import DeepSort
 from ultralytics import YOLO
@@ -480,7 +481,8 @@ class LocalVideoProcessor:
                                             "track_id": track_id,
                                             "asset_type": class_name,
                                             "type": class_name,
-                                            "defect_id": str(ULID()) if condition != "good" else None,
+                                            "asset_display_id": generate_asset_display_id(db=db),
+                                            "defect_id": generate_defect_id(db=db) if condition != "good" else None,
                                             "asset_id": label_info.get("asset_id"),
                                             "category_id": label_info.get("category_id"),
                                             "group_id": label_info.get("group_id"),
