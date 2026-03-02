@@ -19,6 +19,7 @@ import type { AssetRecord } from "@/types/asset";
 import AssetFilterStrip from "@/components/asset-library/AssetFilterStrip";
 import AssetDetailSidebar from "@/components/asset-library/AssetDetailSidebar";
 import AssetTable, { type ColumnDef } from "@/components/asset-library/AssetTable";
+import capitalize from "@/helpers/capitalize";
 
 // ── DAMAGED condition set (mirrors backend) ─────────────────
 const DAMAGED_CONDITIONS = new Set([
@@ -39,7 +40,7 @@ const ASSET_COLUMNS: ColumnDef[] = [
   { key: "category", header: "Category", className: "py-1.5 px-1.5 text-center", render: (a) => <CategoryBadge category={a.assetCategory} categoryId={a.category_id} /> },
   {
     key: "condition", header: "Condition", className: "py-1.5 px-1.5 text-center", render: (a) => (
-      <span className={`inline-flex items-center rounded-md px-1.5 py-0.5 text-[9px] font-semibold leading-tight ${DAMAGED_CONDITIONS.has((a.condition ?? '').toLowerCase())
+      <span className={`inline-flex capitalize items-center rounded-md px-1.5 py-0.5 text-[9px] font-semibold leading-tight ${DAMAGED_CONDITIONS.has((a.condition ?? '').toLowerCase())
         ? 'bg-destructive/10 text-destructive'
         : a.condition?.toLowerCase() === 'good'
           ? 'bg-emerald-500/10 text-emerald-600'
@@ -50,7 +51,7 @@ const ASSET_COLUMNS: ColumnDef[] = [
   { key: "coords", header: "Coordinates", className: "font-mono text-[10px] py-1.5 px-1.5 whitespace-nowrap text-center", render: (a) => `${a.lat.toFixed(4)}, ${a.lng.toFixed(4)}` },
   { key: "road", header: "Road", className: "text-[11px] py-1.5 px-1.5 whitespace-nowrap text-center", render: (a) => a.roadName },
   { key: "side", header: "Road Side", className: "text-[11px] py-1.5 px-1.5 text-center", render: (a) => a.side },
-  { key: "zone", header: "Zone", className: "text-[11px] py-1.5 px-1.5 text-center", render: (a) => a.zone },
+  { key: "zone", header: "Zone", className: "text-[11px] capitalize py-1.5 px-1.5 text-center", render: (a) => a.zone },
   { key: "survey", header: "Survey", className: "text-[11px] py-1.5 px-1.5 whitespace-nowrap text-center", render: (a) => a.lastSurveyDate },
 ];
 
@@ -236,8 +237,8 @@ export default function AssetLibrary() {
       "Latitude", "Longitude", "Road Name", "Side", "Zone", "Survey Date",
     ];
     const rows = filteredAssets.map((a) => [
-      a.id?.toUpperCase(), a.assetType, a.assetCategory, a.condition,
-      a.lat, a.lng, a.roadName, a.side, a.zone, a.lastSurveyDate,
+      a.id?.toUpperCase(), a.assetType, a.assetCategory, capitalize(a.condition),
+      a.lat, a.lng, a.roadName, capitalize(a.side), capitalize(a.zone), a.lastSurveyDate,
     ]);
     exportToExcel({
       filename: "Asset_Library_Report.xlsx",

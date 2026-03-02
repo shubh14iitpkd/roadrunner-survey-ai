@@ -309,17 +309,17 @@ export default function AssetDetailSidebar({
           </div>
           {/* Info strip */}
           <div className="px-1.5 py-1.5 space-y-1 shrink-0">
-            <div className="flex items-center gap-x-2">
+            <div className="flex items-center justify-between">
               {([
-                ["ID", selectedAsset.defectId],
+                // ["ID", selectedAsset.defectId],
                 ["Asset ID", selectedAsset.id],
                 ["Type", selectedAsset.assetType],
                 ["Road Side", selectedAsset.side],
                 ["Zone", selectedAsset.zone],
               ] as [string, string | undefined][]).map(([label, val]) => (
                 <div key={label} className="min-w-0">
-                  <p className="text-[6px] text-muted-foreground uppercase">{label}</p>
-                  <p className="text-[9px] font-medium text-foreground leading-none truncate">{val}</p>
+                  <p className="text-[8px] text-muted-foreground uppercase">{label}</p>
+                  <p className="text-[10px] font-medium text-foreground leading-none truncate">{val}</p>
                 </div>
               ))}
             </div>

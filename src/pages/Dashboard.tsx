@@ -511,8 +511,8 @@ export default function Dashboard() {
         {/* Anomalies by Road */}
         <Card className="p-0 border border-border bg-card overflow-hidden">
           <div className="px-5 pt-5 pb-3 flex items-center gap-3">
-            <div className="p-2 rounded-lg bg-primary/10">
-              <Map className="h-4 w-4 text-primary" />
+            <div className="p-2 rounded-lg bg-primary/10 dark:bg-muted-secondary/15">
+              <Map className="h-4 w-4 text-primary dark:text-muted-secondary" />
             </div>
             <div className="flex-1">
               <p className="text-xs font-medium text-muted-foreground uppercase tracking-widest">Defects</p>
@@ -609,7 +609,7 @@ function KPICard({ label, value, unit, icon, accent, trend, lastSurvey }: {
   const styles = {
     primary: {
       border: "border-l-primary dark:border-l-muted-secondary",
-      iconBg: "bg-primary/10 text-primary dark:text-muted-secondary",
+      iconBg: "bg-primary/10 text-primary dark:bg-muted-secondary/15 dark:text-muted-secondary",
       valueTint: "text-primary dark:text-muted-secondary",
       gradFrom: "hsl(217, 64%, 31%)",
       gradTo: "hsl(198, 99%, 41%)",
