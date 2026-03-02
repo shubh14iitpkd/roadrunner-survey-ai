@@ -56,7 +56,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         <aside
           className={cn(
             "h-screen flex flex-col transition-all duration-300 bg-primary",
-            collapsed ? "w-[56px]" : "w-1/6 max-w-[400px]",
+            collapsed ? "w-[56px]" : "md:w-1/4 lg:w-1/6 max-w-[400px]",
             "fixed lg:static top-0 left-0 z-[9999] lg:z-auto lg:transition-all",
             sidebarOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
           )}
@@ -76,7 +76,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
               <img
                 src={logo}
                 alt="RoadSight AI"
-                className="h-10 w-auto object-contain brightness-0 invert opacity-95"
+                className="h-14 w-auto object-contain brightness-0 invert opacity-95"
               />
             )}
             <Button
@@ -97,7 +97,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                 return (
                   <div
                     key={item.name}
-                    className="px-3 pt-5 pb-1.5 text-sm font-semibold text-white/25 uppercase tracking-[0.18em]"
+                    className="px-3 pt-5 pb-1.5 text-lg font-semibold text-white/25 uppercase tracking-[0.18em]"
                   >
                     {item.name}
                   </div>
@@ -125,7 +125,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                   )} />
                   {!collapsed && (
                     <>
-                      <span className="flex-1 truncate text-xs font-medium">{item.name}</span>
+                      <span className="flex-1 truncate text-lg font-medium">{item.name}</span>
                       {isActive && <div className="w-1 h-1 rounded-full bg-sky-400" />}
                     </>
                   )}

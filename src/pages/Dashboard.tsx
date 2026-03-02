@@ -259,7 +259,7 @@ export default function Dashboard() {
           {/* Donut */}
           <Card className="lg:col-span-2 p-0 border border-border bg-card overflow-hidden flex flex-col">
             <div className="px-5 pt-4 pb-1">
-              <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-[0.15em]">Asset Distribution</p>
+              <p className="text-sm font-semibold text-muted-foreground uppercase tracking-[0.15em]">Asset Distribution</p>
               <p className="text-sm font-semibold text-foreground mt-0.5">By Category</p>
             </div>
             <div className="flex items-center justify-center px-5" style={{ height: 300 }}>
@@ -317,10 +317,10 @@ export default function Dashboard() {
             <div className="px-5 pb-2 flex-1 flex flex-col justify-evenly">
               {categoryChartData.map((d, i) => (
                 <div
-                  key={d.category}
+                  key={d.category_id || `category-${i}`}
                   className={cn(
                     "flex items-center gap-2 text-xs px-2 py-1.5 rounded-md transition-colors cursor-pointer",
-                    selectedCategory === d.category ? "bg-primary/10 ring-1 ring-primary/30" : activeDonutIndex === i ? "bg-muted/80" : "hover:bg-muted/40"
+                    selectedCategory === d.category ? "bg-muted-secondary/10 ring-1 ring-muted-secondary/30" : activeDonutIndex === i ? "bg-muted/80" : "hover:bg-muted/40"
                   )}
                   onMouseEnter={() => setActiveDonutIndex(i)}
                   onMouseLeave={() => setActiveDonutIndex(undefined)}
@@ -338,7 +338,7 @@ export default function Dashboard() {
                     className="w-2.5 h-2.5 rounded-full shrink-0"
                     style={{ backgroundColor: getCategoryColorCode(d.category_id) }}
                   />
-                  <span className="text-foreground font-medium text-[11px]">{d.category}</span>
+                  <span className="text-foreground font-medium text-sm">{d.category}</span>
                   <span className="font-bold text-foreground ml-auto tabular-nums text-[11px]">{d.count}</span>
                 </div>
               ))}
@@ -347,7 +347,7 @@ export default function Dashboard() {
               <Button
                 variant="outline"
                 size="sm"
-                className="w-full h-7 text-[11px] gap-1.5"
+                className="w-full h-7 text-sm gap-1.5"
                 onClick={() => navigate(selectedCategory ? `/asset-library?category=${encodeURIComponent(selectedCategory)}` : '/asset-library')}
               >
                 <MapPin className="h-3 w-3" />
@@ -367,7 +367,7 @@ export default function Dashboard() {
                     {selectedCategory ? selectedCategory : "All Categories"}
                   </p>
                   {selectedCategory && (
-                    <Button variant="ghost" size="sm" className="h-5 px-1.5 text-[10px] text-muted-foreground" onClick={() => { setSelectedCategory(null); setSelectedCategoryId(null); }}>
+                    <Button variant="ghost" size="sm" className="h-5 px-1.5 text-sm text-muted-foreground" onClick={() => { setSelectedCategory(null); setSelectedCategoryId(null); }}>
                       <X className="h-3 w-3 mr-0.5" /> Clear
                     </Button>
                   )}
@@ -383,10 +383,10 @@ export default function Dashboard() {
               <Table>
                 <TableHeader className="top-0 z-10 bg-card">
                   <TableRow className="border-b border-border hover:bg-transparent">
-                    <TableHead className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground w-10">#</TableHead>
-                    <TableHead className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Type</TableHead>
-                    <TableHead className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Category</TableHead>
-                    <TableHead className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground text-right">Count</TableHead>
+                    <TableHead className="text-sm font-semibold uppercase tracking-wider text-muted-foreground w-10">#</TableHead>
+                    <TableHead className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Type</TableHead>
+                    <TableHead className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Category</TableHead>
+                    <TableHead className="text-sm font-semibold uppercase tracking-wider text-muted-foreground text-right">Count</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -412,11 +412,11 @@ export default function Dashboard() {
               </Table>
             </div>
             <div className="flex items-center justify-between px-4 py-2 border-t border-border">
-              <span className="text-[10px] text-muted-foreground tabular-nums">
+              <span className="text-sm text-muted-foreground tabular-nums">
                 {(assetTypePage - 1) * assetTypePageSize + 1}–{Math.min(assetTypePage * assetTypePageSize, assetTypeTableData.total)} of {assetTypeTableData.total}
               </span>
               <div className="flex items-center gap-1">
-                <span className="text-[10px] text-muted-foreground tabular-nums mr-1">{assetTypePage}/{assetTypeTotalPages || 1}</span>
+                <span className="text-sm text-muted-foreground tabular-nums mr-1">{assetTypePage}/{assetTypeTotalPages || 1}</span>
                 <Button variant="ghost" size="icon" className="h-7 w-7" disabled={assetTypePage <= 1} onClick={() => setAssetTypePage(p => p - 1)}>
                   <ChevronLeft className="h-3.5 w-3.5" />
                 </Button>
@@ -441,7 +441,7 @@ export default function Dashboard() {
             <Button
               variant="outline"
               size="sm"
-              className="h-7 text-[10px] gap-1.5"
+              className="h-7 text-sm gap-1.5"
               onClick={() => { exportDefectByAssetTypeReport(undefined, labelMapData).catch(console.error); }}
              >
               <Download className="h-3 w-3" />
@@ -453,15 +453,15 @@ export default function Dashboard() {
             <Table>
               <TableHeader className="top-0 z-10 bg-card">
                 <TableRow className="border-b hover:bg-transparent">
-                  <TableHead className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Defect Type</TableHead>
-                  <TableHead className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Category</TableHead>
-                  <TableHead className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground text-right">Count</TableHead>
-                  <TableHead className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground text-right w-48">Actions</TableHead>
+                  <TableHead className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Defect Type</TableHead>
+                  <TableHead className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Category</TableHead>
+                  <TableHead className="text-sm font-semibold uppercase tracking-wider text-muted-foreground text-right">Count</TableHead>
+                  <TableHead className="text-sm font-semibold uppercase tracking-wider text-muted-foreground text-right w-48">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {defectByAsset?.length > 0 ? defectByAsset.map((row) => (
-                  <TableRow key={row.type} className="hover:bg-muted/40 border-b border-border/50" style={{ height: 36 }}>
+                {defectByAsset?.length > 0 ? defectByAsset.map((row, idx) => (
+                  <TableRow key={row.asset_id || `defect-${idx}`} className="hover:bg-muted/40 border-b border-border/50" style={{ height: 36 }}>
                     <TableCell className="text-xs font-medium py-2.5">{row.type}</TableCell>
                     <TableCell className="py-2.5">
                       <CategoryBadge category={row.category} categoryId={row.category_id} />
@@ -521,7 +521,7 @@ export default function Dashboard() {
               <Button
                 variant="outline"
                 size="sm"
-                className="h-7 text-[10px] gap-1.5"
+                className="h-7 text-sm gap-1.5"
                 onClick={() => { exportDefectByRoadReport(undefined, labelMapData).catch(console.error); }}
                >
                 <Download className="h-3 w-3" />
@@ -543,15 +543,15 @@ export default function Dashboard() {
             <Table>
               <TableHeader className="top-0 z-10 bg-card">
                 <TableRow className="border-b border-border hover:bg-transparent">
-                  <TableHead className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Road</TableHead>
-                  <TableHead className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground text-right">Count</TableHead>
-                  <TableHead className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Last Survey</TableHead>
-                  <TableHead className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground text-right w-48">Actions</TableHead>
+                  <TableHead className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Road</TableHead>
+                  <TableHead className="text-sm font-semibold uppercase tracking-wider text-muted-foreground text-right">Count</TableHead>
+                  <TableHead className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Last Survey</TableHead>
+                  <TableHead className="text-sm font-semibold uppercase tracking-wider text-muted-foreground text-right w-48">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {topDefectRoads.map((row) => (
-                  <TableRow key={row.road} className="hover:bg-muted/40 border-b border-border/50" style={{ height: 36 }}>
+                {topDefectRoads.map((row, idx) => (
+                  <TableRow key={`${row.road}-${idx}`} className="hover:bg-muted/40 border-b border-border/50" style={{ height: 36 }}>
                     <TableCell className="text-xs font-medium py-2.5">{row.road}</TableCell>
                     <TableCell className="text-right py-2.5">
                       <span className="inline-flex items-center justify-center rounded-md bg-destructive/10 text-destructive px-2 py-0.5 text-xs font-bold tabular-nums min-w-[2rem]">
@@ -607,9 +607,9 @@ function KPICard({ label, value, unit, icon, accent, trend, lastSurvey }: {
 }) {
   const styles = {
     primary: {
-      border: "border-l-primary",
-      iconBg: "bg-primary/10 text-primary",
-      valueTint: "text-primary",
+      border: "border-l-primary dark:border-l-muted-secondary",
+      iconBg: "bg-primary/10 text-primary dark:text-muted-secondary",
+      valueTint: "text-primary dark:text-muted-secondary",
       gradFrom: "hsl(217, 64%, 31%)",
       gradTo: "hsl(198, 99%, 41%)",
     },
@@ -644,7 +644,7 @@ function KPICard({ label, value, unit, icon, accent, trend, lastSurvey }: {
           {icon}
         </div>
         <div className="flex-1 min-w-0">
-          <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-widest">{label}</p>
+          <p className="text-sm font-medium text-muted-foreground uppercase tracking-widest">{label}</p>
           <div className="flex items-baseline gap-1.5 mt-1">
             <span className={`text-3xl font-bold tabular-nums tracking-tight ${s.valueTint}`}>{value}</span>
             {unit && <span className="text-sm text-muted-foreground font-medium">{unit}</span>}
