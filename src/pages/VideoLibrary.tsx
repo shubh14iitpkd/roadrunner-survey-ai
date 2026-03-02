@@ -361,8 +361,6 @@ export default function VideoLibrary() {
                       <span>{video.surveyDate}</span>
                       <span>•</span>
                       <span>{video.surveyorName}</span>
-                      <span>•</span>
-                      <span>{video.size}</span>
                     </div>
                   </div>
 
@@ -462,7 +460,6 @@ export default function VideoLibrary() {
                     <div className="flex flex-wrap gap-2">
                       <Badge variant="outline" className="text-xs">Route #{video.routeId}</Badge>
                       <Badge variant="secondary" className="text-xs">{video.surveyDate}</Badge>
-                      <Badge variant="outline" className="text-xs">{video.duration}</Badge>
                     </div>
                     <p className="text-xs text-muted-foreground">Surveyor: {video.surveyorName}</p>
                   </div>

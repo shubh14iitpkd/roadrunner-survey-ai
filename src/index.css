@@ -134,7 +134,8 @@ All colors MUST be HSL.
     /* Dark Mode */
     --background: 0 0% 13.3%;
     /* #222 */
-    --foreground: 0 0% 95%;
+    /* --foreground: 0 0% 95%; */
+    --foreground: 214 59% 85%;
     /* near white */
 
     --card: 207 7% 24%;
@@ -144,7 +145,8 @@ All colors MUST be HSL.
     --popover: 207 7% 24%;
     --popover-foreground: 0 0% 93%;
 
-    --primary: 217 64% 50%;
+    --primary: 217 64% 31%;
+    /* --primary: 217 64% 50%;      */
     /* brighter blue for dark mode visibility */
     --primary-foreground: 0 0% 100%;
     --primary-glow: 217 64% 65%;

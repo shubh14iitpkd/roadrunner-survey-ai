@@ -55,14 +55,14 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         {/* Sidebar */}
         <aside
           className={cn(
-            "h-screen flex flex-col transition-all duration-300",
+            "h-screen flex flex-col transition-all duration-300 bg-primary",
             collapsed ? "w-[56px]" : "w-1/6 max-w-[400px]",
             "fixed lg:static top-0 left-0 z-[9999] lg:z-auto lg:transition-all",
             sidebarOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
           )}
-          style={{
-            background: 'hsl(215 58% 30%)',
-          }}
+          // style={{
+          //   background: 'hsl(215 58% 30%)',
+          // }}
         >
           {/* Logo */}
           <div className={cn("flex items-center border-b border-white/[0.06] relative", collapsed ? "justify-center px-1 py-3" : "justify-center px-4 py-3")}>
