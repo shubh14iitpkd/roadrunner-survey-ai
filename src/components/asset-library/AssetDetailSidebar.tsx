@@ -227,18 +227,18 @@ export default function AssetDetailSidebar({
         if (selectedAsset.box) {
           const box = selectedAsset.box;
           const scale = Math.max(1, imgW / 1000);
-
-          ctx.strokeStyle = "#ef4444";
+          const color = getCategoryColorCode(selectedAsset.category_id || 'Other');
+          ctx.strokeStyle = color;
           ctx.lineWidth = 3 * scale;
           ctx.strokeRect(box.x, box.y, box.width, box.height);
 
-          const fontSize = 8;
+          const fontSize = Math.max(8, Math.round(imgW / 50));
           const padding = 4 * scale;
           const label = getAssetDisplayName(selectedAsset);
           ctx.font = `bold ${fontSize}px Arial`;
           const tm = ctx.measureText(label);
 
-          ctx.fillStyle = "rgba(239, 68, 68, 0.85)";
+          ctx.fillStyle = color;
           ctx.fillRect(box.x, box.y - fontSize - padding * 2, tm.width + padding * 2, fontSize + padding * 2);
           ctx.fillStyle = "#ffffff";
           ctx.fillText(label, box.x + padding, box.y - padding);
