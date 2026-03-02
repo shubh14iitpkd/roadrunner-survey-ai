@@ -328,7 +328,7 @@ export default function AssetDetailSidebar({
             <div className="flex items-center justify-between">
               {([
                 // ["ID", selectedAsset.defectId],
-                ["Asset ID", selectedAsset.id],
+                ["Asset ID", selectedAsset.assetDisplayId],
                 ["Type", selectedAsset.assetType],
                 ["Road Side", selectedAsset.side],
                 ["Zone", selectedAsset.zone],

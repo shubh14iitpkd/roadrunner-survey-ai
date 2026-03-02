@@ -108,7 +108,7 @@ export default function LibraryMapView({
       <FlyToSelected assets={assets} selectedId={selectedId} />
 
       {assets.map((asset) => {
-        const isSelected = asset.id === selectedId;
+        const isSelected = asset.assetDisplayId === selectedId;
         const useIcon = wantsIcons && isAssetIconExist(asset.assetId);
 
         if (useIcon) {
@@ -116,7 +116,7 @@ export default function LibraryMapView({
           const icon = isSelected ? getSelectedIcon(baseIcon) : baseIcon;
           return (
             <Marker
-              key={asset.id}
+              key={asset.assetDisplayId}
               position={[asset.lat, asset.lng]}
               icon={icon}
               zIndexOffset={isSelected ? 1000 : 0}
@@ -138,7 +138,7 @@ export default function LibraryMapView({
 
         return (
           <CircleMarker
-            key={asset.defectId}
+            key={asset.assetDisplayId}
             center={[asset.lat, asset.lng]}
             radius={isSelected ? SELECTED_RADIUS : DEFAULT_RADIUS}
             pathOptions={{

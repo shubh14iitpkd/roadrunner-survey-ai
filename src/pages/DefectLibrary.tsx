@@ -36,7 +36,7 @@ const DUMMY_ISSUES: Record<string, string[]> = {
 // ── Table columns for Defect Library ──────────────────────
 const DEFECT_COLUMNS: ColumnDef[] = [
   { key: "defectId", header: "Defect ID", className: "font-mono text-[11px] font-semibold py-1.5 px-1.5 whitespace-nowrap text-center", render: (a) => a.defectId },
-  { key: "assetId", header: "Asset ID", className: "font-mono text-[11px] py-1.5 px-1.5 whitespace-nowrap text-center", render: (a) => a.id?.toUpperCase() },
+  { key: "assetDisplayId", header: "Asset ID", className: "font-mono text-[11px] py-1.5 px-1.5 whitespace-nowrap text-center", render: (a) => a.assetDisplayId },
   { key: "assetType", header: "Asset Type", className: "text-[10px] leading-tight py-1.5 px-1.5 min-w-[180px] max-w-[220px] text-center", render: (a) => <span className="line-clamp-2">{a.assetType}</span> },
   { key: "category", header: "Category", className: "py-1.5 px-1.5 text-center", render: (a) => <CategoryBadge category={a.assetCategory} categoryId={a.category_id} /> },
   { key: "coords", header: "Coordinates", className: "font-mono text-[10px] py-1.5 px-1.5 whitespace-nowrap text-center", render: (a) => `${a.lat.toFixed(4)}, ${a.lng.toFixed(4)}` },
@@ -143,6 +143,7 @@ export default function DefectLibrary() {
             id: mongoId,
             defectId: asset.defect_id || `ANM-${String(idx + 1).padStart(4, '0')}`,
             assetId: asset.asset_id,
+            assetDisplayId: asset.asset_display_id,
             category_id: asset.category_id,
             assetType: assetTypeName,
             assetCategory: categoryName,
@@ -198,7 +199,7 @@ export default function DefectLibrary() {
       if (selectedRouteId !== null && a.routeId !== selectedRouteId) return false;
       if (q && !(
         a.defectId.toLowerCase().includes(q) ||
-        a.assetId.toLowerCase().includes(q) ||
+        a.assetDisplayId.toLowerCase().includes(q) ||
         a.assetType.toLowerCase().includes(q) ||
         (a.roadName ?? '').toLowerCase().includes(q) ||
         a.issue.toLowerCase().includes(q)
@@ -234,7 +235,7 @@ export default function DefectLibrary() {
       "Road Name", "Side", "Zone", "Last Survey Date", "Issue Type",
     ];
     const rows = filteredDefects.map((a) => [
-      a.defectId, a.id?.toUpperCase(), a.assetType, a.assetCategory,
+      a.defectId, a.assetDisplayId, a.assetType, a.assetCategory,
       a.lat, a.lng, a.roadName, a.side,
       a.zone, a.lastSurveyDate, a.issue,
     ]);
@@ -361,7 +362,7 @@ export default function DefectLibrary() {
         <div className="flex-1 relative min-w-0" style={{ zIndex: 0, isolation: 'isolate' }}>
           <LibraryMapView
             assets={filteredDefects}
-            selectedId={selectedDefect?.id ?? null}
+            selectedId={selectedDefect?.assetDisplayId ?? null}
             onSelect={handleRowClick}
           />
         </div>
@@ -533,9 +534,10 @@ export default function DefectLibrary() {
         loadError={loadError}
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
-        selectedId={selectedDefect?.defectId ?? null}
+        selectedId={selectedDefect?.assetDisplayId ?? null}
         onRowClick={handleRowClick}
         onRetry={loadData}
+        idField="assetDisplayId"
         onClearFilters={clearFilters}
         columns={DEFECT_COLUMNS}
       />

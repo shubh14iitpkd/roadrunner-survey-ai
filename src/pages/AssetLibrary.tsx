@@ -35,7 +35,7 @@ const conditionToColor = (condition: string): string => {
 
 // ── Table columns for Asset Library (no Issue / Defect ID) ──
 const ASSET_COLUMNS: ColumnDef[] = [
-  { key: "id", header: "Asset ID", className: "font-mono text-[11px] py-1.5 px-1.5 whitespace-nowrap text-center", render: (a) => a.id?.toUpperCase() },
+  { key: "assetDisplayId", header: "Asset ID", className: "font-mono text-[11px] py-1.5 px-1.5 whitespace-nowrap text-center", render: (a) => a.assetDisplayId },
   { key: "assetType", header: "Asset Type", className: "text-[10px] leading-tight py-1.5 px-1.5 min-w-[180px] max-w-[220px] text-center", render: (a) => <span className="line-clamp-2">{a.assetType}</span> },
   { key: "category", header: "Category", className: "py-1.5 px-1.5 text-center", render: (a) => <CategoryBadge category={a.assetCategory} categoryId={a.category_id} /> },
   {
@@ -150,6 +150,7 @@ export default function AssetLibrary() {
             category_id: asset.category_id,
             assetType: assetTypeName,
             assetCategory: categoryName,
+            assetDisplayId: asset.asset_display_id || '',
             condition,
             markerColor: conditionToColor(condition),
             lat,
@@ -204,7 +205,7 @@ export default function AssetLibrary() {
       if (selectedRouteId !== null && a.routeId !== selectedRouteId) return false;
       if (q && !(
         (a.defectId ?? '').toLowerCase().includes(q) ||
-        (a.id ?? '').toLowerCase().includes(q) ||
+        (a.assetDisplayId ?? '').toLowerCase().includes(q) ||
         a.assetId.toLowerCase().includes(q) ||
         a.assetType.toLowerCase().includes(q) ||
         (a.roadName ?? '').toLowerCase().includes(q)
@@ -237,7 +238,7 @@ export default function AssetLibrary() {
       "Latitude", "Longitude", "Road Name", "Side", "Zone", "Survey Date",
     ];
     const rows = filteredAssets.map((a) => [
-      a.id?.toUpperCase(), a.assetType, a.assetCategory, capitalize(a.condition),
+      a.assetDisplayId, a.assetType, a.assetCategory, capitalize(a.condition),
       a.lat, a.lng, a.roadName, capitalize(a.side), capitalize(a.zone), a.lastSurveyDate,
     ]);
     exportToExcel({
@@ -348,7 +349,7 @@ export default function AssetLibrary() {
         <div className="flex-1 relative min-w-0" style={{ zIndex: 0, isolation: 'isolate' }}>
           <LibraryMapView
             assets={filteredAssets}
-            selectedId={selectedAsset?.id ?? null}
+            selectedId={selectedAsset?.assetDisplayId ?? null}
             onSelect={handleRowClick}
           />
         </div>
@@ -517,10 +518,10 @@ export default function AssetLibrary() {
         loadError={loadError}
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
-        selectedId={selectedAsset?.id ?? null}
+        selectedId={selectedAsset?.assetDisplayId ?? null}
         onRowClick={handleRowClick}
         onRetry={loadData}
-        idField="id"
+        idField="assetDisplayId"
         onClearFilters={clearFilters}
         columns={ASSET_COLUMNS}
       />

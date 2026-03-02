@@ -3,6 +3,7 @@ export interface AssetRecord {
   id?: string;
   surveyId?: string;
   condition?: string;
+  assetDisplayId?: string;
   markerColor?: string;
   defectId: string;
   assetId: string;
