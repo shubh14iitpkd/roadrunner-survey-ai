@@ -359,3 +359,12 @@ All colors MUST be HSL.
 .leaflet-tooltip-custom::before {
   border-top-color: hsl(222 47% 11% / 0.95) !important;
 }
+
+.recharts-pie-sector:focus {
+  border: none;
+  outline: none;
+}
+.recharts-pie-sector {
+  border: none;
+  outline: none;
+}

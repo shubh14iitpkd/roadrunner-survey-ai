@@ -267,6 +267,7 @@ export default function Dashboard() {
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
                     <Pie
+                    className="recharts-sector"
                       activeIndex={effectiveDonutIndex !== undefined ? effectiveDonutIndex : undefined}
                       activeShape={effectiveDonutIndex !== undefined ? renderActiveShape : undefined}
                       data={categoryChartData}
@@ -293,7 +294,7 @@ export default function Dashboard() {
                           setSelectedCategoryId(catId);
                         }
                       }}
-                      style={{ cursor: 'pointer' }}
+                      style={{ cursor: 'pointer', outline: 'none', border: 'none' }}
                     >
                       {categoryChartData.map((item, i) => (
                         <Cell key={i} fill={getCategoryColorCode(item.category_id)} />

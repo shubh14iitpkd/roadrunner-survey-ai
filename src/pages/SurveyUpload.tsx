@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Upload, Play, CheckCircle, Clock, AlertCircle, Video, Cloud, FileVideo, Database, TrendingUp, Calendar, MapPin, Loader2, Trash2, X, Map } from "lucide-react";
+import { Upload, Play, CheckCircle, Clock, AlertCircle, Video, AlertTriangle, FileVideo, Database, TrendingUp, Calendar, MapPin, Loader2, Trash2, X, Map } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -815,20 +815,20 @@ export default function SurveyUpload() {
                                     asChild
                                     className="h-7 text-xs border-green-300 text-green-700 hover:bg-green-50"
                                   >
-                                    <Link to={`/assets?route_id=${video.routeId}`}>
+                                    <Link to={`/asset-library?route_id=${video.routeId}`}>
                                       <Database className="h-3 w-3 mr-1" />
-                                      Reports
+                                      Library
                                     </Link>
                                   </Button>
                                   <Button
                                     size="sm"
-                                    variant="outline"
+                                    variant="destructive"
                                     asChild
-                                    className="h-7 text-xs border-blue-300 text-blue-700 hover:bg-blue-50"
+                                    className="h-7 text-xs border border-destructive bg-destructive/10 text-destructive hover:bg-destructive/20"
                                   >
-                                    <Link to={`/gis?id=${video.routeId}`}>
-                                      <Map className="h-3 w-3 mr-1" />
-                                      Map
+                                    <Link to={`/defect-library?route_id=${video.routeId}`}>
+                                      <AlertTriangle className="h-3 w-3 mr-1" />
+                                      Defects
                                     </Link>
                                   </Button>
                                   <Button

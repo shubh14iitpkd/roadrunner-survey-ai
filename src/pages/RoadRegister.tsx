@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Plus, Upload, MapPin, Search, FileJson, FileSpreadsheet, Pencil, Check, X, Map, Route, TrendingUp } from "lucide-react";
+import { Plus, Upload, MapPin, Search, FileJson, FileSpreadsheet, Database, Pencil, Check, X, Map, Route, TrendingUp } from "lucide-react";
 import { Link } from "react-router-dom";
 import {
   Dialog,
@@ -1112,10 +1112,10 @@ export default function RoadRegister() {
                       </Badge>
                     </td>
                     <td className="p-4">
-                      <Link to={`/gis?road=${encodeURIComponent(road.road_name)}`}>
-                        <Button variant="ghost" size="sm" className="gap-2">
-                          <MapPin className="h-4 w-4" />
-                          View Map
+                      <Link to={`/asset-library?route_id=${encodeURIComponent(road.route_id)}`}>
+                        <Button variant="default" size="sm" className="gap-2">
+                          <Database className="h-4 w-4" />
+                          View Assets
                         </Button>
                       </Link>
                     </td>

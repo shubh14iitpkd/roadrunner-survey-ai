@@ -37,15 +37,16 @@ const ASSET_COLUMNS: ColumnDef[] = [
   { key: "id", header: "Asset ID", className: "font-mono text-[11px] py-1.5 px-1.5 whitespace-nowrap text-center", render: (a) => a.id?.toUpperCase() },
   { key: "assetType", header: "Asset Type", className: "text-[10px] leading-tight py-1.5 px-1.5 min-w-[180px] max-w-[220px] text-center", render: (a) => <span className="line-clamp-2">{a.assetType}</span> },
   { key: "category", header: "Category", className: "py-1.5 px-1.5 text-center", render: (a) => <CategoryBadge category={a.assetCategory} categoryId={a.category_id} /> },
-  { key: "condition", header: "Condition", className: "py-1.5 px-1.5 text-center", render: (a) => (
-    <span className={`inline-flex items-center rounded-md px-1.5 py-0.5 text-[9px] font-semibold leading-tight ${
-      DAMAGED_CONDITIONS.has((a.condition ?? '').toLowerCase())
+  {
+    key: "condition", header: "Condition", className: "py-1.5 px-1.5 text-center", render: (a) => (
+      <span className={`inline-flex items-center rounded-md px-1.5 py-0.5 text-[9px] font-semibold leading-tight ${DAMAGED_CONDITIONS.has((a.condition ?? '').toLowerCase())
         ? 'bg-destructive/10 text-destructive'
         : a.condition?.toLowerCase() === 'good'
           ? 'bg-emerald-500/10 text-emerald-600'
           : 'bg-amber-500/10 text-amber-600'
-    }`}>{a.condition ?? '—'}</span>
-  )},
+        }`}>{a.condition ?? '—'}</span>
+    )
+  },
   { key: "coords", header: "Coordinates", className: "font-mono text-[10px] py-1.5 px-1.5 whitespace-nowrap text-center", render: (a) => `${a.lat.toFixed(4)}, ${a.lng.toFixed(4)}` },
   { key: "road", header: "Road", className: "text-[11px] py-1.5 px-1.5 whitespace-nowrap text-center", render: (a) => a.roadName },
   { key: "side", header: "Road Side", className: "text-[11px] py-1.5 px-1.5 text-center", render: (a) => a.side },

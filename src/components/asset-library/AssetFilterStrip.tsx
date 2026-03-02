@@ -67,10 +67,10 @@ export default function AssetFilterStrip({
     <div className="px-4 py-1.5 border-b border-border bg-gradient-to-r from-card to-muted/30 shrink-0 flex items-center gap-2 flex-nowrap min-w-0">
       {/* Count badge */}
       <div className="flex items-center gap-1.5 shrink-0">
-        <span className={cn(countLabel === "defects" ? "border-destructive bg-destructive/10 text-destructive":"border-primary/20 bg-primary/10 text-primary","inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] font-bold tabular-nums border")}>
+        <span className={cn(countLabel === "defects" ? "border-destructive bg-destructive/10 text-destructive":"bg-primary/20 border-primary text-primary dark:border-muted-secondary/20 dark:bg-muted-secondary/10 dark:text-muted-secondary","inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] font-bold tabular-nums border")}>
           {filteredCount}
         </span>
-        <span className="text-[9px] text-muted-foreground">{countLabel}</span>
+        <span className={cn("text-sm", countLabel === "defects" ? "text-destructive" : "text-primary dark:text-muted-secondary")}>{countLabel}</span>
         {(directionFilter !== "all" || zoneFilter !== "all") && (
           <div className="flex items-center gap-1 ml-1">
             {directionFilter !== "all" && (

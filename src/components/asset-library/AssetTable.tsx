@@ -151,7 +151,7 @@ export default function AssetTable({
                     key={rowId}
                     className={cn(
                       "cursor-pointer hover:bg-muted/40 border-b border-border/50",
-                      selectedId === rowId && "bg-primary/5"
+                      selectedId === rowId && "bg-primary/5 dark:bg-muted-secondary/20"
                     )}
                     onClick={() => onRowClick(item)}
                   >

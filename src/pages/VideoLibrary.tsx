@@ -3,7 +3,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Play, Download, Search, ArrowLeft, Video as VideoIcon, Columns2, X, MapPin, Loader2 } from "lucide-react";
+import { Play, Download, Search, ArrowLeft, Video as VideoIcon, Columns2, X, MapPin, Loader2, Database } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { roadRegister } from "@/data/roadRegister";
 import { Link } from "react-router-dom";
@@ -391,14 +391,14 @@ export default function VideoLibrary() {
                           {video.storageUrl ? "Watch" : "No Video"}
                         </Button>
                         <Button size="sm" variant="outline" asChild disabled={!video.storageUrl}>
-                          <a href={video.storageUrl} download>
-                            <Download className="h-3 w-3" />
+                          <a href={video.storageUrl} download title="Download">
+                            <Download className="h-3 w-3"/>
                           </a>
                         </Button>
                         {video.gpxFileUrl && (
                           <Button size="sm" variant="outline" asChild>
-                            <a href={`/gis?id=${video.routeId}`} title="View on GIS">
-                              <MapPin className="h-3 w-3" />
+                            <a href={`/asset-library?id=${video.routeId}`} title="View in Asset Library">
+                              <Database className="h-3 w-3" />
                             </a>
                           </Button>
                         )}

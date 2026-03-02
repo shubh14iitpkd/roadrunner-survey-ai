@@ -489,7 +489,7 @@ class LocalVideoProcessor:
                                             "frame_number": frame_num,
                                             "timestamp": timestamp,
                                             "video_id": video_id,
-                                            "road_side": side,
+                                            "side": side,
                                             "zone": zone,
                                             "box": {
                                                 "x": float(ltwh_box[0]),
