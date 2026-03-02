@@ -463,7 +463,6 @@ export default function DefectLibrary() {
                           <span className={cn("text-xs font-semibold", isDetected ? "text-destructive" : "text-emerald-600")}>
                             {isDetected ? `Defect Detected — ${latestSurvey.issue}` : `No Defect Detected`}
                           </span>
-                          <span className="text-[9px] text-muted-foreground ml-auto">Asset: {selectedDefect.assetId} · {selectedDefect.defectId}</span>
                         </div>
                       );
                     })()}

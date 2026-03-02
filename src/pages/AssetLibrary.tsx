@@ -447,7 +447,6 @@ export default function AssetLibrary() {
                       <span className={cn("text-xs font-semibold capitalize", isDamaged ? "text-destructive" : "text-emerald-600")}>
                         Condition: {selectedAsset.condition}
                       </span>
-                      <span className="text-[9px] text-muted-foreground ml-auto">Asset: {selectedAsset.assetId} · {selectedAsset.id}</span>
                     </div>
                   );
                 })()}

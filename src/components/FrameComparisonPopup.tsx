@@ -138,14 +138,6 @@ export default function FrameComparisonPopup({
           <div style={{ fontWeight: 600, fontSize: '14px', marginBottom: '4px' }}>
             {trackTitle}
           </div>
-          <div style={{ fontSize: '11px', color: '#94a3b8' }}>
-            Point {pointIndex + 1} of {totalPoints} • Frame #{frameData.frame_number} • {frameData.timestamp}s
-          </div>
-          {frameData.gpx_point && (
-            <div style={{ fontSize: '10px', color: '#64748b', marginTop: '2px' }}>
-             {frameData.gpx_point.lat.toFixed(5)}, {frameData.gpx_point.lon.toFixed(5)}
-            </div>
-          )}
         </div>
         
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>

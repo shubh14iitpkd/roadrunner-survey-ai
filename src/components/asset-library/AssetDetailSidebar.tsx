@@ -56,17 +56,33 @@ export default function AssetDetailSidebar({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   // Counter incremented on image onLoad to trigger canvas re-draw
   const [drawTrigger, setDrawTrigger] = useState(0);
-  const prevImageUrl = useRef<string | null>(null);
 
-  // When the selected asset changes but the image URL stays the same (same video
-  // frame shared by multiple assets), the <img> onLoad won't fire because src is
-  // unchanged. Detect this and manually bump drawTrigger so the canvas redraws.
+  // Ensure the canvas is redrawn whenever the selected asset or image changes.
+  // Problem: when imageUrl comes from the module-level cache it is resolved
+  // synchronously, so by the time the <img> renders the browser may have already
+  // fired (and discarded) the load event before our onLoad handler is attached.
+  // We also skip onLoad entirely when the src string doesn't change (same video
+  // frame shared by multiple assets). This effect handles both cases:
+  //   • Waits one rAF so the browser has laid out the <img> (clientWidth > 0).
+  //   • If the image is already decoded (img.complete === true), bumps drawTrigger.
+  //   • Otherwise the onLoad handler below will bump it when the fetch finishes.
   useEffect(() => {
-    if (imageUrl && imageUrl === prevImageUrl.current && selectedAsset?.box) {
-      // Same image, different asset — force redraw
-      setDrawTrigger((n) => n + 1);
-    }
-    prevImageUrl.current = imageUrl;
+    if (!imageUrl || !selectedAsset?.box) return;
+
+    let rafId: number;
+    rafId = requestAnimationFrame(() => {
+      const img = imgRef.current;
+      if (!img) return;
+      if (img.complete && img.naturalWidth > 0) {
+        // Image already decoded — onLoad won't fire, force redraw now
+        setDrawTrigger((n) => n + 1);
+      }
+      // If not complete, the onLoad handler on the <img> element will fire
+      // and increment drawTrigger then.
+    });
+
+    return () => cancelAnimationFrame(rafId);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [imageUrl, selectedAsset?.id]);
 
   const selectedIdx = selectedAsset
@@ -141,7 +157,7 @@ export default function AssetDetailSidebar({
     ctx.fillStyle = "#ffffff";
     ctx.textBaseline = "middle";
     ctx.fillText(label, x + 4, labelY + labelH / 2);
-  }, [imageUrl, selectedAsset?.box, frameWidth, frameHeight, drawTrigger]);
+  }, [imageUrl, selectedAsset?.id, selectedAsset?.box, frameWidth, frameHeight, drawTrigger]);
 
   // Re-draw on resize
   useEffect(() => {
