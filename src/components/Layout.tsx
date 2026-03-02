@@ -76,13 +76,13 @@ export default function Layout({ children }: { children: React.ReactNode }) {
               <img
                 src={logo}
                 alt="RoadSight AI"
-                className="h-14 w-auto object-contain brightness-0 invert opacity-95"
+                className="h-10 w-auto object-contain brightness-0 invert opacity-95"
               />
             )}
             <Button
               variant="ghost"
               size="icon"
-              className="lg:hidden text-white/70 hover:text-white hover:bg-white/10 h-7 w-7 absolute right-3 top-1/2 -translate-y-1/2"
+              className="lg:hidden text-white hover:text-white hover:bg-white/10 h-7 w-7 absolute right-3 top-1/2 -translate-y-1/2"
               onClick={() => setSidebarOpen(false)}
             >
               <X className="h-4 w-4" />
@@ -97,7 +97,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                 return (
                   <div
                     key={item.name}
-                    className="px-3 pt-5 pb-1.5 text-lg font-semibold text-white/25 uppercase tracking-[0.18em]"
+                    className="px-3 pt-5 pb-1.5 text-sm font-semibold text-white/25 uppercase tracking-[0.18em]"
                   >
                     {item.name}
                   </div>
@@ -115,17 +115,17 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                     collapsed ? "justify-center p-2" : "gap-2.5 px-3 py-[7px]",
                     isActive
                       ? "bg-white/[0.1] text-white/95 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]"
-                      : "text-white/50 hover:text-white/80 hover:bg-white/[0.04]"
+                      : "text-white/90 hover:text-white/90 hover:bg-white/[0.04]"
                   )}
                 >
                   <item.icon className={cn(
                     "flex-shrink-0 transition-colors",
                     collapsed ? "h-4 w-4" : "h-[15px] w-[15px]",
-                    isActive ? "text-sky-400" : "text-white/30 group-hover:text-white/55"
+                    isActive ? "text-sky-400" : "text-white group-hover:text-white/55"
                   )} />
                   {!collapsed && (
                     <>
-                      <span className="flex-1 truncate text-lg font-medium">{item.name}</span>
+                      <span className="flex-1 truncate text-xs font-medium">{item.name}</span>
                       {isActive && <div className="w-1 h-1 rounded-full bg-sky-400" />}
                     </>
                   )}
@@ -153,7 +153,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
               variant="ghost"
               size="icon"
               onClick={() => setCollapsed(!collapsed)}
-              className="h-7 w-7 text-white/30 hover:bg-white/[0.06] hover:text-white/60"
+              className="h-7 w-7 text-white/50 hover:bg-white/[0.06] hover:text-white/60"
               title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
             >
               {collapsed ? <ChevronsRight className="h-3.5 w-3.5" /> : <ChevronsLeft className="h-3.5 w-3.5" />}
