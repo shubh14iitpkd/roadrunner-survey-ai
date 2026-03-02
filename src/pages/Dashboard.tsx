@@ -577,7 +577,7 @@ export default function Dashboard() {
                           variant="ghost"
                           size="sm"
                           className="h-7 text-[11px] gap-1 text-muted-foreground hover:text-foreground"
-                          onClick={() => navigate(`/defect-library?road=${encodeURIComponent(row.road)}`)}
+                          onClick={() => navigate(row.route_id != null ? `/defect-library?route_id=${row.route_id}` : `/defect-library?road=${encodeURIComponent(row.road)}`)}
                         >
                           <MapPin className="h-3 w-3" />
                           Map

@@ -360,11 +360,11 @@ All colors MUST be HSL.
   border-top-color: hsl(222 47% 11% / 0.95) !important;
 }
 
-.recharts-pie-sector:focus {
+.leaflet-interactive:focus, .recharts-pie-sector:focus {
   border: none;
   outline: none;
 }
-.recharts-pie-sector {
+.leaflet-interactive, .recharts-pie-sector {
   border: none;
   outline: none;
 }

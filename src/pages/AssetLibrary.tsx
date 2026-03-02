@@ -61,6 +61,8 @@ export default function AssetLibrary() {
   const [searchQuery, setSearchQuery] = useState("");
   const { data: labelMapData } = useLabelMap();
 
+  const [roads, setRoads] = useState<{ route_id: number; name: string }[]>([]);
+  const [selectedRouteId, setSelectedRouteId] = useState<number | null>(null);
   const [selectedAssetTypes, setSelectedAssetTypes] = useState<string[]>([]);
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
   const [directionFilter, setDirectionFilter] = useState<"all" | "LHS" | "RHS">("all");
@@ -107,6 +109,10 @@ export default function AssetLibrary() {
         api.assets.getMaster({}), // no condition filter = all assets
       ]);
 
+      if (roadsResp?.items) {
+        setRoads(roadsResp.items.map((r: any) => ({ route_id: r.route_id, name: r.road_name })));
+      }
+
       if (masterResp?.items) {
         const mapped: AssetRecord[] = masterResp.items.map((asset: any, idx: number) => {
           const coords = asset.location?.coordinates || [];
@@ -149,6 +155,7 @@ export default function AssetLibrary() {
             lng,
             surveyId,
             roadName: asset.route_name,
+            routeId: asset.route_id != null ? Number(asset.route_id) : undefined,
             side: asset.side || 'Shoulder',
             zone: asset.zone || 'Unknown',
             lastSurveyDate: asset.survey_date || asset.created_at?.split('T')[0] || '—',
@@ -179,8 +186,10 @@ export default function AssetLibrary() {
   useEffect(() => {
     const typeParam = searchParams.get("type");
     const categoryParam = searchParams.get("category");
+    const routeIdParam = searchParams.get("route_id");
     if (typeParam) setSelectedAssetTypes([typeParam]);
     if (categoryParam) setCategoryFilter(categoryParam);
+    if (routeIdParam) setSelectedRouteId(Number(routeIdParam));
   }, [searchParams]);
 
   // ── Filtering ──
@@ -191,16 +200,17 @@ export default function AssetLibrary() {
       if (directionFilter !== "all" && a.side !== directionFilter) return false;
       if (selectedAssetTypes.length > 0 && !selectedAssetTypes.includes(a.assetType)) return false;
       if (zoneFilter !== "all" && a.zone !== zoneFilter) return false;
+      if (selectedRouteId !== null && a.routeId !== selectedRouteId) return false;
       if (q && !(
-        a.defectId.toLowerCase().includes(q) ||
+        (a.defectId ?? '').toLowerCase().includes(q) ||
         (a.id ?? '').toLowerCase().includes(q) ||
         a.assetId.toLowerCase().includes(q) ||
         a.assetType.toLowerCase().includes(q) ||
-        a.roadName.toLowerCase().includes(q)
+        (a.roadName ?? '').toLowerCase().includes(q)
       )) return false;
       return true;
     });
-  }, [assets, categoryFilter, selectedAssetTypes, directionFilter, zoneFilter, searchQuery]);
+  }, [assets, categoryFilter, selectedAssetTypes, directionFilter, zoneFilter, selectedRouteId, searchQuery]);
 
   const navigateAsset = useCallback((direction: 'prev' | 'next') => {
     if (!selectedAsset) return;
@@ -258,18 +268,13 @@ export default function AssetLibrary() {
     return unique;
   }, [assets]);
 
-  const selectedRoadName = searchParams.get("road");
-  const selectedRoadAssets = useMemo(() => {
-    if (!selectedRoadName) return [];
-    return filteredAssets.filter(a => a.roadName === selectedRoadName);
-  }, [filteredAssets, selectedRoadName]);
-
   const clearFilters = useCallback(() => {
     setCategoryFilter("all");
     setSelectedAssetTypes([]);
     setDirectionFilter("all");
     setZoneFilter("all");
     setSearchQuery("");
+    setSelectedRouteId(null);
   }, []);
 
   return (
@@ -331,8 +336,9 @@ export default function AssetLibrary() {
         onSearchChange={setSearchQuery}
         categoryOptions={categoryOptions}
         assetTypeOptions={assetTypeOptions}
-        selectedRoadName={selectedRoadName}
-        selectedRoadCount={selectedRoadAssets.length}
+        roads={roads}
+        selectedRouteId={selectedRouteId}
+        onRouteChange={setSelectedRouteId}
         onClearFilters={clearFilters}
       />
 

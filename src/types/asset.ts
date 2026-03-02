@@ -11,6 +11,7 @@ export interface AssetRecord {
   lat: number;
   lng: number;
   roadName: string;
+  routeId?: number;
   side: string;
   zone?: string;
   lastSurveyDate: string;

@@ -8,6 +8,11 @@ import { getCategoryDotColor } from "@/components/CategoryBadge";
 type DirectionFilter = "all" | "LHS" | "RHS";
 type zoneFilter = "all" | "shoulder" | "median" | "pavement" | "overhead";
 
+interface Road {
+  route_id: number;
+  name: string;
+}
+
 interface AssetFilterStripProps {
   filteredCount: number;
   countLabel?: string; // "anomalies" | "assets" etc.
@@ -23,8 +28,13 @@ interface AssetFilterStripProps {
   onSearchChange: (v: string) => void;
   categoryOptions: {id: string, name: string}[];
   assetTypeOptions: string[];
-  selectedRoadName: string | null;
-  selectedRoadCount: number;
+  // Road filtering
+  roads?: Road[];
+  selectedRouteId: number | null;
+  onRouteChange: (routeId: number | null) => void;
+  // Legacy road context (for breadcrumb-style display from URL param)
+  selectedRoadName?: string | null;
+  selectedRoadCount?: number;
   onClearFilters: () => void;
 }
 
@@ -43,6 +53,9 @@ export default function AssetFilterStrip({
   onSearchChange,
   categoryOptions,
   assetTypeOptions,
+  roads = [],
+  selectedRouteId,
+  onRouteChange,
   selectedRoadName,
   selectedRoadCount,
   onClearFilters,
@@ -52,7 +65,8 @@ export default function AssetFilterStrip({
     selectedAssetTypes.length > 0 ||
     directionFilter !== "all" ||
     zoneFilter !== "all" ||
-    searchQuery !== "";
+    searchQuery !== "" ||
+    selectedRouteId !== null;
 
   const zoneOptions = ["all", "shoulder", "median", "pavement", "overhead"] as const;
   const zoneLabels: Record<string, string> = { all: "all", shoulder: "shoulder", median: "median", pavement: "pavement", overhead: "overhead" };
@@ -62,6 +76,9 @@ export default function AssetFilterStrip({
   const directionOptions = ["all", "LHS", "RHS"] as const;
   const directionActiveIdx = directionOptions.indexOf(directionFilter);
   const directionStepWidth = 40;
+
+  // Selected road label for display
+  const selectedRoad = roads.find(r => r.route_id === selectedRouteId);
 
   return (
     <div className="px-4 py-1.5 border-b border-border bg-gradient-to-r from-card to-muted/30 shrink-0 flex items-center gap-2 flex-nowrap min-w-0">
@@ -140,6 +157,31 @@ export default function AssetFilterStrip({
       <div className="h-5 w-px bg-border/60 shrink-0" />
 
       {/* Dropdowns */}
+      {/* Road dropdown */}
+      {roads.length > 0 && (
+        <Select
+          value={selectedRouteId !== null ? String(selectedRouteId) : "all"}
+          onValueChange={(v) => onRouteChange(v === "all" ? null : Number(v))}
+        >
+          <SelectTrigger className="w-[140px] h-6 text-[10px] border-border bg-background rounded-md shrink-0 shadow-sm overflow-hidden">
+            <div className="truncate block flex items-center gap-1">
+              {selectedRouteId !== null && <MapIcon className="h-2.5 w-2.5 text-muted-secondary shrink-0" />}
+              <SelectValue placeholder="All Roads" />
+            </div>
+          </SelectTrigger>
+          <SelectContent className="bg-card z-50 max-h-64">
+            <SelectItem value="all">All Roads</SelectItem>
+            {roads.map((r) => (
+              <SelectItem key={r.route_id} value={String(r.route_id)} className="text-xs">
+                <span className="flex items-center gap-1.5">
+                  {r.name}
+                </span>
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      )}
+
       <Select value={categoryFilter} onValueChange={(v) => { onCategoryChange(v); onAssetTypesChange([]); }}>
         <SelectTrigger className="w-[115px] h-6 text-[10px] border-border bg-background rounded-md shrink-0 shadow-sm overflow-hidden">
           <span className="truncate block"><SelectValue placeholder="Category" /></span>
@@ -178,13 +220,16 @@ export default function AssetFilterStrip({
         </button>
       )}
 
-      {/* Road context */}
-      {selectedRoadName && (
+      {/* Route context pill (from URL param) — only shown if no roads dropdown or as supplemental info */}
+      {selectedRoadName && !selectedRoad && (
         <>
           <div className="h-4 w-px bg-border shrink-0" />
+          
           <MapIcon className="h-3.5 w-3.5 text-primary shrink-0" />
-          <span className="text-[11px] font-semibold text-foreground shrink-0">{selectedRoadName}</span>
-          <span className="text-[10px] text-muted-foreground shrink-0">({selectedRoadCount})</span>
+          <span className="text-sm font-semibold text-foreground shrink-0">{selectedRoadName}</span>
+          {selectedRoadCount != null && (
+            <span className="text-[10px] text-muted-foreground shrink-0">({selectedRoadCount})</span>
+          )}
         </>
       )}
     </div>

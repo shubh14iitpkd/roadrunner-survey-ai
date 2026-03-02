@@ -4,7 +4,7 @@
 import { exportToExcel } from "@/lib/excelExport";
 import { apiFetch } from "@/lib/api";
 import type { ResolvedMap } from "@/contexts/LabelMapContext";
-
+import capitalize from "@/helpers/capitalize";
 // ── helpers ──────────────────────────────────────────────────────────────────
 
 /** Fetch ALL damaged assets from the master endpoint (no pagination). */
@@ -77,7 +77,7 @@ export async function exportDefectByAssetTypeReport(filterAssetType?: string, la
 
   const data = rows.map(r => [
     r.anomalyId, r.id, r.lat, r.lon,
-    r.roadName, r.side, r.zone, r.lastSurveyDate, r.issueType,
+    r.roadName, capitalize(r.side), capitalize(r.zone), r.lastSurveyDate, capitalize(r.issueType),
   ]);
 
   const suffix = labelMap?.labels?.[filterAssetType]?.display_name || "All_Types";
@@ -107,8 +107,8 @@ export async function exportDefectByRoadReport(filterRoad?: string, labelMap?: R
 
   const data = filtered.map(r => [
     r.anomalyId, r.id, r.assetType, r.assetCategory,
-    r.lat, r.lon, r.side, r.zone,
-    r.lastSurveyDate, r.issueType,
+    r.lat, r.lon, capitalize(r.side), capitalize(r.zone),
+    r.lastSurveyDate, capitalize(r.issueType),
   ]);
 
   const suffix = filterRoad ? filterRoad.replace(/\s+/g, "_") : "All_Roads";
@@ -140,8 +140,8 @@ export async function exportRoadWiseAssetTypeReport(labelMap?: ResolvedMap | nul
 
   const data = rows.map(r => [
     r.roadName, r.assetType, r.assetCategory, r.anomalyId, r.id,
-    r.lat, r.lon, r.side, r.zone,
-    r.lastSurveyDate, r.issueType,
+    r.lat, r.lon, capitalize(r.side), capitalize(r.zone),
+    r.lastSurveyDate, capitalize(r.issueType),
   ]);
 
   exportToExcel({
