@@ -121,150 +121,156 @@ export default function Settings() {
   };
 
   return (
-    <div className="p-6 space-y-6 max-w-4xl mx-auto">
-      <div>
-        <h1 className="text-3xl font-bold mb-2">Settings</h1>
-        <p className="text-muted-foreground">
-          Manage your account and application preferences
-        </p>
+    <div className="min-h-screen bg-background">
+      {/* Header */}
+      <div className="border-b border-border bg-header-strip">
+        <div className="px-5 py-2 max-w-4xl mx-auto">
+          <div className="flex items-center gap-2">
+            <SettingsIcon className="h-4 w-4 text-muted-foreground" />
+            <div>
+              <p className="text-[9px] font-semibold text-muted-foreground uppercase tracking-[0.15em]">Configuration</p>
+              <h1 className="text-sm font-bold text-foreground tracking-tight">Settings</h1>
+            </div>
+          </div>
+        </div>
       </div>
+      <div className="p-6 space-y-6 max-w-4xl mx-auto">
+        <Accordion type="single" collapsible className="space-y-4">
+          <AccordionItem value="profile" className="border-0">
+            <Card className="card-shadow">
+              <AccordionTrigger className="px-6 py-4 hover:no-underline">
+                <div className="flex items-center gap-3">
+                  <User className="h-5 w-5 dark:text-foreground text-primary" />
+                  <div className="text-left">
+                    <h2 className="font-semibold text-lg">Profile Settings</h2>
+                    <p className="text-sm text-muted-foreground font-normal">
+                      Update your profile information and preferences
+                    </p>
+                  </div>
+                </div>
+              </AccordionTrigger>
+              <AccordionContent className="px-6 pb-6">
+                <Separator className="mb-6" />
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="name">Full Name</Label>
+                    <Input id="name" value={fullName} onChange={(e) => setFullName(e.target.value)} />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="email">Email</Label>
+                    <Input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="organization">Organization</Label>
+                    <Input id="organization" value={organization} onChange={(e) => setOrganization(e.target.value)} />
+                  </div>
+                  {/* <Button onClick={handleSave} className="mt-4">Save Changes</Button> */}
+                </div>
+              </AccordionContent>
+            </Card>
+          </AccordionItem>
+          <AccordionItem value="security" className="border-0">
+            <Card className="card-shadow">
+              <AccordionTrigger className="px-6 py-4 hover:no-underline">
+                <div className="flex items-center gap-3">
+                  <Lock className="h-5 w-5 dark:text-foreground text-primary" />
+                  <div className="text-left">
+                    <h2 className="font-semibold text-lg">Security</h2>
+                    <p className="text-sm text-muted-foreground font-normal">
+                      Manage password and security settings
+                    </p>
+                  </div>
+                </div>
+              </AccordionTrigger>
+              <AccordionContent className="px-6 pb-6">
+                <Separator className="mb-6" />
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="current-password">Current Password</Label>
+                    <div className="relative">
+                      <Input
+                        id="current-password"
+                        type={showCurrentPassword ? "text" : "password"}
+                        value={currentPassword}
+                        onChange={(e) => setCurrentPassword(e.target.value)}
+                        className="pr-10"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowCurrentPassword(!showCurrentPassword)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                      >
+                        {showCurrentPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </button>
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="new-password">New Password</Label>
+                    <div className="relative">
+                      <Input
+                        id="new-password"
+                        type={showNewPassword ? "text" : "password"}
+                        value={newPassword}
+                        onChange={(e) => setNewPassword(e.target.value)}
+                        className="pr-10"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowNewPassword(!showNewPassword)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                      >
+                        {showNewPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </button>
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="confirm-password">Confirm New Password</Label>
+                    <div className="relative">
+                      <Input
+                        id="confirm-password"
+                        type={showConfirmPassword ? "text" : "password"}
+                        value={confirmPassword}
+                        onChange={(e) => setConfirmPassword(e.target.value)}
+                        className="pr-10"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                      >
+                        {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </button>
+                    </div>
+                  </div>
+                  <Button
+                    onClick={handleUpdatePassword}
+                    className="mt-4"
+                    disabled={isUpdatingPassword}
+                  >
+                    {isUpdatingPassword ? "Updating..." : "Update Password"}
+                  </Button>
+                </div>
+              </AccordionContent>
+            </Card>
+          </AccordionItem>
 
-      <Accordion type="single" collapsible className="space-y-4">
-        <AccordionItem value="profile" className="border-0">
-          <Card className="card-shadow">
-            <AccordionTrigger className="px-6 py-4 hover:no-underline">
-              <div className="flex items-center gap-3">
-                <User className="h-5 w-5 dark:text-foreground text-primary" />
-                <div className="text-left">
-                  <h2 className="font-semibold text-lg">Profile Settings</h2>
-                  <p className="text-sm text-muted-foreground font-normal">
-                    Update your profile information and preferences
-                  </p>
-                </div>
-              </div>
-            </AccordionTrigger>
-            <AccordionContent className="px-6 pb-6">
-              <Separator className="mb-6" />
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="name">Full Name</Label>
-                  <Input id="name" value={fullName} onChange={(e) => setFullName(e.target.value)} />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="email">Email</Label>
-                  <Input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="organization">Organization</Label>
-                  <Input id="organization" value={organization} onChange={(e) => setOrganization(e.target.value)} />
-                </div>
-                {/* <Button onClick={handleSave} className="mt-4">Save Changes</Button> */}
-              </div>
-            </AccordionContent>
-          </Card>
-        </AccordionItem>
-        <AccordionItem value="security" className="border-0">
-          <Card className="card-shadow">
-            <AccordionTrigger className="px-6 py-4 hover:no-underline">
-              <div className="flex items-center gap-3">
-                <Lock className="h-5 w-5 dark:text-foreground text-primary" />
-                <div className="text-left">
-                  <h2 className="font-semibold text-lg">Security</h2>
-                  <p className="text-sm text-muted-foreground font-normal">
-                    Manage password and security settings
-                  </p>
-                </div>
-              </div>
-            </AccordionTrigger>
-            <AccordionContent className="px-6 pb-6">
-              <Separator className="mb-6" />
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="current-password">Current Password</Label>
-                  <div className="relative">
-                    <Input
-                      id="current-password"
-                      type={showCurrentPassword ? "text" : "password"}
-                      value={currentPassword}
-                      onChange={(e) => setCurrentPassword(e.target.value)}
-                      className="pr-10"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowCurrentPassword(!showCurrentPassword)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                    >
-                      {showCurrentPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                    </button>
+          <AccordionItem value="application" className="border-0">
+            <Card className="card-shadow">
+              <AccordionTrigger className="px-6 py-4 hover:no-underline">
+                <div className="flex items-center gap-3">
+                  <SettingsIcon className="h-5 w-5 dark:text-foreground text-primary" />
+                  <div className="text-left">
+                    <h2 className="font-semibold text-lg">Application Settings</h2>
+                    <p className="text-sm text-muted-foreground font-normal">
+                      Configure display preferences
+                    </p>
                   </div>
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="new-password">New Password</Label>
-                  <div className="relative">
-                    <Input
-                      id="new-password"
-                      type={showNewPassword ? "text" : "password"}
-                      value={newPassword}
-                      onChange={(e) => setNewPassword(e.target.value)}
-                      className="pr-10"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowNewPassword(!showNewPassword)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                    >
-                      {showNewPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                    </button>
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="confirm-password">Confirm New Password</Label>
-                  <div className="relative">
-                    <Input
-                      id="confirm-password"
-                      type={showConfirmPassword ? "text" : "password"}
-                      value={confirmPassword}
-                      onChange={(e) => setConfirmPassword(e.target.value)}
-                      className="pr-10"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                    >
-                      {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                    </button>
-                  </div>
-                </div>
-                <Button
-                  onClick={handleUpdatePassword}
-                  className="mt-4"
-                  disabled={isUpdatingPassword}
-                >
-                  {isUpdatingPassword ? "Updating..." : "Update Password"}
-                </Button>
-              </div>
-            </AccordionContent>
-          </Card>
-        </AccordionItem>
-
-        <AccordionItem value="application" className="border-0">
-          <Card className="card-shadow">
-            <AccordionTrigger className="px-6 py-4 hover:no-underline">
-              <div className="flex items-center gap-3">
-                <SettingsIcon className="h-5 w-5 dark:text-foreground text-primary" />
-                <div className="text-left">
-                  <h2 className="font-semibold text-lg">Application Settings</h2>
-                  <p className="text-sm text-muted-foreground font-normal">
-                    Configure display preferences
-                  </p>
-                </div>
-              </div>
-            </AccordionTrigger>
-            <AccordionContent className="px-6 pb-6">
-              <Separator className="mb-6" />
-              <div className="space-y-4">
-                {/* <div className="space-y-2">
+              </AccordionTrigger>
+              <AccordionContent className="px-6 pb-6">
+                <Separator className="mb-6" />
+                <div className="space-y-4">
+                  {/* <div className="space-y-2">
                   <Label htmlFor="upload-speed">Upload Speed Limit (Mbps)</Label>
                   <Input id="upload-speed" type="number" defaultValue="100" />
                 </div>
@@ -272,49 +278,50 @@ export default function Settings() {
                   <Label htmlFor="processing-threads">Processing Threads</Label>
                   <Input id="processing-threads" type="number" defaultValue="4" />
                 </div> */}
-                <div className="flex items-center justify-between">
-                  <div className="space-y-0.5">
-                    <Label>Dark Mode</Label>
-                    <p className="text-sm text-muted-foreground">
-                      Enable dark theme for the interface
-                    </p>
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-0.5">
+                      <Label>Dark Mode</Label>
+                      <p className="text-sm text-muted-foreground">
+                        Enable dark theme for the interface
+                      </p>
+                    </div>
+                    <Switch checked={darkMode} onCheckedChange={handleToggleDarkMode} />
                   </div>
-                  <Switch checked={darkMode} onCheckedChange={handleToggleDarkMode} />
-                </div>
-                <div className="flex items-center justify-between">
-                  <div className="space-y-0.5">
-                    <Label>Show Map Icons</Label>
-                    <p className="text-sm text-muted-foreground">
-                      Display asset-specific icons on the map instead of circles
-                    </p>
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-0.5">
+                      <Label>Show Map Icons</Label>
+                      <p className="text-sm text-muted-foreground">
+                        Display asset-specific icons on the map instead of circles
+                      </p>
+                    </div>
+                    <Switch checked={wantsIcons} onCheckedChange={handleToggleIcons} />
                   </div>
-                  <Switch checked={wantsIcons} onCheckedChange={handleToggleIcons} />
                 </div>
-              </div>
-            </AccordionContent>
-          </Card>
-        </AccordionItem>
+              </AccordionContent>
+            </Card>
+          </AccordionItem>
 
-        <AccordionItem value="asset-labels" className="border-0">
-          <Card className="card-shadow">
-            <AccordionTrigger className="px-6 py-4 hover:no-underline">
-              <div className="flex items-center gap-3">
-                <Tag className="h-5 w-5 dark:text-foreground text-primary" />
-                <div className="text-left">
-                  <h2 className="font-semibold text-lg">Asset Labels</h2>
-                  <p className="text-sm text-muted-foreground font-normal">
-                    Customize display names for assets and categories
-                  </p>
+          <AccordionItem value="asset-labels" className="border-0">
+            <Card className="card-shadow">
+              <AccordionTrigger className="px-6 py-4 hover:no-underline">
+                <div className="flex items-center gap-3">
+                  <Tag className="h-5 w-5 dark:text-foreground text-primary" />
+                  <div className="text-left">
+                    <h2 className="font-semibold text-lg">Asset Labels</h2>
+                    <p className="text-sm text-muted-foreground font-normal">
+                      Customize display names for assets and categories
+                    </p>
+                  </div>
                 </div>
-              </div>
-            </AccordionTrigger>
-            <AccordionContent className="px-6 pb-6">
-              <Separator className="mb-6" />
-              <AssetLabelSettings />
-            </AccordionContent>
-          </Card>
-        </AccordionItem>
-      </Accordion>
+              </AccordionTrigger>
+              <AccordionContent className="px-6 pb-6">
+                <Separator className="mb-6" />
+                <AssetLabelSettings />
+              </AccordionContent>
+            </Card>
+          </AccordionItem>
+        </Accordion>
+      </div>
     </div>
   );
 }

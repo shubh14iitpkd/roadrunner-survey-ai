@@ -548,23 +548,21 @@ export default function RoadRegister() {
   };
 
   return (
-    <div className="space-y-6">
-      {/* Hero Header */}
-      <div className="relative overflow-hidden gradient-primary p-8 shadow-elevated">
-        <div className="absolute inset-0 page-header dark:bg-primary"></div>
-        <div className="relative flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-          <div>
-            <h1 className="text-4xl font-bold mb-2 text-white drop-shadow-lg">
-              Road Register
-            </h1>
-            <p className="text-white/90 text-lg">
-              Comprehensive road network management system
-            </p>
+    <div className="space-y-6 p-5">
+      {/* Compact Header */}
+      <div className="border-b border-border bg-header-strip -mx-5 -mt-5 mb-4">
+        <div className="px-5 py-2 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Map className="h-4 w-4 text-primary dark:text-muted-secondary" />
+            <div>
+              <p className="text-[9px] font-semibold text-muted-foreground uppercase tracking-[0.15em]">Project Management</p>
+              <h1 className="text-sm font-bold text-foreground tracking-tight">Road Register</h1>
+            </div>
           </div>
-          <div className="flex gap-3">
-            {/* <Dialog open={isImportDialogOpen} onOpenChange={setIsImportDialogOpen}>
+          <div className="flex gap-2">
+            <Dialog open={isImportDialogOpen} onOpenChange={setIsImportDialogOpen}>
               <DialogTrigger asChild>
-                <Button variant="secondary" className="gap-2 bg-white/20 hover:bg-white/30 text-white border-white/30 backdrop-blur-sm">
+                <Button variant="outline" size="sm" className="h-7 text-[11px] gap-1.5">
                   <Upload className="h-4 w-4" />
                   Import Data
                 </Button>
@@ -612,7 +610,7 @@ export default function RoadRegister() {
                   </Button>
                 </div>
               </DialogContent>
-            </Dialog> */}
+            </Dialog>
 
             <Dialog open={isAddDialogOpen} onOpenChange={(open) => {
               // Prevent closing when clicking on Google Places autocomplete
@@ -646,8 +644,8 @@ export default function RoadRegister() {
               setIsAddDialogOpen(open);
             }}>
               <DialogTrigger asChild>
-                <Button className="gap-2 bg-white text-primary hover:bg-white/90 shadow-lg">
-                  <Plus className="h-4 w-4" />
+                <Button variant="default" size="sm" className="h-7 text-[11px] gap-1.5">
+                  <Plus className="h-3 w-3" />
                   Add Road
                 </Button>
               </DialogTrigger>
@@ -905,48 +903,14 @@ export default function RoadRegister() {
       </div>
 
       <div className="px-6 space-y-6">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <Card className="p-6 shadow-elevated border-0 bg-gradient-to-br from-blue-50 to-white dark:from-blue-950/20 dark:to-card">
-            <div className="flex items-start justify-between">
-              <div className="space-y-2">
-                <p className="text-sm font-semibold text-blue-600 dark:text-blue-400 uppercase tracking-wide">Total Roads</p>
-                <p className="text-5xl font-bold bg-gradient-to-br from-blue-600 to-blue-400 bg-clip-text text-transparent">{totalRoads}</p>
-              </div>
-              <div className="p-3 rounded-xl bg-gradient-to-br from-blue-500 to-blue-600 shadow-lg">
-                <Map className="h-6 w-6 text-white" />
-              </div>
-            </div>
-          </Card>
-
-          <Card className="p-6 shadow-elevated border-0 bg-gradient-to-br from-green-50 to-white dark:from-green-950/20 dark:to-card">
-            <div className="flex items-start justify-between">
-              <div className="space-y-2">
-                <p className="text-sm font-semibold text-green-600 dark:text-green-400 uppercase tracking-wide">Total Length</p>
-                <p className="text-5xl font-bold bg-gradient-to-br from-green-600 to-green-400 bg-clip-text text-transparent">{Number(totalLength.toFixed(1)).toLocaleString("en-IN")}<span className="text-2xl ml-1">km</span></p>
-              </div>
-              <div className="p-3 rounded-xl bg-gradient-to-br from-green-500 to-green-600 shadow-lg">
-                <Route className="h-6 w-6 text-white" />
-              </div>
-            </div>
-          </Card>
-
-          <Card className="p-6 shadow-elevated border-0 bg-gradient-to-br from-purple-50 to-white dark:from-purple-950/20 dark:to-card">
-            <div className="flex items-start justify-between">
-              <div className="space-y-2">
-                <p className="text-sm font-semibold text-purple-600 dark:text-purple-400 uppercase tracking-wide">Average Length</p>
-                <p className="text-5xl font-bold bg-gradient-to-br from-purple-600 to-purple-400 bg-clip-text text-transparent">
-                  {totalRoads > 0 ? (totalLength / totalRoads).toFixed(1) : 0}<span className="text-2xl ml-1">km</span>
-                </p>
-              </div>
-              <div className="p-3 rounded-xl bg-gradient-to-br from-purple-500 to-purple-600 shadow-lg">
-                <TrendingUp className="h-6 w-6 text-white" />
-              </div>
-            </div>
-          </Card>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <RoadKPICard label="Total Roads" value={String(totalRoads)} icon={<Map className="h-4 w-4" />} accent="primary" />
+          <RoadKPICard label="Total Length" value={Number(totalLength.toFixed(1)).toLocaleString("en-IN")} unit="km" icon={<Route className="h-4 w-4" />} accent="secondary" />
+          <RoadKPICard label="Average Length" value={totalRoads > 0 ? (totalLength / totalRoads).toFixed(1) : "0"} unit="km" icon={<TrendingUp className="h-4 w-4" />} accent="destructive" />
         </div>
 
         <Card className="p-8 shadow-elevated border-0 gradient-card">
-          <h3 className="font-bold text-xl mb-6">Road Types Distribution</h3>
+          <h3 className="font-bold text-xl mb-6">Road Length Distribution</h3>
           <div className="grid md:grid-cols-2 gap-8 items-center">
             <ResponsiveContainer width="100%" height={250}>
               <PieChart>
@@ -1096,8 +1060,8 @@ export default function RoadRegister() {
                       </div>
                     </td>
                     <td className="p-4">
-                      <Badge variant="secondary" className="font-semibold items-center justify-center flex">
-                        {`${road.estimated_distance_km} km` || "—"}
+                      <Badge variant="secondary" className="font-semibold">
+                        {road.estimated_distance_km || "—"} km
                       </Badge>
                     </td>
                     <td className="p-4">
@@ -1129,4 +1093,62 @@ export default function RoadRegister() {
 
 function cn(...classes: (string | boolean | undefined)[]) {
   return classes.filter(Boolean).join(" ");
+}
+
+/* ── KPI Card Component (Dashboard-style) ── */
+function RoadKPICard({ label, value, unit, icon, accent }: {
+  label: string;
+  value: string;
+  unit?: string;
+  icon: React.ReactNode;
+  accent: "primary" | "secondary" | "destructive";
+}) {
+  const styles = {
+    primary: {
+      border: "border-l-primary dark:border-l-muted-secondary",
+      iconBg: "bg-primary/10 text-primary dark:bg-muted-secondary/10 dark:text-muted-secondary",
+      valueTint: "text-primary dark:text-muted-secondary",
+      gradFrom: "hsl(217, 64%, 31%)",
+      gradTo: "hsl(198, 99%, 41%)",
+    },
+    secondary: {
+      border: "border-l-secondary",
+      iconBg: "bg-secondary/10 text-secondary",
+      valueTint: "text-secondary",
+      gradFrom: "hsl(198, 99%, 41%)",
+      gradTo: "hsl(187, 85%, 43%)",
+    },
+    destructive: {
+      border: "border-l-destructive",
+      iconBg: "bg-destructive/10 text-destructive",
+      valueTint: "text-destructive",
+      gradFrom: "hsl(0, 84%, 60%)",
+      gradTo: "hsl(38, 92%, 50%)",
+    },
+  };
+  const s = styles[accent];
+
+  return (
+    <Card className={`p-0 border border-border bg-card overflow-hidden border-l-[3px] ${s.border} relative`}>
+      <div className="absolute inset-0 bg-kpi-grid pointer-events-none" />
+      <div className="absolute inset-0 pointer-events-none" style={{
+        background: `linear-gradient(135deg, ${s.gradFrom}18 0%, transparent 60%, ${s.gradTo}10 100%)`
+      }} />
+      <div className="absolute right-0 top-2 bottom-2 w-[3px] rounded-full pointer-events-none" style={{
+        background: `linear-gradient(180deg, ${s.gradFrom}, ${s.gradTo})`
+      }} />
+      <div className="relative px-5 py-5 flex items-center gap-4">
+        <div className={`p-2.5 rounded-xl ${s.iconBg}`}>
+          {icon}
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-widest">{label}</p>
+          <div className="flex items-baseline gap-1.5 mt-1">
+            <span className={`text-3xl font-bold tabular-nums tracking-tight ${s.valueTint}`}>{value}</span>
+            {unit && <span className="text-sm text-muted-foreground font-medium">{unit}</span>}
+          </div>
+        </div>
+      </div>
+    </Card>
+  );
 }
