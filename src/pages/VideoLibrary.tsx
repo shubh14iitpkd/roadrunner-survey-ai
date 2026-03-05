@@ -17,6 +17,7 @@ interface VideoData {
   roadName: string;
   surveyDate: string;
   surveyorName: string;
+  surveyDisplayId: string;
   duration: string;
   size: string;
   status: string;
@@ -99,6 +100,7 @@ export default function VideoLibrary() {
             roadName: road?.road_name || `Route #${v.route_id}`,
             surveyDate: "",
             surveyorName: "",
+            surveyDisplayId: v.survey_display_id,
             duration: `${durMin}:${durSec}`,
             size: sizeMb,
             status: (v.status || "").toString(),
@@ -129,6 +131,7 @@ export default function VideoLibrary() {
                 ...v,
                 surveyDate: s?.survey_date || v.surveyDate,
                 surveyorName: s?.surveyor_name || v.surveyorName,
+                surveyDisplayId: s?.display_id || v.surveyDisplayId,
               };
             }));
           }
@@ -141,7 +144,7 @@ export default function VideoLibrary() {
   }, []);
 
   const filteredVideos = videos.filter((video) => {
-    const matchesSearch = video.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    const matchesSearch = video.surveyDisplayId.toLowerCase().includes(searchQuery.toLowerCase()) ||
       video.roadName.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesRoute = selectedRoute === "all" || video.routeId.toString() === selectedRoute;
     const matchesSurveyor = selectedSurveyor === "all" || video.surveyorName === selectedSurveyor;
@@ -352,7 +355,7 @@ export default function VideoLibrary() {
 
                 <div className="p-4 space-y-3">
                   <div>
-                    <h3 className="font-semibold mb-1">{video.title}</h3>
+                    <h3 className="font-semibold mb-1">{video.surveyDisplayId}</h3>
                     <div className="flex flex-wrap gap-2 mb-2">
                       <Badge variant="outline" className="text-xs">
                         Route #{video.routeId}
