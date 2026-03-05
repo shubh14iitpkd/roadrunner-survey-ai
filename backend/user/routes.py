@@ -1,6 +1,8 @@
 from db import get_db
 from flask import Blueprint, jsonify, request
 from bson import ObjectId
+from flask_jwt_extended import jwt_required, get_jwt_identity
+from utils.security import hash_password, verify_password
 
 user_bp = Blueprint("user", __name__)
 
@@ -114,6 +116,78 @@ def update_label_preferences(user_id: str):
         return jsonify({"ok": True})
     except Exception as e:
         print(f"[PREFS] {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@user_bp.put("/<user_id>/password")
+@jwt_required()
+def update_password(user_id: str):
+    """
+    Update user password
+    ---
+    tags:
+      - User
+    security:
+      - Bearer: []
+    parameters:
+      - name: user_id
+        in: path
+        type: string
+        required: true
+        description: The ID of the user
+      - name: body
+        in: body
+        required: true
+        schema:
+          type: object
+          required:
+            - current_password
+            - new_password
+          properties:
+            current_password:
+              type: string
+            new_password:
+              type: string
+    responses:
+      200:
+        description: Password updated successfully
+      400:
+        description: Invalid request or incorrect current password
+      401:
+        description: Unauthorized
+      404:
+        description: User not found
+      500:
+        description: Internal server error
+    """
+    identity = get_jwt_identity()
+    if identity != user_id:
+        return jsonify({"error": "unauthorized"}), 401
+
+    data = request.get_json(silent=True) or {}
+    current_password = data.get("current_password")
+    new_password = data.get("new_password")
+
+    if not current_password or not new_password:
+        return jsonify({"error": "current_password and new_password are required"}), 400
+
+    try:
+        db = get_db()
+        user = db.users.find_one({"_id": ObjectId(user_id)})
+        if not user:
+            return jsonify({"error": "user not found"}), 404
+
+        if not verify_password(current_password, user.get("password_hash", "")):
+            return jsonify({"error": "incorrect current password"}), 400
+
+        new_password_hash = hash_password(new_password)
+        db.users.update_one(
+            {"_id": ObjectId(user_id)},
+            {"$set": {"password_hash": new_password_hash}}
+        )
+        return jsonify({"ok": True, "message": "password updated successfully"})
+    except Exception as e:
+        print(f"[USER] {e}")
         return jsonify({"error": str(e)}), 500
 
 

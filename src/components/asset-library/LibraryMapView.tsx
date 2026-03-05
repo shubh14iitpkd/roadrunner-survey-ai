@@ -89,7 +89,7 @@ export default function LibraryMapView({
     if (assets.length === 0) return [25.2, 55.27]; // Dubai fallback
     return [assets[0].lat, assets[0].lng];
   }, [assets]);
-  const wantsIcons = localStorage.getItem('wants_icons') !== 'false';
+  const wantsIcons = localStorage.getItem('wants_icons') === 'true';
   return (
     <MapContainer
       center={center}

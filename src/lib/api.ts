@@ -224,6 +224,8 @@ export const api = {
 			apiFetch(`/api/users/${userId}/preferences/label`, { method: "PUT", body: JSON.stringify({ asset_ids: assetIds, display_name: displayName }) }),
 		updateCategoryPreference: (userId: string, categoryId: string, displayName: string) =>
 			apiFetch(`/api/users/${userId}/preferences/category`, { method: "PUT", body: JSON.stringify({ category_id: categoryId, display_name: displayName }) }),
+		updatePassword: (userId: string, payload: any) =>
+			apiFetch(`/api/users/${userId}/password`, { method: "PUT", body: JSON.stringify(payload) }),
 	},
 	frames: {
 		list: (params?: { video_id?: string; survey_id?: string; route_id?: number; has_detections?: boolean; limit?: number; offset?: number }) => {
