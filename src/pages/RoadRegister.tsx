@@ -458,7 +458,10 @@ export default function RoadRegister() {
   const totalLength = roads.reduce((sum, road) => sum + (road.estimated_distance_km || 0), 0);
   const roadsByType = roads.reduce((acc, road) => {
     const type = road.road_type || "Unknown";
-    acc[type] = (acc[type] || 0) + 1;
+    if (!acc[type]) {
+      acc[type] = 0;
+    }
+    acc[type] += road.estimated_distance_km
     return acc;
   }, {} as Record<string, number>);
 
@@ -559,7 +562,7 @@ export default function RoadRegister() {
             </p>
           </div>
           <div className="flex gap-3">
-            <Dialog open={isImportDialogOpen} onOpenChange={setIsImportDialogOpen}>
+            {/* <Dialog open={isImportDialogOpen} onOpenChange={setIsImportDialogOpen}>
               <DialogTrigger asChild>
                 <Button variant="secondary" className="gap-2 bg-white/20 hover:bg-white/30 text-white border-white/30 backdrop-blur-sm">
                   <Upload className="h-4 w-4" />
@@ -609,7 +612,7 @@ export default function RoadRegister() {
                   </Button>
                 </div>
               </DialogContent>
-            </Dialog>
+            </Dialog> */}
 
             <Dialog open={isAddDialogOpen} onOpenChange={(open) => {
               // Prevent closing when clicking on Google Places autocomplete
@@ -961,13 +964,7 @@ export default function RoadRegister() {
                     <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
                   ))}
                 </Pie>
-                <Tooltip />
-                <Legend
-                  layout="vertical"
-                  verticalAlign="middle"
-                  align="right"
-                  iconType="circle"
-                />
+                <Tooltip formatter={(value) => `${value} km`} labelFormatter={(label) => ``}/>
               </PieChart>
             </ResponsiveContainer>
             <div className="space-y-3">
@@ -977,7 +974,7 @@ export default function RoadRegister() {
                     <div className="w-4 h-4 rounded-full" style={{ backgroundColor: CHART_COLORS[idx % CHART_COLORS.length] }} />
                     <span className="font-medium">{type}</span>
                   </div>
-                  <Badge variant="secondary" className="font-bold">{count as number}</Badge>
+                  <Badge variant="secondary" className="font-bold">{count as number} km</Badge>
                 </div>
               ))}
             </div>
@@ -1099,8 +1096,8 @@ export default function RoadRegister() {
                       </div>
                     </td>
                     <td className="p-4">
-                      <Badge variant="secondary" className="font-semibold">
-                        {road.estimated_distance_km || "—"} km
+                      <Badge variant="secondary" className="font-semibold items-center justify-center flex">
+                        {`${road.estimated_distance_km} km` || "—"}
                       </Badge>
                     </td>
                     <td className="p-4">

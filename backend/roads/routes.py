@@ -153,20 +153,36 @@ def create_road():
 		return jsonify({"error": f"missing: {', '.join(missing)}"}), 400
 
 	db = get_db()
-	db.roads.create_index([("road_name", TEXT), ("start_point_name", TEXT), ("end_point_name", TEXT)], name="roads_text", default_language="english")
+	# db.roads.create_index([("road_name", TEXT), ("start_point_name", TEXT), ("end_point_name", TEXT)], name="roads_text", default_language="english")
 	route_id = next_sequence("route_id")
+
+	start_lat =  body.get("start_lat")
+	start_lng =  body.get("start_lng")
+	end_lat =  body.get("end_lat")
+	end_lng =  body.get("end_lng")
+	road_side =  body.get("road_side")
+	road_name = body.get("road_name")
+
+	existing = db.roads.find_one({"road_name": road_name })
+	if existing:
+		return jsonify({"error": "Route with given name already exists"}), 400
+	
+	existing = db.roads.find_one({"start_lat": start_lat, "start_lng": start_lng, "end_lat": end_lat, "end_lng": end_lng, "road_side": road_side})
+	if existing:
+		return jsonify({"error": "Route with given coordinates and side already exists"}), 400
+
 	doc = {
 		"route_id": route_id,
 		"road_name": body.get("road_name"),
 		"start_point_name": body.get("start_point_name"),
-		"start_lat": body.get("start_lat"),
-		"start_lng": body.get("start_lng"),
+		"start_lat": start_lat,
+		"start_lng": start_lng,
 		"end_point_name": body.get("end_point_name"),
-		"end_lat": body.get("end_lat"),
-		"end_lng": body.get("end_lng"),
+		"end_lat": end_lat,
+		"end_lng": end_lng,
 		"estimated_distance_km": body.get("estimated_distance_km"),
 		"road_type": body.get("road_type"),
-		"road_side": body.get("road_side"),
+		"road_side": road_side,
 		"created_at": get_now_iso(),
 		"updated_at": get_now_iso(),
 	}
