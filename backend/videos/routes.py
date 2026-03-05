@@ -877,7 +877,7 @@ def process_video_with_ai(video_id: str):
                             if survey_id:
                                 mongo_db.surveys.update_one(
                                     {"_id": ObjectId(survey_id)},
-                                    {"$set": {"totals": totals}}
+                                    {"$set": {"totals": totals, "status": "processed"}}
                                 )
                     except Exception as agge:
                         print(f"[PROCESS] Error calculating demo aggregates: {agge}")
@@ -1062,14 +1062,18 @@ def process_video_with_ai(video_id: str):
                     },
                 )
 
-                mongo_db.surveys.update_one(
-                    {"_id": ObjectId(survey_id)},
-                    {
-                        "$set": {
-                            "totals": result.get("assets_summary", {"good": 0, "damaged": 0, "total_assets": 0})
+                # TODO: store aggregates here
+                if survey_id:
+                    mongo_db.surveys.update_one(
+                        {"_id": ObjectId(survey_id)},
+                        {
+                            "$set": {
+                                "totals": result.get("assets_summary", {"good": 0, "damaged": 0, "total_assets": 0}),
+                                "status": "processed",
+                                "updated_at": get_now_iso(),
+                            }
                         }
-                    },
-                )
+                    )
                 print(f"[PROCESS] Video {video_id} processing completed successfully")
 
             except Exception as e:
