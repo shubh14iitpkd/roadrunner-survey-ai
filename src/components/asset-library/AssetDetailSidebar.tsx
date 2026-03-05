@@ -265,7 +265,7 @@ export default function AssetDetailSidebar({
   return (
     <div
       className={cn(
-        "border-l border-border bg-card flex flex-col shrink-0 transition-all duration-300 w-96",
+        "border-l border-border bg-card flex flex-col shrink-0 transition-all duration-300 w-1/2 lg:w-2/5 ",
       )}
     >
       {selectedAsset ? (

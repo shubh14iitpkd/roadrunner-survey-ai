@@ -388,7 +388,7 @@ export default function AssetLibrary() {
           <DialogTitle>Full Asset View</DialogTitle>
           <DialogDescription>Full description of an asset</DialogDescription>
         </DialogHeader>
-        <DialogContent className="max-w-3xl w-[90vw] max-h-[90vh] overflow-auto p-0" style={{ zIndex: 9999 }}>
+        <DialogContent className="max-w-[80vw] w-[70vw] h-[85vh] max-h-[90vh] overflow-auto p-0" style={{ zIndex: 9999 }}>
           {selectedAsset && (() => {
             const assetFrameData = {
               videoId: selectedAsset.videoId || "",
