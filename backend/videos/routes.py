@@ -217,8 +217,15 @@ def create_video():
         survey_res = db.surveys.insert_one(temp_survey)
         survey_id = survey_res.inserted_id
 
+    # Look up survey_display_id from the survey
+    survey_display_id = None
+    survey_doc = db.surveys.find_one({"_id": survey_id}, {"survey_display_id": 1})
+    if survey_doc:
+        survey_display_id = survey_doc.get("survey_display_id")
+
     doc = {
         "survey_id": survey_id,
+        "survey_display_id": survey_display_id,
         "route_id": int(body["route_id"]),
         "title": body["title"],
         "storage_url": body.get("storage_url"),
@@ -438,18 +445,28 @@ def upload_direct():
 
     # NOW update database with successful upload
     if video_id:
+        # Look up the survey_display_id for the existing video's survey
+        existing_video = db.videos.find_one({"_id": ObjectId(video_id)}, {"survey_id": 1})
+        survey_display_id = None
+        if existing_video and existing_video.get("survey_id"):
+            survey_doc = db.surveys.find_one({"_id": existing_video["survey_id"]}, {"survey_display_id": 1})
+            if survey_doc:
+                survey_display_id = survey_doc.get("survey_display_id")
+
+        update_fields = {
+            "storage_url": storage_url,
+            "gpx_file_url": gpx_file_url,
+            "size_bytes": file_size,
+            "status": "uploaded",
+            "progress": 100,
+            "updated_at": get_now_iso(),
+        }
+        if survey_display_id:
+            update_fields["survey_display_id"] = survey_display_id
+
         db.videos.find_one_and_update(
             {"_id": ObjectId(video_id)},
-            {
-                "$set": {
-                    "storage_url": storage_url,
-                    "gpx_file_url": gpx_file_url,
-                    "size_bytes": file_size,
-                    "status": "uploaded",
-                    "progress": 100,
-                    "updated_at": get_now_iso(),
-                }
-            },
+            {"$set": update_fields},
         )
         return (
             jsonify(
@@ -474,8 +491,15 @@ def upload_direct():
             400,
         )
 
+    # Look up survey_display_id
+    survey_display_id = None
+    survey_doc = db.surveys.find_one({"_id": ObjectId(survey_id)}, {"survey_display_id": 1})
+    if survey_doc:
+        survey_display_id = survey_doc.get("survey_display_id")
+
     doc = {
         "survey_id": ObjectId(survey_id),
+        "survey_display_id": survey_display_id,
         "route_id": int(route_id),
         "title": title,
         "storage_url": storage_url,
@@ -1624,7 +1648,14 @@ def upload_library_video():
         except ValueError:
             gpx_file_url = f"/uploads/{gpx_path.name}"
 
-    # 5. Final Database Update
+    # 5. Look up survey_display_id from the survey
+    survey_display_id = None
+    survey_sid = survey_id["$oid"] if isinstance(survey_id, dict) else survey_id
+    survey_doc = db.surveys.find_one({"_id": ObjectId(survey_sid)}, {"survey_display_id": 1})
+    if survey_doc:
+        survey_display_id = survey_doc.get("survey_display_id")
+
+    # 6. Final Database Update
     update_doc = {
         "storage_url": storage_url,
         "gpx_file_url": gpx_file_url,
@@ -1633,6 +1664,7 @@ def upload_library_video():
         "status": "uploaded",
         "progress": 100,
         "updated_at": get_now_iso(),
+        "survey_display_id": survey_display_id,
     }
 
     key = os.path.splitext(os.path.basename(storage_url))[0]
@@ -1643,7 +1675,7 @@ def upload_library_video():
         sid = survey_id
     
     # link the survey id with demo assets
-    db.assets.update_many({ "video_key": key}, {"$set": { "survey_id": ObjectId(sid) }})
+    db.assets.update_many({ "video_key": key}, {"$set": { "survey_id": ObjectId(sid), "route_id": int(route_id), "survey_display_id": survey_display_id }})
     
     if video_id:
         res = db.videos.find_one_and_update(

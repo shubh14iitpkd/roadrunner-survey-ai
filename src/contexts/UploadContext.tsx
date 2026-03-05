@@ -22,6 +22,7 @@ export interface VideoFile {
     surveyorName: string;
     gpxFile?: string;
     surveyId?: string; // backend survey _id
+    surveyDisplayId?: string; // human-readable survey display id
     thumbnailUrl?: string; // thumbnail URL
 }
 
@@ -160,6 +161,7 @@ export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                         surveyorName: survey?.surveyor_name || '',
                         gpxFile: v.gpx_file_url ? v.gpx_file_url.split('/').pop() : undefined,
                         surveyId: surveyIdStr,
+                        surveyDisplayId: v.survey_display_id || survey?.survey_display_id,
                         thumbnailUrl: v.thumbnail_url,
                     };
                 });
@@ -338,6 +340,7 @@ export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             });
 
             const surveyId: string = surveyResp.item._id;
+            const surveyDisplayId: string | undefined = surveyResp.item.survey_display_id;
             const id = `video-${Date.now()}`;
             // activeUploads.current.add(id); // for skipping polling 
             const filename = videoPath.split('/').pop() || `${id}.mp4`;
@@ -376,6 +379,7 @@ export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                 surveyDate: surveyDate,
                 surveyorName: surveyorName,
                 surveyId,
+                surveyDisplayId,
                 gpxFile: undefined,
                 thumbnailUrl: thumbPath ? `${thumbPath}` : undefined,
             };
@@ -415,6 +419,7 @@ export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                 gpx_file_url: gpxFileUrl,
             });
             const surveyId: string = surveyResp.item._id;
+            const surveyDisplayId: string | undefined = surveyResp.item.survey_display_id;
 
             // 2) Seed local queue and create video rows in backend
             const newVideos: { file: File, videoObj: VideoFile, backendId: string }[] = [];
@@ -459,6 +464,7 @@ export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                     surveyDate: surveyDate,
                     surveyorName: surveyorName,
                     surveyId,
+                    surveyDisplayId,
                     gpxFile: undefined,
                     thumbnailUrl: undefined,
                 };

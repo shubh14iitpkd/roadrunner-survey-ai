@@ -5,7 +5,7 @@ from bson import ObjectId
 from pymongo import DESCENDING
 
 from db import get_db
-from utils.ids import get_now_iso
+from utils.ids import get_now_iso, generate_survey_id
 from utils.rbac import role_required
 from utils.response import mongo_response
 
@@ -164,6 +164,7 @@ def create_survey():
         "road_id": str(road.get("_id")) if road and road.get("_id") is not None else None,
         "survey_date": body["survey_date"],
         "surveyor_name": body["surveyor_name"],
+        "survey_display_id": generate_survey_id(db),
         "survey_version": survey_version,
         "is_latest": is_latest,
         "status": body.get("status", "uploaded"),

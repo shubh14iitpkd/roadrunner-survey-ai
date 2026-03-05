@@ -637,30 +637,29 @@ export default function SurveyUpload() {
               </div>
             ) : (
               <div className="rounded-xl border border-border overflow-hidden">
-                <table className="w-full">
-                  <thead>
-                    <tr className="bg-gradient-to-r from-blue-50 via-indigo-50 to-purple-50 dark:from-blue-950/30 dark:via-indigo-950/30 dark:to-purple-950/30 border-b border-border">
-                      <th className="text-left p-3 font-semibold text-sm w-24">Preview</th>
-                      <th className="text-left p-3 font-semibold text-sm min-w-[140px] max-w-[200px]">Route</th>
-                      <th className="text-left p-3 font-semibold text-sm w-24">Date</th>
-                      <th className="text-left p-3 font-semibold text-sm w-20">Surveyor</th>
-                      <th className="text-left p-3 font-semibold text-sm w-20">GPS</th>
-                      <th className="text-left p-3 font-semibold text-sm w-32">Status</th>
-                      <th className="text-center p-3 font-semibold text-sm">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
+                <div className="flex flex-col w-full">
+                  <div className="flex w-full items-center justify-between bg-gradient-to-r from-blue-50 via-indigo-50 to-purple-50 dark:from-blue-950/30 dark:via-indigo-950/30 dark:to-purple-950/30 border-b border-border">
+                    <div className="text-left p-3 font-semibold text-sm flex-1">Preview</div>
+                    <div className="text-left p-3 font-semibold text-sm flex-1">Survey ID</div>
+                    <div className="text-left p-3 font-semibold text-sm flex-[2.5]">Route</div>
+                    <div className="text-left p-3 font-semibold text-sm flex-1">Date</div>
+                    <div className="text-left p-3 font-semibold text-sm flex-1">Surveyor</div>
+                    <div className="text-left p-3 font-semibold text-sm flex-1">GPS</div>
+                    <div className="text-left p-3 font-semibold text-sm flex-1">Status</div>
+                    <div className="text-center p-3 font-semibold text-sm flex-[2.5]">Actions</div>
+                  </div>
+                  <div className="flex flex-col w-full">
                     {videos.map((video, index) => {
                       const road = roads.find(r => r.route_id === video.routeId);
                       const uniqueKey = video.backendId || video.id || `video-temp-${index}`;
 
                       return (
-                        <tr
+                        <div
                           key={uniqueKey}
-                          className="border-b border-border hover:bg-blue-50/70 dark:hover:bg-blue-950/30 transition-colors duration-200"
+                          className="flex w-full items-center justify-between border-b border-border hover:bg-blue-50/70 dark:hover:bg-blue-950/30 transition-colors duration-200"
                         >
                           {/* Preview with video name tooltip */}
-                          <td className="p-3">
+                          <div className="p-3 flex-1 flex justify-start">
                             <div className="relative group">
                               {video.thumbnailUrl ? (
                                 <div
@@ -691,10 +690,21 @@ export default function SurveyUpload() {
                                 </div>
                               </div>
                             </div>
-                          </td>
+                          </div>
+
+                          {/* Survey ID column */}
+                          <div className="p-3 flex-1 flex justify-start">
+                            <div className="flex flex-col gap-0.5">
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-sm font-mono text-blue-600 dark:text-blue-400 uppercase tracking-wide">
+                                  {video.surveyDisplayId}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
 
                           {/* Route (stacked layout with truncation) */}
-                          <td className="p-3 max-w-[200px]">
+                          <div className="p-3 flex-[2.5] flex justify-start">
                             <div className="flex flex-col gap-0.5">
                               <div className="flex items-center gap-1.5">
                                 <span className="text-[10px] font-mono text-blue-600 dark:text-blue-400 uppercase tracking-wide">
@@ -708,22 +718,22 @@ export default function SurveyUpload() {
                                 {road?.road_name || `Road ${video.routeId}`}
                               </span>
                             </div>
-                          </td>
+                          </div>
 
                           {/* Date */}
-                          <td className="p-3">
+                          <div className="p-3 flex-1 flex justify-start">
                             <span className="text-sm text-muted-foreground">{video.surveyDate}</span>
-                          </td>
+                          </div>
 
                           {/* Surveyor */}
-                          <td className="p-3">
-                            <span className="text-sm truncate max-w-[80px] block" title={video.surveyorName}>
+                          <div className="p-3 flex-1 flex justify-start">
+                            <span className="text-sm line-clamp-2" title={video.surveyorName}>
                               {video.surveyorName}
                             </span>
-                          </td>
+                          </div>
 
                           {/* GPS Mini Map */}
-                          <td className="p-3">
+                          <div className="p-3 flex-1 flex justify-start">
                             {video.gpxFile ? (
                               <Link to={`/gis?id=${video.routeId}`} className="h-3 w-3">
                                 <Badge variant="secondary" className="gap-1.5 text-xs font-medium bg-green-50 dark:bg-green-950/30 text-green-700 dark:text-green-400 border-green-200 dark:border-green-800">
@@ -736,11 +746,11 @@ export default function SurveyUpload() {
                                 No
                               </Badge>
                             )}
-                          </td>
+                          </div>
 
                           {/* Status column */}
-                          <td className="p-3">
-                            <div className="flex flex-col gap-1">
+                          <div className="p-3 flex-1 flex justify-start">
+                            <div className="flex flex-col gap-1 w-full">
                               <div className="flex items-center gap-1.5">
                                 {getStatusIcon(video.status)}
                                 <Badge
@@ -761,16 +771,15 @@ export default function SurveyUpload() {
                               {/* Progress bar for uploading/processing */}
                               {(video.status === "uploading" || video.status === "processing") && (
                                 <div className="flex items-center gap-2">
-                                  <Progress value={video.progress} className="h-1.5 flex-1 max-w-[80px]" />
-                                  <span className="text-[10px] font-medium text-primary">{video.progress}%</span>
+                                  <Progress value={video.progress} className="h-1.5 flex-1" />
+                                  <span className="text-[10px] font-medium text-primary whitespace-nowrap">{video.progress}%</span>
                                 </div>
                               )}
                             </div>
-                          </td>
+                          </div>
 
                           {/* Actions column */}
-                          <td className="p-3">
-                            <div className="flex items-center justify-center gap-1.5 flex-wrap">
+                          <div className="p-3 flex-[2.5] flex items-center justify-center gap-1.5 flex-wrap">
                               {video.status === "uploaded" && (
                                 <Button
                                   size="sm"
@@ -866,13 +875,12 @@ export default function SurveyUpload() {
                               >
                                 <Trash2 className="h-3.5 w-3.5" />
                               </Button>
-                            </div>
-                          </td>
-                        </tr>
+                          </div>
+                        </div>
                       );
                     })}
-                  </tbody>
-                </table>
+                  </div>
+                </div>
               </div>
             )}
           </Card>
