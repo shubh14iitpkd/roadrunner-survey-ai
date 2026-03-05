@@ -281,33 +281,31 @@ export default function SurveyUpload() {
   // startBatchUpload removed
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 p-5">
       {/* Hero Header */}
-      <div className="relative overflow-hidden gradient-primary p-8 shadow-elevated">
-        <div className="absolute inset-0 page-header dark:bg-primary"></div>
-        <div className="relative flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-          <div>
-            <h1 className="text-4xl font-bold mb-2 text-white drop-shadow-lg">
-              Survey Upload & Processing
-            </h1>
-            <p className="text-white/90 text-lg">
-              Upload and process road survey videos with AI-powered analysis
-            </p>
+      <div className="border-b border-border bg-header-strip -mx-5 -mt-5 mb-4">
+        <div className="px-5 py-2 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Upload className="h-4 w-4 text-primary" />
+            <div>
+              <p className="text-[9px] font-semibold text-muted-foreground uppercase tracking-[0.15em]">Project Management</p>
+              <h1 className="text-sm font-bold text-foreground tracking-tight">Survey Upload & Processing</h1>
+            </div>
           </div>
-          <div className="flex gap-3">
+          <div className="flex gap-2">
             <Link to="/videos">
-              <Button variant="secondary" className="gap-2 bg-white/20 hover:bg-white/30 text-white border-white/30 backdrop-blur-sm">
-                <FileVideo className="h-4 w-4" />
+              <Button variant="outline" size="sm" className="h-7 text-[11px] gap-1.5">
+                <FileVideo className="h-3 w-3" />
                 Video Library
               </Button>
             </Link>
             <Dialog open={isUploadDialogOpen} onOpenChange={setIsUploadDialogOpen}>
               <DialogTrigger asChild>
-                <Button className="gap-2 bg-white text-primary hover:bg-white/90 shadow-lg">
-                  <Upload className="h-4 w-4" />
-                  Upload Survey Data
+                <Button variant="default" size="sm" className="h-7 text-[11px] gap-1.5">
+                  <Upload className="h-3 w-3" />
+                  Upload
                   {uploadingItems.length > 0 && (
-                    <Badge variant="secondary" className="ml-1 bg-primary/20">
+                    <Badge variant="secondary" className="ml-1 text-[9px] h-4 px-1">
                       {uploadingItems.length}
                     </Badge>
                   )}
@@ -328,7 +326,7 @@ export default function SurveyUpload() {
                     Upload video and GPX files for road survey processing. You can add multiple videos - they will upload in parallel.
                   </DialogDescription>
                 </DialogHeader>
-
+                
                 {/* Upload Queue Status */}
                 {uploadingItems.length > 0 && (
                   <div className="p-3 rounded-lg bg-primary/5 border border-primary/20">
@@ -516,8 +514,8 @@ export default function SurveyUpload() {
                       </div>
                     </div>
                     <div>
-                      <VideoLibraryUpload
-                        selectedRoute={selectedRoute}
+                      <VideoLibraryUpload 
+                        selectedRoute={selectedRoute} 
                         surveyorName={surveyorName}
                         surveyDate={surveyDate}
                         handleFileSelect={handleLibraryFileSelect}
@@ -526,7 +524,7 @@ export default function SurveyUpload() {
                     </div>
                   </TabsContent>
                 </Tabs>
-
+                
                 {/* Footer with close button */}
                 <div className="flex justify-end pt-4 border-t">
                   <Button variant="outline" onClick={() => setIsUploadDialogOpen(false)}>
@@ -541,58 +539,11 @@ export default function SurveyUpload() {
 
       <div className="px-6 space-y-6">
         {/* KPI Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-          <Card className="p-6 shadow-elevated border-0 bg-gradient-to-br from-blue-50 to-white dark:from-blue-950/20 dark:to-card animate-fade-in hover:shadow-glow transition-all duration-300">
-            <div className="flex items-start justify-between">
-              <div className="space-y-2">
-                <p className="text-sm font-semibold text-blue-600 dark:text-blue-400 uppercase tracking-wide">Total Uploaded</p>
-                <p className="text-5xl font-bold bg-gradient-to-br from-blue-600 to-blue-400 bg-clip-text text-transparent">{totalUploaded}</p>
-                <p className="text-xs font-medium text-muted-foreground">Videos in system</p>
-              </div>
-              <div className="p-4 rounded-2xl bg-gradient-to-br from-blue-500 to-blue-600 shadow-lg">
-                <Database className="h-7 w-7 text-white" />
-              </div>
-            </div>
-          </Card>
-
-          <Card className="p-6 shadow-elevated border-0 bg-gradient-to-br from-green-50 to-white dark:from-green-950/20 dark:to-card animate-fade-in hover:shadow-glow transition-all duration-300">
-            <div className="flex items-start justify-between">
-              <div className="space-y-2">
-                <p className="text-sm font-semibold text-green-600 dark:text-green-400 uppercase tracking-wide">AI Processed</p>
-                <p className="text-5xl font-bold bg-gradient-to-br from-green-600 to-green-400 bg-clip-text text-transparent">{totalProcessed}</p>
-                <p className="text-xs font-medium text-muted-foreground">Reports ready</p>
-              </div>
-              <div className="p-4 rounded-2xl bg-gradient-to-br from-green-500 to-green-600 shadow-lg">
-                <CheckCircle className="h-7 w-7 text-white" />
-              </div>
-            </div>
-          </Card>
-
-          <Card className="p-6 shadow-elevated border-0 bg-gradient-to-br from-amber-50 to-white dark:from-amber-950/20 dark:to-card animate-fade-in hover:shadow-glow transition-all duration-300">
-            <div className="flex items-start justify-between">
-              <div className="space-y-2">
-                <p className="text-sm font-semibold text-amber-600 dark:text-amber-400 uppercase tracking-wide">In Queue</p>
-                <p className="text-5xl font-bold bg-gradient-to-br from-amber-600 to-amber-400 bg-clip-text text-transparent">{inQueue}</p>
-                <p className="text-xs font-medium text-muted-foreground">Waiting to process</p>
-              </div>
-              <div className="p-4 rounded-2xl bg-gradient-to-br from-amber-500 to-amber-600 shadow-lg">
-                <Clock className="h-7 w-7 text-white" />
-              </div>
-            </div>
-          </Card>
-
-          <Card className="p-6 shadow-elevated border-0 bg-gradient-to-br from-purple-50 to-white dark:from-purple-950/20 dark:to-card animate-fade-in hover:shadow-glow transition-all duration-300">
-            <div className="flex items-start justify-between">
-              <div className="space-y-2">
-                <p className="text-sm font-semibold text-purple-600 dark:text-purple-400 uppercase tracking-wide">Processing</p>
-                <p className="text-5xl font-bold bg-gradient-to-br from-purple-600 to-purple-400 bg-clip-text text-transparent">{processing}</p>
-                <p className="text-xs font-medium text-muted-foreground">Active tasks</p>
-              </div>
-              <div className="p-4 rounded-2xl bg-gradient-to-br from-purple-500 to-purple-600 shadow-lg">
-                <TrendingUp className="h-7 w-7 text-white" />
-              </div>
-            </div>
-          </Card>
+        <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+          <SurveyKPICard label="Total Uploaded" value={String(totalUploaded)} icon={<Database className="h-4 w-4" />} accent="primary" />
+          <SurveyKPICard label="AI Processed" value={String(totalProcessed)} icon={<CheckCircle className="h-4 w-4" />} accent="secondary" />
+          <SurveyKPICard label="In Queue" value={String(inQueue)} icon={<Clock className="h-4 w-4" />} accent="warning" />
+          <SurveyKPICard label="Processing" value={String(processing)} icon={<TrendingUp className="h-4 w-4" />} accent="destructive" />
         </div>
 
         {/* Processing Queue - Always Visible */}
@@ -1036,4 +987,67 @@ export default function SurveyUpload() {
 
 function cn(...classes: (string | boolean | undefined)[]) {
   return classes.filter(Boolean).join(" ");
+}
+
+/* ── KPI Card Component (Dashboard-style) ── */
+function SurveyKPICard({ label, value, icon, accent }: {
+  label: string;
+  value: string;
+  icon: React.ReactNode;
+  accent: "primary" | "secondary" | "warning" | "destructive";
+}) {
+  const styles = {
+    primary: {
+      border: "border-l-primary dark:border-l-muted-secondary",
+      iconBg: "bg-primary/10 text-primary dark:bg-muted-secondary/10 dark:text-muted-secondary",
+      valueTint: "text-primary dark:text-muted-secondary",
+      gradFrom: "hsl(217, 64%, 31%)",
+      gradTo: "hsl(198, 99%, 41%)",
+    },
+    secondary: {
+      border: "border-l-secondary",
+      iconBg: "bg-secondary/10 text-secondary",
+      valueTint: "text-secondary",
+      gradFrom: "hsl(198, 99%, 41%)",
+      gradTo: "hsl(187, 85%, 43%)",
+    },
+    warning: {
+      border: "border-l-warning",
+      iconBg: "bg-warning/10 text-warning",
+      valueTint: "text-warning",
+      gradFrom: "hsl(38, 92%, 50%)",
+      gradTo: "hsl(38, 92%, 65%)",
+    },
+    destructive: {
+      border: "border-l-destructive",
+      iconBg: "bg-destructive/10 text-destructive",
+      valueTint: "text-destructive",
+      gradFrom: "hsl(0, 84%, 60%)",
+      gradTo: "hsl(38, 92%, 50%)",
+    },
+  };
+  const s = styles[accent];
+
+  return (
+    <Card className={`p-0 border border-border bg-card overflow-hidden border-l-[3px] ${s.border} relative`}>
+      <div className="absolute inset-0 bg-kpi-grid pointer-events-none" />
+      <div className="absolute inset-0 pointer-events-none" style={{
+        background: `linear-gradient(135deg, ${s.gradFrom}18 0%, transparent 60%, ${s.gradTo}10 100%)`
+      }} />
+      <div className="absolute right-0 top-2 bottom-2 w-[3px] rounded-full pointer-events-none" style={{
+        background: `linear-gradient(180deg, ${s.gradFrom}, ${s.gradTo})`
+      }} />
+      <div className="relative px-5 py-5 flex items-center gap-4">
+        <div className={`p-2.5 rounded-xl ${s.iconBg}`}>
+          {icon}
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-widest">{label}</p>
+          <div className="flex items-baseline gap-1.5 mt-1">
+            <span className={`text-3xl font-bold tabular-nums tracking-tight ${s.valueTint}`}>{value}</span>
+          </div>
+        </div>
+      </div>
+    </Card>
+  );
 }
