@@ -68,9 +68,9 @@ function FlyToSelected({
 
   useEffect(() => {
     if (!selectedId) return;
-    const asset = assets.find((a) => a.defectId === selectedId);
+    const asset = assets.find((a) => a.assetDisplayId === selectedId);
     if (!asset) return;
-    map.flyTo([asset.lat, asset.lng], Math.max(map.getZoom(), 15), {
+    map.flyTo([asset.lat, asset.lng], Math.max(map.getZoom(), 16), {
       duration: 0.6,
     });
   }, [selectedId, assets, map]);
