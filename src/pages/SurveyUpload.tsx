@@ -286,7 +286,7 @@ export default function SurveyUpload() {
       <div className="border-b border-border bg-header-strip -mx-5 -mt-5 mb-4">
         <div className="px-5 py-2 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <Upload className="h-4 w-4 text-primary" />
+            <Upload className="h-4 w-4 text-primary dark:text-muted-secondary" />
             <div>
               <p className="text-[9px] font-semibold text-muted-foreground uppercase tracking-[0.15em]">Project Management</p>
               <h1 className="text-sm font-bold text-foreground tracking-tight">Survey Upload & Processing</h1>

@@ -5,7 +5,6 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Play, Download, Search, ArrowLeft, Video as VideoIcon, Columns2, X, MapPin, Loader2, Database } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { roadRegister } from "@/data/roadRegister";
 import { Link } from "react-router-dom";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { api, API_BASE } from "@/lib/api";
@@ -31,6 +30,7 @@ interface VideoData {
 
 export default function VideoLibrary() {
   const [videos, setVideos] = useState<VideoData[]>([]);
+  const [roads, setRoads] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showPlayer, setShowPlayer] = useState(false);
   const [playerSrc, setPlayerSrc] = useState<string>("");
@@ -57,8 +57,15 @@ export default function VideoLibrary() {
           return String(id);
         };
 
-        const resp = await api.videos.list();
-        const items = resp.items as any[];
+        const [roadsResp, videosResp] = await Promise.all([
+          api.roads.list(),
+          api.videos.list()
+        ]);
+        
+        const fetchedRoads = roadsResp.items || [];
+        if (!cancelled) setRoads(fetchedRoads);
+
+        const items = videosResp.items as any[];
         const baseMapped: VideoData[] = items.map(v => {
           const videoIdStr = getIdString(v._id);
           const durationSeconds = v.duration_seconds || 0;
@@ -66,7 +73,7 @@ export default function VideoLibrary() {
           const durSec = String(durationSeconds % 60).padStart(2, "0");
           const sizeBytes = v.size_bytes || 0;
           const sizeMb = `${(sizeBytes / 1024 / 1024).toFixed(0)} MB`;
-          const road = roadRegister.find(r => r.route_id === v.route_id);
+          const road = fetchedRoads.find((r: any) => r.route_id === v.route_id);
 
           // Helper function to build full URL
           const buildUrl = (path: string | undefined) => {
@@ -178,37 +185,35 @@ export default function VideoLibrary() {
   };
 
   return (
-    <div className="space-y-6">
-      {/* Hero Header */}
-      <div className="relative overflow-hidden gradient-primary p-8 shadow-elevated">
-        <div className="absolute inset-0 page-header dark:bg-primary"></div>
-        <div className="relative flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-3 mb-2">
-              <Link to="/upload">
-                <Button variant="ghost" size="icon" className="bg-white/20 hover:bg-white/30 text-white">
-                  <ArrowLeft className="h-5 w-5" />
-                </Button>
-              </Link>
-              <h1 className="text-4xl font-bold text-white drop-shadow-lg">
-                Video Library
-              </h1>
+    <div className="space-y-4 p-5">
+      {/* Compact Header */}
+      <div className="border-b border-border bg-header-strip -mx-5 -mt-5 mb-4">
+        <div className="px-5 py-2 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <VideoIcon className="h-4 w-4 text-primary dark:text-muted-secondary" />
+            <div>
+              <p className="text-[9px] font-semibold text-muted-foreground uppercase tracking-[0.15em]">Project Management</p>
+              <h1 className="text-sm font-bold text-foreground tracking-tight">Video Library</h1>
             </div>
-            <p className="text-white/90 text-lg pl-14">
-              Browse and compare AI-processed survey videos
-            </p>
           </div>
-          <div className="flex gap-3">
+          <div className="flex gap-2">
+            <Link to="/upload">
+              <Button variant="outline" size="sm" className="h-7 text-[11px] gap-1.5">
+                <ArrowLeft className="h-3 w-3" />
+                Surveys
+              </Button>
+            </Link>
             <Button
-              variant={compareMode ? "default" : "secondary"}
+              variant={compareMode ? "default" : "outline"}
+              size="sm"
+              className="h-7 text-[11px] gap-1.5"
               onClick={() => {
                 setCompareMode(!compareMode);
                 setSelectedForCompare([]);
               }}
-              className={compareMode ? "gap-2 bg-white text-primary hover:bg-white/90 shadow-lg" : "gap-2 bg-white/20 hover:bg-white/30 text-white border-white/30 backdrop-blur-sm"}
             >
-              <Columns2 className="h-4 w-4" />
-              {compareMode ? "Exit Compare" : "Compare Videos"}
+              <Columns2 className="h-3 w-3" />
+              {compareMode ? "Exit Compare" : "Compare"}
             </Button>
           </div>
         </div>
@@ -237,7 +242,7 @@ export default function VideoLibrary() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All Routes</SelectItem>
-                  {roadRegister.map((road) => (
+                  {roads.map((road) => (
                     <SelectItem key={road.route_id} value={road.route_id.toString()}>
                       {road.route_id} - {road.road_name}
                     </SelectItem>
