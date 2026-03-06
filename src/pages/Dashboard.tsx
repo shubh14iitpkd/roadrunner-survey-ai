@@ -116,11 +116,13 @@ export default function Dashboard() {
 
   // Resolved asset type rows from API data
   const assetTypeRows = useMemo(() => {
+    console.log("assetTypeTableData", assetTypeTableData);
     return assetTypeTableData.items.map((item: any) => ({
       asset_id: item.asset_id,
       type: getAssetDisplayName(item),
       category: getCategoryDisplayName(item),
       category_id: item.category_id,
+      damaged_count: item.damaged_count,
       count: item.count,
     }));
   }, [assetTypeTableData, getAssetDisplayName, getCategoryDisplayName]);
@@ -279,7 +281,7 @@ export default function Dashboard() {
                       nameKey="category"
                       paddingAngle={2}
                       stroke="hsl(var(--card))"
-                      strokeWidth={2}
+                      // strokeWidth={2}
                       onMouseEnter={onDonutEnter}
                       onMouseLeave={() => setActiveDonutIndex(undefined)}
                       onClick={(_, index) => {
@@ -387,7 +389,8 @@ export default function Dashboard() {
                     <TableHead className="text-sm font-semibold uppercase tracking-wider text-muted-foreground w-10">#</TableHead>
                     <TableHead className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Type</TableHead>
                     <TableHead className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Category</TableHead>
-                    <TableHead className="text-sm font-semibold uppercase tracking-wider text-muted-foreground text-right">Count</TableHead>
+                    <TableHead className="text-sm font-semibold uppercase tracking-wider text-muted-foreground text-right">Total</TableHead>
+                    <TableHead className="text-sm font-semibold uppercase tracking-wider text-muted-foreground text-right">Defects</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -401,6 +404,11 @@ export default function Dashboard() {
                         <CategoryBadge category={row.category} categoryId={row.category_id}/>
                       </TableCell>
                       <TableCell className="text-right font-semibold text-xs tabular-nums py-2">{row.count}</TableCell>
+                      <TableCell className="text-right font-semibold text-xs tabular-nums py-2">
+                        <span className="inline-flex items-center justify-center rounded-md bg-destructive/10 text-destructive px-2 py-0.5 text-xs font-bold tabular-nums min-w-[2rem]">
+                          {row.damaged_count}
+                        </span>
+                      </TableCell>
                     </TableRow>
                   ))}
                   {/* Fill empty rows to keep consistent height

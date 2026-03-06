@@ -253,7 +253,16 @@ def top_asset_types():
 			"_id": group_key,
 			"asset_id": {"$first": "$asset_id"},
 			"asset_type": {"$first": "$asset_type"}, 
-			"count": {"$sum": 1}
+			"count": {"$sum": 1},
+			"damaged_count": {
+            "$sum": {
+				"$cond": [
+						{"$eq": ["$condition", "damaged"]}, 
+						1, 
+						0
+					]
+				}
+        	}
 		}},
 		{"$sort": {"count": -1}},
 		{"$skip": skip},
@@ -283,7 +292,8 @@ def top_asset_types():
 			"type": atype,
 			"category_id": category_id_val,
 			"display_name": display_name,
-			"count": d.get("count", 0)
+			"count": d.get("count", 0),
+			"damaged_count": d.get("damaged_count", 0)
 		})
 	
 	import math
