@@ -22,5 +22,6 @@ export interface AssetRecord {
   frameNumber?: number;
   asset_id?: string;
   category_id?: string;
+  groupId?: string;
   box?: { x: number; y: number; width: number; height: number };
 }

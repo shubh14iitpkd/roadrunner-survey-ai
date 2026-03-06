@@ -158,6 +158,7 @@ export default function AssetLibrary() {
             surveyId,
             roadName: asset.route_name,
             routeId: asset.route_id != null ? Number(asset.route_id) : undefined,
+            groupId: asset.group_id ?? undefined,
             side: asset.side || 'Shoulder',
             zone: asset.zone || 'Unknown',
             lastSurveyDate: asset.survey_date || asset.created_at?.split('T')[0] || '—',
