@@ -48,6 +48,7 @@ export const api = {
 	roads: {
 		list: (query: string = "") => apiFetch(`/api/roads/${query}`),
 		get: (route_id: number) => apiFetch(`/api/roads/${route_id}`),
+		surveyedCount: () => apiFetch("/api/roads/survey/count"),
 		create: (payload: any) => apiFetch("/api/roads/", { method: "POST", body: JSON.stringify(payload) }),
 		update: (route_id: number, payload: any) => apiFetch(`/api/roads/${route_id}`, { method: "PUT", body: JSON.stringify(payload) }),
 		delete: (route_id: number) => apiFetch(`/api/roads/${route_id}`, { method: "DELETE" }),

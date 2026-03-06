@@ -253,3 +253,20 @@ def delete_road(route_id: int):
 	if not res.deleted_count:
 		return jsonify({"error": "not found"}), 404
 	return jsonify({"ok": True})
+
+@roads_bp.get("/survey/count")
+def survey_count():
+	"""
+	Get count of roads that have been surveyed
+	---
+	tags:
+	  - Roads
+	security:
+	  - Bearer: []
+	responses:
+	  200:
+	    description: Count of roads that have been surveyed retrieved successfully
+	"""
+	db = get_db()
+	surveyed_road_ids = db.surveys.distinct("road_id")
+	return jsonify({"total_count": len(surveyed_road_ids)}), 200

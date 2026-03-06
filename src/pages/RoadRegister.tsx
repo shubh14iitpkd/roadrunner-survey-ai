@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Plus, Upload, MapPin, Search, FileJson, FileSpreadsheet, Database, Pencil, Check, X, Map, Route, TrendingUp } from "lucide-react";
+import { Plus, Upload, MapPin, Search, FileJson, FileSpreadsheet, Database, Pencil, Check, X, Map, Route, TrendingUp, CircleCheck } from "lucide-react";
 import { Link } from "react-router-dom";
 import {
   Dialog,
@@ -51,6 +51,7 @@ export default function RoadRegister() {
   const [endLat, setEndLat] = useState("");
   const [endLng, setEndLng] = useState("");
   const [distance, setDistance] = useState("");
+  const [surveyedCount, setSurveyedCount] = useState(0);
   const [isMapLoaded, setIsMapLoaded] = useState(false);
 
   // Refs for autocomplete inputs
@@ -69,10 +70,11 @@ export default function RoadRegister() {
   const loadRoads = async () => {
     try {
       setLoading(true);
-      const resp = await api.roads.list();
+      const [resp, surveyedCount] = await Promise.all([api.roads.list(), api.roads.surveyedCount()]);
       if (resp?.items) {
         setRoads(resp.items);
       }
+      setSurveyedCount(surveyedCount?.total_count || 0);
     } catch (err: any) {
       toast.error("Failed to load roads: " + (err?.message || "Unknown error"));
       setRoads([]);
@@ -906,7 +908,7 @@ export default function RoadRegister() {
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <RoadKPICard label="Total Roads" value={String(totalRoads)} icon={<Map className="h-4 w-4" />} accent="primary" />
           <RoadKPICard label="Total Length" value={Number(totalLength.toFixed(1)).toLocaleString("en-IN")} unit="km" icon={<Route className="h-4 w-4" />} accent="secondary" />
-          <RoadKPICard label="Average Length" value={totalRoads > 0 ? (totalLength / totalRoads).toFixed(1) : "0"} unit="km" icon={<TrendingUp className="h-4 w-4" />} accent="destructive" />
+          <RoadKPICard label="Surveyed Roads" value={String(surveyedCount)} icon={<CircleCheck className="h-4 w-4" />} accent="destructive" />
         </div>
 
         <Card className="p-8 shadow-elevated border-0 gradient-card">

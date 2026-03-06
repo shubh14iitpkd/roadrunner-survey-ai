@@ -7,6 +7,10 @@ import { Play, Download, Search, ArrowLeft, Video as VideoIcon, Columns2, X, Map
 import { Badge } from "@/components/ui/badge";
 import { Link } from "react-router-dom";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Calendar } from "@/components/ui/calendar";
+import { format, parseISO } from "date-fns";
+import { CalendarIcon } from "lucide-react";
 import { api, API_BASE } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -42,6 +46,7 @@ export default function VideoLibrary() {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedRoute, setSelectedRoute] = useState<string>("all");
   const [selectedSurveyor, setSelectedSurveyor] = useState<string>("all");
+  const [selectedDate, setSelectedDate] = useState<Date | undefined>(undefined);
   const [compareMode, setCompareMode] = useState(false);
   const [selectedForCompare, setSelectedForCompare] = useState<string[]>([]);
   const [showCompareView, setShowCompareView] = useState(false);
@@ -148,8 +153,18 @@ export default function VideoLibrary() {
       video.roadName.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesRoute = selectedRoute === "all" || video.routeId.toString() === selectedRoute;
     const matchesSurveyor = selectedSurveyor === "all" || video.surveyorName === selectedSurveyor;
+    
+    let matchesDate = true;
+    if (selectedDate && video.surveyDate) {
+      try {
+        const vDate = parseISO(video.surveyDate);
+        matchesDate = format(vDate, "yyyy-MM-dd") === format(selectedDate, "yyyy-MM-dd");
+      } catch (e) {
+        matchesDate = false;
+      }
+    }
 
-    return matchesSearch && matchesRoute && matchesSurveyor;
+    return matchesSearch && matchesRoute && matchesSurveyor && matchesDate;
   });
 
   const surveyors = useMemo(() => Array.from(new Set(videos.map(v => v.surveyorName).filter(Boolean))), [videos]);
@@ -225,7 +240,7 @@ export default function VideoLibrary() {
       <div className="px-6 space-y-6">
         {/* Filters */}
         <Card className="p-4 shadow-elevated border-0 gradient-card animate-fade-in">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
             <div className="md:col-span-2">
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -252,6 +267,32 @@ export default function VideoLibrary() {
                   ))}
                 </SelectContent>
               </Select>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant={"outline"}
+                    className={cn(
+                      "w-full justify-start text-left font-normal",
+                      !selectedDate && "text-muted-foreground"
+                    )}
+                  >
+                    <CalendarIcon className="mr-2 h-4 w-4" />
+                    {selectedDate ? format(selectedDate, "PPP") : <span>Filter by date</span>}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0" align="start">
+                  <Calendar
+                    mode="single"
+                    selected={selectedDate}
+                    onSelect={setSelectedDate}
+                    disabled={(date) => date > new Date()}
+                    initialFocus
+                  />
+                </PopoverContent>
+              </Popover>
             </div>
 
             <div>
