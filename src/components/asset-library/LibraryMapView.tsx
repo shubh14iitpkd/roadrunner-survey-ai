@@ -46,6 +46,64 @@ function haversineM(lat1: number, lng1: number, lat2: number, lng2: number): num
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
+/* ── Helper: greedy nearest-neighbour spatial sort ─────── */
+// Reorders assets so consecutive entries are geographically adjacent,
+// regardless of the order they arrive from the API.
+function nearestNeighborSort(assets: AssetRecord[]): AssetRecord[] {
+  if (assets.length <= 1) return [...assets];
+
+  const unvisited = new Set(assets.map((_, i) => i));
+
+  // Start from the southernmost point (min lat) — likely one road end
+  let startIdx = 0;
+  let minLat = assets[0].lat;
+  for (const i of unvisited) {
+    if (assets[i].lat < minLat) { minLat = assets[i].lat; startIdx = i; }
+  }
+
+  const sorted: AssetRecord[] = [assets[startIdx]];
+  unvisited.delete(startIdx);
+  let current = startIdx;
+
+  while (unvisited.size > 0) {
+    let nearest = -1;
+    let minDist = Infinity;
+    for (const i of unvisited) {
+      const d = haversineM(assets[current].lat, assets[current].lng, assets[i].lat, assets[i].lng);
+      if (d < minDist) { minDist = d; nearest = i; }
+    }
+    sorted.push(assets[nearest]);
+    unvisited.delete(nearest);
+    current = nearest;
+  }
+  return sorted;
+}
+
+/* ── Helper: split spatially-sorted assets into segments ── */
+// Gap > POLYLINE_MAX_GAP_M metres between consecutive sorted points
+// starts a new segment so far-apart detections aren't linked.
+const POLYLINE_MAX_GAP_M = 200;
+
+function splitIntoSegments(
+  assets: AssetRecord[],
+  maxGapM = POLYLINE_MAX_GAP_M
+): AssetRecord[][] {
+  if (assets.length === 0) return [];
+  const sorted = nearestNeighborSort(assets);
+  const segments: AssetRecord[][] = [[sorted[0]]];
+  for (let i = 1; i < sorted.length; i++) {
+    const prev = sorted[i - 1];
+    const curr = sorted[i];
+    const dist = haversineM(prev.lat, prev.lng, curr.lat, curr.lng);
+    if (dist <= maxGapM) {
+      segments[segments.length - 1].push(curr);
+    } else {
+      segments.push([curr]);
+    }
+  }
+  return segments;
+}
+
 /* ── Helper: build a selected variant of an icon (larger) ── */
 function getSelectedIcon(baseIcon: L.Icon): L.Icon {
   const opts = (baseIcon as any).options;
@@ -118,11 +176,12 @@ interface PolylineGroupProps {
 }
 
 function PolylineGroup({ routeKey, routeId: _routeId, groupAssets, selectedId, onSelect }: PolylineGroupProps) {
-  const positions = useMemo<[number, number][]>(
-    () => groupAssets.map((a) => [a.lat, a.lng]),
+  // Split into segments so far-apart points aren't joined
+  const segments = useMemo<[number, number][][]>(
+    () => splitIntoSegments(groupAssets).map((seg) => seg.map((a) => [a.lat, a.lng] as [number, number])),
     [groupAssets]
   );
-
+  // console.log("segments", segments);
   const hasSelected = groupAssets.some((a) => a.assetDisplayId === selectedId);
   const selectedAsset = groupAssets.find((a) => a.assetDisplayId === selectedId);
 
@@ -156,29 +215,50 @@ function PolylineGroup({ routeKey, routeId: _routeId, groupAssets, selectedId, o
         eventHandlers={{ click: handleClick }}
       /> */}
 
-      {/* Visible polyline */}
-      <Polyline
-        positions={positions}
-        pathOptions={{
-          color: routeColor(routeKey, hasSelected),
-          weight: hasSelected ? 8 : 6,
-          opacity: hasSelected ? 1 : 0.8,
-
-          dashArray: undefined,
-          lineCap: "round",
-          lineJoin: "round",
-        }}
-        eventHandlers={{ click: handleClick }}
-      >
-        <Tooltip sticky direction="top" opacity={0.95}>
-          <div className="text-xs leading-tight">
-            <div className="font-semibold">Road Marking Line</div>
-            {/* <div className="text-[10px] text-muted-foreground">
-              {groupAssets.length} asset{groupAssets.length !== 1 ? "s" : ""}
-            </div> */}
-          </div>
-        </Tooltip>
-      </Polyline>
+      {/* One Polyline per contiguous segment; isolated points → CircleMarker */}
+      {segments.map((segPositions, idx) =>
+        segPositions.length === 1 ? (
+          // Single isolated detection: render as a small dot so it's visible
+          <CircleMarker
+            key={idx}
+            center={segPositions[0]}
+            radius={5}
+            pathOptions={{
+              color: routeColor(routeKey, hasSelected),
+              fillColor: routeColor(routeKey, hasSelected),
+              fillOpacity: 0.85,
+              weight: 1,
+            }}
+            eventHandlers={{ click: handleClick }}
+          >
+            <Tooltip sticky direction="top" opacity={0.95}>
+              <div className="text-xs leading-tight">
+                <div className="font-semibold">Road Marking Line</div>
+              </div>
+            </Tooltip>
+          </CircleMarker>
+        ) : (
+          <Polyline
+            key={idx}
+            positions={segPositions}
+            pathOptions={{
+              color: routeColor(routeKey, hasSelected),
+              weight: hasSelected ? 8 : 6,
+              opacity: hasSelected ? 1 : 0.8,
+              dashArray: undefined,
+              lineCap: "round",
+              lineJoin: "round",
+            }}
+            eventHandlers={{ click: handleClick }}
+          >
+            <Tooltip sticky direction="top" opacity={0.95}>
+              <div className="text-xs leading-tight">
+                <div className="font-semibold">Road Marking Line</div>
+              </div>
+            </Tooltip>
+          </Polyline>
+        )
+      )}
 
       {/* Highlight the selected asset with a dot on the polyline */}
       {selectedAsset && (
