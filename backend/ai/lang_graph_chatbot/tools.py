@@ -110,6 +110,16 @@ def _classify_condition(condition: str) -> str:
     return "good"
 
 
+def _get_latest_survey_ids() -> list:
+    """
+    Return the MongoDB _id list of all surveys where is_latest=True.
+    Used to scope detected-asset queries to the most recent survey per route.
+    """
+    db = get_db()
+    docs = db.surveys.find({"is_latest": True}, {"_id": 1})
+    return [d["_id"] for d in docs]
+
+
 # ---------- time helpers ----------
 
 def _get_date_range(period: str) -> tuple[str, str]:
@@ -1123,9 +1133,197 @@ def get_survey_findings(route_id: Optional[int] = None, period: str = "all") -> 
     })
 
 
+
+# =============================================================================
+# CATALOG / INVENTORY TOOLS
+# (query system_asset_categories + system_asset_labels, NOT detected assets)
+# =============================================================================
+
+
+@tool
+def get_catalog_category_info(category_name: str) -> str:
+    """
+    Get the master catalog info for a category: how many asset label types exist
+    and the full list of label display names. Queries system_asset_labels — this
+    is NOT about detected assets, it is the full inventory catalog.
+
+    Use for:
+    - "How many asset labels exist under Signage?"
+    - "List all labels under Roadway Lighting"
+    - "List all ITS asset types"
+    - "Name three asset types under Pavement"
+    - "Which assets are in category X?"
+    - Semantic questions like "Identify assets installed at regular intervals",
+      "Identify assets related to pedestrian movement", or
+      "Identify assets supporting traffic flow" — call this tool for EACH
+      relevant category and pick matching labels from the results.
+
+    Args:
+        category_name: Category display name, e.g. "Directional Signage",
+                       "Roadway Lighting", "ITS", "Pavement",
+                       "Other Infrastructure Assets", "Structures", "Beautification"
+
+    Returns:
+        JSON with label_count and full labels list from the master catalog
+    """
+    cid = _resolve_category_id(category_name)
+    if not cid:
+        return json.dumps({"error": f"Category '{category_name}' not found in catalog"})
+
+    rm = get_resolved_map()
+    labels = [
+        info["display_name"]
+        for aid, info in rm["labels"].items()
+        if info.get("category_id") == cid
+    ]
+    labels_sorted = sorted(labels)
+
+    return json.dumps({
+        "category": _cat_name(cid),
+        "label_count": len(labels_sorted),
+        "labels": labels_sorted,
+    })
+
+
+@tool
+def find_asset_category(asset_name: str) -> str:
+    """
+    Identify which asset category a given asset type belongs to.
+    Looks up the master catalog (system_asset_labels).
+
+    Use for:
+    - "What category is CCTV?"
+    - "Identify asset category for Guardrail"
+    - "Which category does Kerb belong to?"
+    - "What category is Tunnel in?"
+
+    Args:
+        asset_name: Asset display name to look up, e.g. "CCTV", "Guardrail", "Kerb", "Tunnel"
+
+    Returns:
+        JSON with the asset name and its category
+    """
+    rm = get_resolved_map()
+    name_lower = asset_name.strip().lower()
+
+    matches = []
+    for aid, info in rm["labels"].items():
+        dn = info["display_name"].lower()
+        defn = info["default_name"].lower()
+        if name_lower in dn or name_lower in defn or dn.startswith(name_lower):
+            cid = info.get("category_id", "")
+            matches.append({
+                "asset": info["display_name"],
+                "category": _cat_name(cid),
+                "category_id": cid,
+            })
+
+    if not matches:
+        return json.dumps({"error": f"Asset '{asset_name}' not found in catalog"})
+
+    # Deduplicate by category for a clean summary
+    seen_cats = {}
+    for m in matches:
+        seen_cats.setdefault(m["category"], []).append(m["asset"])
+
+    return json.dumps({
+        "query": asset_name,
+        "results": [
+            {"category": cat, "matching_assets": assets}
+            for cat, assets in seen_cats.items()
+        ],
+    })
+
+
+@tool
+def get_inventory_counts_by_category(category_name: str, route_id: Optional[int] = None) -> str:
+    """
+    Count detected assets by label and condition for a category,
+    using only the latest survey per route (is_latest=True).
+
+    Use for:
+    - "Count Signage assets by label and condition"
+    - "Count Roadway Lighting assets by label and condition"
+    - "Count ITS assets by label and condition"
+    - "Count Pavement assets by label and condition"
+    - Any per-category breakdown of detected counts from current surveys
+
+    Args:
+        category_name: Category display name (e.g. "Directional Signage", "ITS")
+        route_id: Optional route ID to restrict to a single route
+
+    Returns:
+        JSON with per-label good/damaged counts, latest surveys only
+    """
+    cid = _resolve_category_id(category_name)
+    if not cid:
+        return json.dumps({"error": f"Category '{category_name}' not found"})
+
+    latest_ids = _get_latest_survey_ids()
+
+    db = get_db()
+    query: dict = {
+        "category_id": cid,
+        "survey_id": {"$in": latest_ids},
+    }
+    if route_id is not None:
+        query["route_id"] = route_id
+
+    pipeline = [
+        {"$match": query},
+        {"$group": {
+            "_id": {"asset_id": "$asset_id", "condition": "$condition"},
+            "count": {"$sum": 1}
+        }},
+    ]
+    results = list(db.assets.aggregate(pipeline))
+
+    if not results:
+        return json.dumps({
+            "category": _cat_name(cid),
+            "route_id": route_id,
+            "note": "No detected assets found in latest surveys for this category",
+            "assets": [],
+            "total": 0,
+        })
+
+    asset_data: dict[str, dict] = {}
+    for r in results:
+        aid = r["_id"]["asset_id"]
+        entry = asset_data.setdefault(aid, {"good": 0, "damaged": 0, "total": 0})
+        if _classify_condition(r["_id"]["condition"]) == "damaged":
+            entry["damaged"] += r["count"]
+        else:
+            entry["good"] += r["count"]
+        entry["total"] += r["count"]
+
+    assets = sorted(
+        [
+            {
+                "label": _label_name(aid),
+                "good": d["good"],
+                "damaged": d["damaged"],
+                "total": d["total"],
+            }
+            for aid, d in asset_data.items()
+        ],
+        key=lambda x: x["total"],
+        reverse=True,
+    )
+
+    return json.dumps({
+        "category": _cat_name(cid),
+        "route_id": route_id,
+        "source": "latest_surveys_only",
+        "assets": assets,
+        "total": sum(d["total"] for d in asset_data.values()),
+    })
+
+
 # =============================================================================
 # TOOL REGISTRY
 # =============================================================================
+
 
 ALL_TOOLS = [
     list_videos,
@@ -1146,4 +1344,8 @@ ALL_TOOLS = [
     get_surveys_in_time_range,
     get_route_condition_report,
     get_survey_findings,
+    # Catalog / Inventory tools
+    get_catalog_category_info,
+    find_asset_category,
+    get_inventory_counts_by_category,
 ]

@@ -1,0 +1,564 @@
+[
+    {
+        "collection": "assets",
+        "schema": {
+            "_id": [
+                "ObjectId"
+            ],
+            "asset_id": [
+                "str"
+            ],
+            "category_id": [
+                "str"
+            ],
+            "asset_type": [
+                "str"
+            ],
+            "type": [
+                "str"
+            ],
+            "video_key": [
+                "str"
+            ],
+            "frame_number": [
+                "int"
+            ],
+            "route_id": [
+                "int"
+            ],
+            "time": [
+                "int",
+                "float"
+            ],
+            "confidence": [
+                "float"
+            ],
+            "condition": [
+                "str"
+            ],
+            "box": [
+                "dict"
+            ],
+            "location": [
+                "dict"
+            ],
+            "created_at": [
+                "str"
+            ],
+            "side": [
+                "str"
+            ],
+            "zone": [
+                "str"
+            ],
+            "survey_id": [
+                "ObjectId"
+            ],
+            "issue": [
+                "str",
+                "NoneType"
+            ],
+            "group_id": [
+                "str"
+            ],
+            "asset_display_id": [
+                "str"
+            ],
+            "defect_id": [
+                "str",
+                "NoneType"
+            ],
+            "survey_display_id": [
+                "str"
+            ],
+            "track_id": [
+                "str"
+            ],
+            "timestamp": [
+                "float"
+            ],
+            "video_id": [
+                "str"
+            ]
+        }
+    },
+    {
+        "collection": "asset_master",
+        "schema": {}
+    },
+    {
+        "collection": "test_videos",
+        "schema": {
+            "_id": [
+                "ObjectId"
+            ],
+            "status": [
+                "str"
+            ],
+            "progress": [
+                "int"
+            ],
+            "message": [
+                "str"
+            ],
+            "original_filename": [
+                "str"
+            ],
+            "created_at": [
+                "datetime"
+            ],
+            "updated_at": [
+                "datetime"
+            ],
+            "file_size": [
+                "int"
+            ],
+            "input_path": [
+                "str"
+            ],
+            "output_path": [
+                "str"
+            ],
+            "summary": [
+                "dict"
+            ]
+        }
+    },
+    {
+        "collection": "system_asset_labels",
+        "schema": {
+            "_id": [
+                "ObjectId"
+            ],
+            "asset_id": [
+                "str"
+            ],
+            "category_id": [
+                "str"
+            ],
+            "default_name": [
+                "str"
+            ],
+            "display_name": [
+                "str"
+            ],
+            "group_id": [
+                "str"
+            ]
+        }
+    },
+    {
+        "collection": "ai_messages",
+        "schema": {
+            "_id": [
+                "ObjectId"
+            ],
+            "chat_id": [
+                "ObjectId"
+            ],
+            "user_id": [
+                "ObjectId"
+            ],
+            "role": [
+                "str"
+            ],
+            "content": [
+                "str"
+            ],
+            "created_at": [
+                "str"
+            ]
+        }
+    },
+    {
+        "collection": "videos",
+        "schema": {
+            "_id": [
+                "ObjectId"
+            ],
+            "survey_id": [
+                "ObjectId"
+            ],
+            "survey_display_id": [
+                "str"
+            ],
+            "route_id": [
+                "int"
+            ],
+            "title": [
+                "str"
+            ],
+            "storage_url": [
+                "str"
+            ],
+            "thumbnail_url": [
+                "str"
+            ],
+            "gpx_file_url": [
+                "str"
+            ],
+            "size_bytes": [
+                "int"
+            ],
+            "duration_seconds": [
+                "int"
+            ],
+            "status": [
+                "str"
+            ],
+            "progress": [
+                "int"
+            ],
+            "eta": [
+                "NoneType"
+            ],
+            "created_at": [
+                "str"
+            ],
+            "updated_at": [
+                "str"
+            ],
+            "annotated_video_url": [
+                "str"
+            ],
+            "category_videos": [
+                "dict"
+            ]
+        }
+    },
+    {
+        "collection": "frames_cpy",
+        "schema": {
+            "_id": [
+                "ObjectId"
+            ],
+            "video_id": [
+                "str"
+            ],
+            "survey_id": [
+                "ObjectId"
+            ],
+            "route_id": [
+                "int"
+            ],
+            "frame_number": [
+                "int"
+            ],
+            "timestamp": [
+                "float"
+            ],
+            "frame_path": [
+                "str"
+            ],
+            "detections": [
+                "list"
+            ],
+            "detections_count": [
+                "int"
+            ],
+            "created_at": [
+                "str"
+            ],
+            "altitude": [
+                "NoneType"
+            ],
+            "gpx_timestamp": [
+                "float"
+            ],
+            "location": [
+                "dict"
+            ],
+            "updated_at": [
+                "str"
+            ]
+        }
+    },
+    {
+        "collection": "ai_chats",
+        "schema": {
+            "_id": [
+                "ObjectId"
+            ],
+            "user_id": [
+                "ObjectId"
+            ],
+            "title": [
+                "str"
+            ],
+            "created_at": [
+                "str"
+            ],
+            "updated_at": [
+                "str"
+            ],
+            "last_message_preview": [
+                "str"
+            ]
+        }
+    },
+    {
+        "collection": "surveys",
+        "schema": {
+            "_id": [
+                "ObjectId"
+            ],
+            "route_id": [
+                "int"
+            ],
+            "road_id": [
+                "str"
+            ],
+            "survey_date": [
+                "str"
+            ],
+            "surveyor_name": [
+                "str"
+            ],
+            "survey_display_id": [
+                "str"
+            ],
+            "survey_version": [
+                "int"
+            ],
+            "is_latest": [
+                "bool"
+            ],
+            "status": [
+                "str"
+            ],
+            "totals": [
+                "dict"
+            ],
+            "gpx_file_url": [
+                "NoneType"
+            ],
+            "created_at": [
+                "str"
+            ],
+            "updated_at": [
+                "str"
+            ]
+        }
+    },
+    {
+        "collection": "frames",
+        "schema": {
+            "_id": [
+                "ObjectId"
+            ],
+            "video_id": [
+                "str"
+            ],
+            "survey_id": [
+                "ObjectId"
+            ],
+            "route_id": [
+                "int"
+            ],
+            "frame_number": [
+                "int"
+            ],
+            "timestamp": [
+                "float"
+            ],
+            "frame_path": [
+                "str"
+            ],
+            "detections": [
+                "list"
+            ],
+            "detections_count": [
+                "int"
+            ],
+            "created_at": [
+                "str"
+            ],
+            "altitude": [
+                "NoneType"
+            ],
+            "gpx_timestamp": [
+                "float"
+            ],
+            "location": [
+                "dict"
+            ],
+            "updated_at": [
+                "str"
+            ],
+            "video_path": [
+                "str"
+            ],
+            "key": [
+                "str"
+            ]
+        }
+    },
+    {
+        "collection": "users",
+        "schema": {
+            "_id": [
+                "ObjectId"
+            ],
+            "name": [
+                "str"
+            ],
+            "first_name": [
+                "str"
+            ],
+            "last_name": [
+                "str"
+            ],
+            "organisation": [
+                "str"
+            ],
+            "email": [
+                "str"
+            ],
+            "email_lower": [
+                "str"
+            ],
+            "password_hash": [
+                "str"
+            ],
+            "role": [
+                "str"
+            ],
+            "is_verified": [
+                "bool"
+            ]
+        }
+    },
+    {
+        "collection": "roads",
+        "schema": {
+            "_id": [
+                "ObjectId"
+            ],
+            "route_id": [
+                "int"
+            ],
+            "road_name": [
+                "str"
+            ],
+            "start_point_name": [
+                "str"
+            ],
+            "start_lat": [
+                "float"
+            ],
+            "start_lng": [
+                "float"
+            ],
+            "end_point_name": [
+                "str"
+            ],
+            "end_lat": [
+                "float"
+            ],
+            "end_lng": [
+                "float"
+            ],
+            "estimated_distance_km": [
+                "int",
+                "float"
+            ],
+            "road_type": [
+                "str"
+            ],
+            "road_side": [
+                "str"
+            ],
+            "created_at": [
+                "str"
+            ],
+            "updated_at": [
+                "str"
+            ],
+            "gpx_file_url": [
+                "str"
+            ]
+        }
+    },
+    {
+        "collection": "geocoding_cache",
+        "schema": {}
+    },
+    {
+        "collection": "user_preferences",
+        "schema": {
+            "_id": [
+                "ObjectId"
+            ],
+            "user_id": [
+                "ObjectId"
+            ],
+            "label_overrides": [
+                "dict"
+            ]
+        }
+    },
+    {
+        "collection": "frames_backup",
+        "schema": {
+            "_id": [
+                "ObjectId"
+            ],
+            "video_id": [
+                "str"
+            ],
+            "survey_id": [
+                "ObjectId"
+            ],
+            "route_id": [
+                "int"
+            ],
+            "frame_number": [
+                "int"
+            ],
+            "timestamp": [
+                "float"
+            ],
+            "frame_path": [
+                "str"
+            ],
+            "detections": [
+                "list"
+            ],
+            "detections_count": [
+                "int"
+            ],
+            "created_at": [
+                "str"
+            ],
+            "altitude": [
+                "NoneType"
+            ],
+            "gpx_timestamp": [
+                "float"
+            ],
+            "location": [
+                "dict"
+            ],
+            "updated_at": [
+                "str"
+            ]
+        }
+    },
+    {
+        "collection": "system_asset_categories",
+        "schema": {
+            "_id": [
+                "ObjectId"
+            ],
+            "category_id": [
+                "str"
+            ],
+            "default_name": [
+                "str"
+            ],
+            "display_name": [
+                "str"
+            ]
+        }
+    }
+]

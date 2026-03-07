@@ -72,6 +72,72 @@ Intent: tool
 User: "What are the asset categories?"
 Intent: tool
 
+User: "How many asset labels exist under the Signage category?"
+Intent: tool
+
+User: "How many asset labels are included under Roadway Lighting?"
+Intent: tool
+
+User: "List all labels under Signage"
+Intent: tool
+
+User: "List all labels under Roadway Lighting"
+Intent: tool
+
+User: "List all ITS asset labels"
+Intent: tool
+
+User: "List all Pavement asset labels"
+Intent: tool
+
+User: "Count Signage assets by label and condition"
+Intent: tool
+
+User: "Count Roadway Lighting assets by label and condition"
+Intent: tool
+
+User: "Count ITS assets by label and condition"
+Intent: tool
+
+User: "How many asset categories are present in the inventory?"
+Intent: tool
+
+User: "Identify asset category for CCTV"
+Intent: tool
+
+User: "What category does Guardrail belong to?"
+Intent: tool
+
+User: "Identify asset category for Kerb"
+Intent: tool
+
+User: "Identify asset category for Tunnel"
+Intent: tool
+
+User: "Name three asset types under Pavement"
+Intent: tool
+
+User: "Name three asset types under ITS"
+Intent: tool
+
+User: "Identify assets installed at regular intervals along the road"
+Intent: tool
+
+User: "Identify assets related to pedestrian movement"
+Intent: tool
+
+User: "Identify assets supporting traffic flow and control"
+Intent: tool
+
+User: "List all asset types under Directional Signage"
+Intent: tool
+
+User: "List all asset types included in Other Infrastructure Assets"
+Intent: tool
+
+User: "Identify all asset types under ITS"
+Intent: tool
+
 User: "Show me a pie chart of asset conditions"
 Intent: visualization
 
