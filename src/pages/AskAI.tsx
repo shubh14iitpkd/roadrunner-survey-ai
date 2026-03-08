@@ -2,22 +2,81 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { MessageSquare, Send, Sparkles, MapPin, ChevronDown, Waypoints, Loader2, Image as ImageIcon, X } from "lucide-react";
+import { MessageSquare, Send, Sparkles, MapPin, Waypoints, Loader2, X, Database, Brain, BarChart2 } from "lucide-react";
 import { api } from "@/lib/api";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { VisualizationBlock } from "@/components/VisualizationBlock";
 import { MapBlock } from "@/components/MapBlock";
 import { ChatHistorySidebar, type ChatItem } from "@/components/ChatHistorySidebar";
+
+// ── Thinking indicator ────────────────────────────────────────────────────────
+
+const THINKING_STEPS = [
+  { icon: Brain,     label: "Understanding your question...",  duration: 1800 },
+  { icon: Database,  label: "Querying road network data...",    duration: 2500 },
+  { icon: BarChart2, label: "Analysing results...",             duration: 2000 },
+  { icon: Sparkles,  label: "Generating response...",           duration: Infinity },
+];
+
+function useThinkingStep(busy: boolean) {
+  const [stepIdx, setStepIdx] = useState(0);
+
+  useEffect(() => {
+    if (!busy) { setStepIdx(0); return; }
+    let current = 0;
+    function advance() {
+      const next = current + 1;
+      if (next >= THINKING_STEPS.length) return;
+      current = next;
+      setStepIdx(next);
+      if (THINKING_STEPS[next].duration !== Infinity) {
+        setTimeout(advance, THINKING_STEPS[next].duration);
+      }
+    }
+    const t = setTimeout(advance, THINKING_STEPS[0].duration);
+    return () => clearTimeout(t);
+  }, [busy]);
+
+  return THINKING_STEPS[stepIdx];
+}
+
+function ThinkingIndicator({ busy }: { busy: boolean }) {
+  const step = useThinkingStep(busy);
+  const Icon = step.icon;
+
+  return (
+    <div className="flex gap-3 justify-start">
+      <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
+        <MessageSquare className="h-4 w-4 text-foreground" />
+      </div>
+      <Card className="p-4 bg-card">
+        <div className="flex items-center gap-3">
+          <div className="relative">
+            <Icon className="h-4 w-4 text-primary dark:text-muted-secondary animate-pulse" />
+          </div>
+          <span className="text-sm text-muted-foreground transition-all duration-500">
+            {step.label}
+          </span>
+          <span className="flex gap-1 ml-1">
+            {[0,1,2].map(i => (
+              <span
+                key={i}
+                className="block w-1.5 h-1.5 rounded-full bg-primary/60"
+                style={{ animation: `pulse 1.2s ease-in-out ${i * 0.2}s infinite` }}
+              />
+            ))}
+          </span>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
 
 interface Message {
   role: "user" | "assistant";
@@ -405,6 +464,8 @@ export default function AskAI() {
                 )}
               </div>
             ))}
+            {/* Thinking indicator — shown while busy */}
+            {busy && <ThinkingIndicator busy={busy} />}
             <div ref={messagesEndRef} />
           </div>
         </ScrollArea>
