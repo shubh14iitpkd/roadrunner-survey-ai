@@ -1321,6 +1321,101 @@ def get_inventory_counts_by_category(category_name: str, route_id: Optional[int]
 
 
 # =============================================================================
+# ANALYTICS TOOLS
+# =============================================================================
+
+
+@tool
+def get_category_route_risk(category_name: str, top_n: int = 5) -> str:
+    """
+    Rank routes by damaged asset count within a specific category, using latest surveys only.
+    Use for risk corridor / risk location / risk zone questions per category.
+
+    Use for:
+    - "Identify top 3 risk corridors based on Signage condition"
+    - "Identify top risk locations due to poor lighting conditions"
+    - "Identify top 5 pavement risk zones"
+    - "Identify highest risk locations based on missing protective assets"
+    - "Identify top 5 safety risks in ITS network"
+    - "Identify highest risk structure type by route"
+    - "Identify top 5 locations with degraded beautification"
+    - Any question asking for worst routes/locations for a specific category
+
+    Args:
+        category_name: Category display name (e.g. "Directional Signage", "Roadway Lighting",
+                       "ITS", "Pavement", "Other Infrastructure Assets", "Structures", "Beautification")
+        top_n: Number of top risk routes to return (default 5)
+
+    Returns:
+        JSON with routes ranked by damaged count for the given category, latest surveys only.
+        Each entry includes damaged count, total count, damage rate %, and road name.
+    """
+    cid = _resolve_category_id(category_name)
+    if not cid:
+        return json.dumps({"error": f"Category '{category_name}' not found"})
+
+    latest_ids = _get_latest_survey_ids()
+
+    db = get_db()
+    pipeline = [
+        {"$match": {
+            "category_id": cid,
+            "survey_id": {"$in": latest_ids},
+        }},
+        {"$group": {
+            "_id": {"route_id": "$route_id", "condition": "$condition"},
+            "count": {"$sum": 1},
+        }},
+    ]
+    results = list(db.assets.aggregate(pipeline))
+
+    if not results:
+        return json.dumps({
+            "category": _cat_name(cid),
+            "note": "No detected assets found in latest surveys",
+            "routes": [],
+        })
+
+    # Pivot by route
+    route_data: dict = {}
+    for r in results:
+        rid = r["_id"]["route_id"]
+        if rid is None:
+            continue
+        entry = route_data.setdefault(rid, {"good": 0, "damaged": 0, "total": 0})
+        if _classify_condition(r["_id"]["condition"]) == "damaged":
+            entry["damaged"] += r["count"]
+        else:
+            entry["good"] += r["count"]
+        entry["total"] += r["count"]
+
+    # Enrich with road names
+    route_ids = list(route_data.keys())
+    roads = {r["route_id"]: r for r in db.roads.find({"route_id": {"$in": route_ids}})}
+
+    ranked = []
+    for rid, data in route_data.items():
+        road = roads.get(rid, {})
+        ranked.append({
+            "route_id": rid,
+            "road_name": road.get("road_name", f"Route {rid}"),
+            "damaged": data["damaged"],
+            "good": data["good"],
+            "total": data["total"],
+            "damage_rate_pct": round(data["damaged"] / data["total"] * 100, 1) if data["total"] else 0,
+        })
+
+    ranked.sort(key=lambda x: x["damaged"], reverse=True)
+
+    return json.dumps({
+        "category": _cat_name(cid),
+        "source": "latest_surveys_only",
+        "top_risk_routes": ranked[:top_n],
+        "total_routes_with_data": len(ranked),
+    })
+
+
+# =============================================================================
 # TOOL REGISTRY
 # =============================================================================
 
@@ -1348,4 +1443,6 @@ ALL_TOOLS = [
     get_catalog_category_info,
     find_asset_category,
     get_inventory_counts_by_category,
+    # Analytics tools
+    get_category_route_risk,
 ]

@@ -138,6 +138,93 @@ Intent: tool
 User: "Identify all asset types under ITS"
 Intent: tool
 
+User: "What percentage of Signage assets are Gantry Directional Signs?"
+Intent: tool
+
+User: "Which label dominates the Signage inventory?"
+Intent: tool
+
+User: "Which Directional Signage label is most prone to damage?"
+Intent: tool
+
+User: "What percentage of Signage assets require attention?"
+Intent: tool
+
+User: "Summarize the overall health of Signage across the network"
+Intent: tool
+
+User: "Identify top 3 risk corridors based on Signage condition"
+Intent: tool
+
+User: "What percentage of Roadway Lighting assets are Street Light Poles?"
+Intent: tool
+
+User: "Which lighting label shows the highest damage frequency?"
+Intent: tool
+
+User: "Summarize the overall health of Roadway Lighting across the network"
+Intent: tool
+
+User: "Identify top risk locations due to poor lighting conditions"
+Intent: tool
+
+User: "What percentage of ITS assets are CCTV?"
+Intent: tool
+
+User: "Which ITS label shows highest failure rate?"
+Intent: tool
+
+User: "Summarize overall ITS health"
+Intent: tool
+
+User: "Identify top 5 safety risks in ITS network"
+Intent: tool
+
+User: "What percentage of Pavement assets are Road Marking Lines?"
+Intent: tool
+
+User: "Which Pavement label has highest deterioration rate?"
+Intent: tool
+
+User: "Summarize Pavement health across network"
+Intent: tool
+
+User: "Identify top 5 pavement risk zones"
+Intent: tool
+
+User: "What percentage of Other Infrastructure Assets are Guardrails?"
+Intent: tool
+
+User: "Which safety asset has highest damage rate?"
+Intent: tool
+
+User: "Summarize overall health of roadside safety assets"
+Intent: tool
+
+User: "What percentage of Structure assets are Bridges?"
+Intent: tool
+
+User: "Which Structure type has highest damage ratio?"
+Intent: tool
+
+User: "Summarize overall structural health of network"
+Intent: tool
+
+User: "What percentage of Beautification assets are vegetation based?"
+Intent: tool
+
+User: "Which Beautification label dominates inventory?"
+Intent: tool
+
+User: "Identify top 5 locations with degraded beautification"
+Intent: tool
+
+User: "Which category has the highest number of damaged assets?"
+Intent: tool
+
+User: "Identify top 5 assets contributing to safety risk across the network"
+Intent: tool
+
 User: "Show me a pie chart of asset conditions"
 Intent: visualization
 

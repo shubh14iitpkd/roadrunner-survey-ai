@@ -35,25 +35,43 @@ You have these tools (they all return raw JSON — you interpret the data and re
 - **list_assets_in_category(category_name, route_id?)** — detected assets in a category
 - **list_detected_assets(route_id?)** — all detected assets grouped by category
 - **get_asset_condition_summary(video_id?, route_id?)** — overall good/damaged totals
-- **get_category_condition_breakdown(category_name, route_id?)** — good/damaged for a category
-- **get_asset_type_condition(asset_name, route_id?)** — condition of a specific asset TYPE (e.g. "Street Light Pole")
-- **get_most_damaged_types(route_id?, limit?)** — asset types ranked by damage count
+- **get_category_condition_breakdown(category_name, route_id?)** — good/damaged for a category. Use for "Summarize overall health of X across the network".
+- **get_asset_type_condition(asset_name, route_id?)** — condition of a specific asset TYPE
+- **get_most_damaged_types(route_id?, limit?)** — asset types ranked by damage count. Use for "top N assets contributing to safety risk" and "which X label has highest damage/failure rate" network-wide.
+- **get_survey_findings(route_id?, period?)** — asset totals by category with good/damaged. Use for cross-category questions: "which category has most damaged assets?"
 
-### Locations
+### Locations & Analytics
 - **get_asset_locations(asset_name?, category_name?, route_id?, limit?)** — lat/lng of detected assets
-- **get_damage_hotspots(route_id, top_n?)** — clusters where damage is concentrated
+- **get_damage_hotspots(route_id, top_n?)** — geo clusters where damage is concentrated
+- **get_category_route_risk(category_name, top_n?)** — routes ranked by damaged count for ONE category, latest surveys only. Use for:
+  - "Top N risk corridors/locations/zones for [category]"
+  - "Identify top risk routes due to poor [lighting/signage/pavement]"
+  - "Identify highest risk locations for [category]"
+
+## Analytics: Computing percentages and rankings from tool data
+When you call `get_inventory_counts_by_category(category_name)`, the result has an `assets` array and a `total`. Derive:
+- **"What % of X are Y?"** → (Y.total / total) * 100
+- **"Which label dominates?"** → asset with highest `total`
+- **"Which label most prone to damage / highest failure/deterioration rate?"** → highest `(damaged/total)` ratio
+- **"What % require attention/maintenance/immediate action?"** → (sum of all `damaged`) / total * 100
+- **"Summarize health"** → also call `get_category_condition_breakdown(category_name)` for clean network-wide good/damaged % summary
+
+For **cross-category analytics** ("which category has most damaged?") → call `get_survey_findings()`, sort categories by `damaged`.
+For **top N safety risks across the network** → call `get_most_damaged_types(limit=N)`.
+For **risk corridors/locations** → call `get_category_route_risk(category_name, top_n=N)`.
 
 ## Current Context
 {context}
 
 ## How to respond
 - **Be natural and conversational** — talk like a helpful colleague, not a report generator.
-- Keep answers concise but informative. Use tables only when the user asks for lists or when there are > 3 items.
+- Keep answers concise but informative. Use tables when there are > 3 items to compare.
 - Use the user's language style. Mirror their formality level.
 - When the user says "this route", use route_id={route_id}.
-- Map user words to category/asset names: "traffic signs" → "Directional Signage", "street lights" → "Roadway Lighting", "road surface/pavement" → "Pavement", "barriers/guardrails" → "Other Infrastructure Assets".
-- **Catalog vs detected**: For "how many types / list all labels" questions, use `get_catalog_category_info`. For "how many detected / count by condition" use `get_inventory_counts_by_category`.
+- Map user words to category/asset names: "traffic signs" → "Directional Signage", "street lights" → "Roadway Lighting", "road surface/pavement" → "Pavement", "barriers/guardrails/crash cushions" → "Other Infrastructure Assets", "safety assets" → "Other Infrastructure Assets".
+- **Catalog vs detected**: For "how many types / list all labels" questions, use `get_catalog_category_info`. For detected counts and conditions use `get_inventory_counts_by_category`.
 - **Semantic classification questions** (e.g. "assets installed at regular intervals", "assets for pedestrian movement", "assets supporting traffic flow"): call `get_catalog_category_info` for relevant categories, then pick and present the matching labels from the results — always ground your answer in what's actually in the catalog.
+- **Always compute percentages yourself** from the raw data returned — present them directly in your answer.
 - Include both counts and percentages when discussing conditions.
 - Never fabricate data — always call a tool first.
 
@@ -91,14 +109,18 @@ def _sanitize_messages_for_gemini(messages: list) -> list:
     """
     Sanitize message history to comply with Gemini's function calling constraints.
     Gemini requires:
-    - Function call (AIMessage with tool_calls) must follow a HumanMessage or ToolMessage
+    - The first message must be a HumanMessage
+    - Function call (AIMessage with tool_calls) must immediately follow a HumanMessage or ToolMessage
     - No consecutive AIMessages without a HumanMessage or ToolMessage in between
 
-    Strategy: find the last HumanMessage and only include messages from that point forward.
-    This keeps the current turn's tool-calling loop intact while dropping older turns
-    that may have broken ordering from other graph nodes (expert, validator, formatter).
+    Strategy: search the FULL message list for the last HumanMessage, then include all
+    messages from that point forward. This keeps the current turn's tool-calling loop
+    intact regardless of how many tool calls have been made in the current turn.
+
+    IMPORTANT: Always pass the full (or sufficiently large) message list here — do NOT
+    pre-slice before calling this function, or the HumanMessage anchor may be missed.
     """
-    # Find the index of the last HumanMessage
+    # Find the index of the last HumanMessage in the full list
     last_human_idx = -1
     for i in range(len(messages) - 1, -1, -1):
         if isinstance(messages[i], HumanMessage):
@@ -136,7 +158,10 @@ def agent_node(state: AgentState) -> dict:
     prompt = AGENT_PROMPT.format(context=context, route_id=route_id)
 
     system = SystemMessage(content=prompt)
-    history = _sanitize_messages_for_gemini(state["messages"][-4:])
+    # Pass the full message list so the sanitizer can always find the last HumanMessage.
+    # Pre-slicing here caused the bug: if the current turn involved many tool calls,
+    # the slice started mid-sequence (at an AIMessage), violating Gemini's ordering rules.
+    history = _sanitize_messages_for_gemini(state["messages"])
 
     response = llm_with_tools.invoke([system] + history)
 
