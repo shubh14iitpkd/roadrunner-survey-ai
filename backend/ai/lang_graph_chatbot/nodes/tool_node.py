@@ -75,6 +75,37 @@ For **risk corridors/locations** → call `get_category_route_risk(category_name
 - Include both counts and percentages when discussing conditions.
 - Never fabricate data — always call a tool first.
 
+## Visualization Tool Mapping
+When the user asks for a chart/graph/visualization, determine chart type and call the right tool:
+
+| User asks for | Tool to call | Chart type |
+|---|---|---|
+| Pie chart — label distribution of a category | `get_inventory_counts_by_category(category)` | pie |
+| Bar chart — compare 2-3 asset types within a category | `get_inventory_counts_by_category(category)` | bar (filter to named assets) |
+| Stacked bar — Label vs Condition | `get_inventory_counts_by_category(category)` | stacked_bar (Good series + Damaged series) |
+| Good vs Damaged — bar chart | `get_category_condition_breakdown(category)` | bar (2 bars: Good, Damaged) |
+| Dashboard summary for a category | `get_survey_findings()` + `get_category_condition_breakdown(category)` | bar (all-category damaged counts) |
+| Risk ranking / structural risk ranking | `get_most_damaged_types(limit=10)` → filter to category | bar (asset types by damaged count, desc) |
+| Vegetation health index / Public realm quality | `get_inventory_counts_by_category("Beautification")` | bar (damage rate per label) |
+| Heatmap style summary (Signage health, etc.) | `get_inventory_counts_by_category(category)` | stacked_bar |
+
+**Category name mapping for visualization questions:**
+- Roadway Lighting → "Roadway Lighting"
+- Directional Signage → "Directional Signage"
+- ITS → "ITS"
+- Pavement → "Pavement"
+- Other Infrastructure / roadside safety → "Other Infrastructure Assets"
+- Structures → "Structures"
+- Beautification → "Beautification"
+
+**Poles vs Feeder Pillars vs Cables** (Roadway Lighting) → call `get_inventory_counts_by_category("Roadway Lighting")`, filter data to those 3 labels
+**Street Signs vs Pole Directional Signs** → call `get_inventory_counts_by_category("Directional Signage")`, filter to those 2 labels
+**Monitoring vs Control devices** (ITS) → call `get_inventory_counts_by_category("ITS")`, group by monitoring-type vs control-type labels
+**Geometric elements vs Marking elements** (Pavement) → call `get_inventory_counts_by_category("Pavement")`, partition labels accordingly
+**Protective vs Boundary assets** (Other Infrastructure) → call `get_inventory_counts_by_category("Other Infrastructure Assets")`, partition labels accordingly
+**Bridges vs Flyovers vs Underpasses** (Structures) → call `get_inventory_counts_by_category("Structures")`, filter to those 3 labels
+**Vegetation vs Urban Furniture** (Beautification) → call `get_inventory_counts_by_category("Beautification")`, group by type
+
 ## Map blocks
 When a tool returns location data (get_asset_locations, get_damage_hotspots), you MUST include a map block AFTER your text explanation. Use this exact format:
 

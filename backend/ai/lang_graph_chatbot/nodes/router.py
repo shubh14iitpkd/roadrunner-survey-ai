@@ -231,6 +231,105 @@ Intent: visualization
 User: "Create a bar chart of damage types"
 Intent: visualization
 
+User: "Generate a pie chart showing label wise distribution of Roadway Lighting"
+Intent: visualization
+
+User: "Create a bar chart comparing Poles vs Feeder Pillars vs Cables"
+Intent: visualization
+
+User: "Generate a stacked bar chart of Lighting Label vs Condition"
+Intent: visualization
+
+User: "Show Good vs Damaged lighting assets using a bar chart"
+Intent: visualization
+
+User: "Generate a visual dashboard summary for lighting performance"
+Intent: visualization
+
+User: "Generate a pie chart showing label wise distribution of Directional Signage"
+Intent: visualization
+
+User: "Compare Street Signs vs Pole Directional Signs using a bar chart"
+Intent: visualization
+
+User: "Generate a stacked bar chart of Directional Signage Label vs Condition"
+Intent: visualization
+
+User: "Show Good vs Damaged Directional Signage using a bar chart"
+Intent: visualization
+
+User: "Create a heatmap style summary of Signage health"
+Intent: visualization
+
+User: "Generate a pie chart of ITS label distribution"
+Intent: visualization
+
+User: "Generate a bar chart comparing Monitoring vs Control devices"
+Intent: visualization
+
+User: "Generate stacked bar chart of ITS Label vs Condition"
+Intent: visualization
+
+User: "Show Good vs Damaged ITS assets using bar chart"
+Intent: visualization
+
+User: "Create a dashboard summary of ITS health"
+Intent: visualization
+
+User: "Generate a pie chart of Pavement label distribution"
+Intent: visualization
+
+User: "Compare geometric elements vs marking elements using bar chart"
+Intent: visualization
+
+User: "Generate stacked bar chart of Pavement Label vs Condition"
+Intent: visualization
+
+User: "Show Good vs Damaged Pavement assets"
+Intent: visualization
+
+User: "Generate a pie chart of Other Infrastructure label wise distribution"
+Intent: visualization
+
+User: "Generate a bar chart comparing protective vs boundary assets"
+Intent: visualization
+
+User: "Generate stacked bar chart of Other Infrastructure Label vs Condition"
+Intent: visualization
+
+User: "Create dashboard summary of roadside safety health"
+Intent: visualization
+
+User: "Generate pie chart of Structure label distribution"
+Intent: visualization
+
+User: "Compare Bridges vs Flyovers vs Underpasses using bar chart"
+Intent: visualization
+
+User: "Generate stacked bar chart of Structures Label vs Condition"
+Intent: visualization
+
+User: "Generate structural risk ranking graph"
+Intent: visualization
+
+User: "Generate pie chart of Beautification label distribution"
+Intent: visualization
+
+User: "Compare Vegetation vs Urban Furniture using bar chart"
+Intent: visualization
+
+User: "Generate stacked bar chart of Beautification Label vs Condition"
+Intent: visualization
+
+User: "Show Good vs Damaged Beautification assets using bar chart"
+Intent: visualization
+
+User: "Generate vegetation health index graph"
+Intent: visualization
+
+User: "Generate public realm quality dashboard summary"
+Intent: visualization
+
 Respond with ONLY the single word: expert, tool, or visualization. Nothing else."""
 
 
