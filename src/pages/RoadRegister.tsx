@@ -150,14 +150,25 @@ export default function RoadRegister() {
     const initializeAutocomplete = () => {
       console.log("Initializing autocomplete...");
 
+      const autoCompleteOptions = {
+        fields: ["formatted_address", "geometry", "name", "place_id", "address_components"],
+        types: ["geocode", "establishment"],
+        componentRestrictions: { country: "qa" }
+      }
+
+      // Helper to validate a selected place
+      const isAllowedRegion = (place: google.maps.places.PlaceResult): boolean => {
+        const components = place.address_components || [];
+        return components.some(
+          (c) => c.types.includes("country") && c.short_name === "QA"
+        );
+      };
+
       // Initialize start point autocomplete
       if (startInputRef.current && !startAutocompleteRef.current) {
         try {
           console.log("Creating start point autocomplete");
-          const autocomplete = new google.maps.places.Autocomplete(startInputRef.current, {
-            fields: ["formatted_address", "geometry", "name", "place_id"],
-            types: ["geocode", "establishment"]
-          });
+          const autocomplete = new google.maps.places.Autocomplete(startInputRef.current, autoCompleteOptions);
 
           startAutocompleteRef.current = autocomplete;
 
@@ -167,6 +178,16 @@ export default function RoadRegister() {
 
             if (!place || !place.geometry || !place.geometry.location) {
               console.log("No place details available for start point");
+              return;
+            }
+
+            // Reject places outside Qatar
+            if (!isAllowedRegion(place)) {
+              console.warn("Selected start place is outside Qatar, ignoring.");
+              toast.error("Please select a location within Qatar.");
+              if (startInputRef.current) startInputRef.current.value = "";
+              setStartLat("");
+              setStartLng("");
               return;
             }
 
@@ -200,10 +221,7 @@ export default function RoadRegister() {
       if (endInputRef.current && !endAutocompleteRef.current) {
         try {
           console.log("Creating end point autocomplete");
-          const autocomplete = new google.maps.places.Autocomplete(endInputRef.current, {
-            fields: ["formatted_address", "geometry", "name", "place_id"],
-            types: ["geocode", "establishment"]
-          });
+          const autocomplete = new google.maps.places.Autocomplete(endInputRef.current, autoCompleteOptions);
 
           endAutocompleteRef.current = autocomplete;
 
@@ -213,6 +231,16 @@ export default function RoadRegister() {
 
             if (!place || !place.geometry || !place.geometry.location) {
               console.log("No place details available for end point");
+              return;
+            }
+
+            // Reject places outside Qatar
+            if (!isAllowedRegion(place)) {
+              console.warn("Selected end place is outside Qatar, ignoring.");
+              toast.error("Please select a location within Qatar.");
+              if (endInputRef.current) endInputRef.current.value = "";
+              setEndLat("");
+              setEndLng("");
               return;
             }
 
@@ -284,8 +312,8 @@ export default function RoadRegister() {
       try {
         console.log('Initializing map...');
         const map = new google.maps.Map(mapRef.current, {
-          center: { lat: 25.2048, lng: 55.2708 }, // Dubai default
-          zoom: 12,
+          center: { lat: 25.3548, lng: 51.1839 }, // Qatar default
+          zoom: 9,
           mapTypeControl: true,
           streetViewControl: false,
           fullscreenControl: false,
@@ -431,8 +459,8 @@ export default function RoadRegister() {
       directionsRendererRef.current?.setDirections({ routes: [] } as any);
 
       // Reset to default view
-      mapInstanceRef.current.setCenter({ lat: 25.2048, lng: 55.2708 });
-      mapInstanceRef.current.setZoom(12);
+      mapInstanceRef.current.setCenter({ lat: 25.3548, lng: 51.1839 });
+      mapInstanceRef.current.setZoom(9);
     }
   }, [startLat, startLng, endLat, endLng]);
 
@@ -690,7 +718,7 @@ export default function RoadRegister() {
                           id="start_point_name"
                           name="start_point_name"
                           type="text"
-                          placeholder="e.g., IIT Delhi"
+                          placeholder="e.g., Sabai Beauty Salon - West Bay"
                           required
                           onChange={() => {
                             // Clear coordinates when user types manually
@@ -709,7 +737,7 @@ export default function RoadRegister() {
                           id="end_point_name"
                           name="end_point_name"
                           type="text"
-                          placeholder="e.g., India Gate"
+                          placeholder="e.g., Sabai Beauty Salon - Lusail"
                           required
                           onChange={() => {
                             // Clear coordinates when user types manually
