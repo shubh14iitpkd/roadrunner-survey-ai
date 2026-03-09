@@ -167,7 +167,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                 <TooltipTrigger asChild>
                   <div className="flex justify-center">
                     <div className="w-8 h-8 rounded-md bg-gradient-to-br from-sky-500/20 to-blue-600/20 flex items-center justify-center ring-1 ring-white/[0.08] cursor-default">
-                      <span className="text-white/75 font-semibold text-[10px]">
+                      <span className="text-white font-semibold text-[10px]">
                         {user?.first_name?.[0]}{user?.last_name?.[0]}
                       </span>
                     </div>
@@ -180,15 +180,15 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             ) : (
               <div className="flex items-center gap-2.5 px-2 py-1.5">
                 <div className="w-7 h-7 rounded-md bg-gradient-to-br from-sky-500/20 to-blue-600/20 flex items-center justify-center ring-1 ring-white/[0.08]">
-                  <span className="text-white/75 font-semibold text-[10px]">
+                  <span className="text-white font-semibold text-[10px]">
                     {user?.first_name?.[0]}{user?.last_name?.[0]}
                   </span>
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-[11px] font-medium text-white/70 truncate leading-tight">
+                  <p className="text-[11px] font-medium text-white truncate leading-tight">
                     {user?.first_name} {user?.last_name}
                   </p>
-                  <p className="text-[9px] text-white/30 truncate">{user?.role}</p>
+                  <p className="text-[9px] text-white truncate">{user?.role}</p>
                 </div>
                 <Button
                   variant="ghost"
@@ -197,7 +197,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                     logout();
                     navigate("/login");
                   }}
-                  className="h-6 w-6 text-white/25 hover:bg-white/[0.06] hover:text-white/60"
+                  className="h-6 w-6 text-white hover:bg-white/[0.06] hover:text-white"
                   title="Logout"
                 >
                   <LogOut className="h-3 w-3" />
