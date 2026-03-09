@@ -590,7 +590,7 @@ export default function RoadRegister() {
             </div>
           </div>
           <div className="flex gap-2">
-            <Dialog open={isImportDialogOpen} onOpenChange={setIsImportDialogOpen}>
+            {/* <Dialog open={isImportDialogOpen} onOpenChange={setIsImportDialogOpen}>
               <DialogTrigger asChild>
                 <Button variant="outline" size="sm" className="h-7 text-[11px] gap-1.5">
                   <Upload className="h-4 w-4" />
@@ -640,7 +640,7 @@ export default function RoadRegister() {
                   </Button>
                 </div>
               </DialogContent>
-            </Dialog>
+            </Dialog> */}
 
             <Dialog open={isAddDialogOpen} onOpenChange={(open) => {
               // Prevent closing when clicking on Google Places autocomplete
