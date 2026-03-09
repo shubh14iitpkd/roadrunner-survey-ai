@@ -106,13 +106,38 @@ def assets_by_category():
 	
 	agg = db.assets.aggregate([
 		{"$match": match_query},
-		{"$group": {"_id": "$category_id", "count": {"$sum": 1}}},
+		{"$group": {"_id": "$category_id", 
+			"count": {"$sum": 1},
+			"good_count": {
+				"$sum": {
+					"$cond": [
+						{"$eq": ["$condition", "good"]}, 
+						1, 
+						0
+					]
+				}
+			},
+			"damaged_count": {
+            "$sum": {
+				"$cond": [
+						{"$eq": ["$condition", "damaged"]}, 
+						1, 
+						0
+					]
+				}
+        	}
+		}},
 		{"$sort": {"count": -1}},
 		{"$limit": 10},
 	])
 	results = list(agg)
 	print("[DASHBOARD] results", results)
-	items = [{"category_id": d.get("_id") or "Unknown", "count": d.get("count", 0)} for d in results]
+	items = [{
+		"category_id": d.get("_id") or "Unknown", 
+		"count": d.get("count", 0), 
+		"damaged_count": d.get("damaged_count", 0), 
+		"good_count": d.get("good_count", 0)
+		} for d in results]
 	return jsonify({"items": items})
 
 

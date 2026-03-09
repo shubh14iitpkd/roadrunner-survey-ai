@@ -4,10 +4,17 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
   TrendingUp, AlertTriangle, Package, Calendar,
-  MapPin, Eye, ChevronLeft, ChevronRight, Map, ArrowUpRight, Activity, X, Download
+  MapPin, Eye, ChevronLeft, ChevronRight, Map, ArrowUpRight, Activity, X, Download,
+  BarChart
 } from "lucide-react";
 import {
   PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Sector,
+  Legend,
+  Bar,
+  XAxis,
+  YAxis,
+  BarChart as RechartsBarChart,
+  CartesianGrid,
 } from "recharts";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -20,6 +27,7 @@ import {
   exportDefectByRoadReport,
   exportRoadWiseAssetTypeReport,
 } from "@/lib/reportGenerator";
+import QatarRoutesMap from '@/components/QatarRoutesMap';
 
 const CATEGORY_COLORS = [
   "hsl(217, 91%, 60%)",   // DIRECTIONAL SIGNAGE - blue
@@ -255,7 +263,11 @@ export default function Dashboard() {
             lastSurvey="12 Feb 2025"
           />
         </div>
-
+        {/* <div className="overflow-hidden">
+          <QatarRoutesMap
+            height="600px"
+          />
+        </div> */}
         {/* Charts Row */}
         <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
           {/* Donut */}
@@ -433,6 +445,56 @@ export default function Dashboard() {
                   <ChevronRight className="h-3.5 w-3.5" />
                 </Button>
               </div>
+            </div>
+          </Card>
+        </div>
+
+        {/* <div className="grid grid-cols-1 lg:grid-cols-4 gap-4"> */}
+        <div className="gap-4">
+          {/* Grouped Bar Chart */}
+          <Card className="lg:col-span-3 p-0 border border-border bg-card overflow-hidden">
+            <div className="px-5 pt-5 pb-3 flex items-center gap-3">
+              <div className="p-2 rounded-lg bg-amber-500/10">
+                <Activity className="h-4 w-4 text-amber-500" />
+              </div>
+              <div>
+                <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-[0.15em]">Condition Breakdown</p>
+                <p className="text-sm font-semibold text-foreground mt-0.5">By Category</p>
+              </div>
+            </div>
+            <div className="gradient-table-line" />
+            <div className="px-3 pb-4 pt-4" style={{ height: 340 }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <RechartsBarChart data={categoryChartData} barGap={2} barCategoryGap="20%" margin={{ top: 10, bottom: 10 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
+                  <XAxis
+                    dataKey="category"
+                    tick={({ x, y, payload }: any) => {
+                      const words = (payload.value as string).split(' ');
+                      return (
+                        <text x={x} y={y} textAnchor="middle" fill="hsl(var(--foreground))" fontSize={9} fontWeight={500}>
+                          {words.map((word: string, i: number) => (
+                            <tspan key={i} x={x} dy={i === 0 ? 12 : 11}>{word}</tspan>
+                          ))}
+                        </text>
+                      );
+                    }}
+                    axisLine={false}
+                    tickLine={false}
+                    height={60}
+                    interval={0}
+                  />
+                  <YAxis tick={{ fontSize: 9, fill: 'hsl(var(--muted-foreground))' }} axisLine={false} tickLine={false} />
+                  <Tooltip
+                    contentStyle={{ background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: 8, fontSize: 11, color: 'hsl(var(--foreground))' }}
+                    labelStyle={{ color: 'hsl(var(--foreground))', fontWeight: 600 }}
+                    itemStyle={{ fontWeight: 500 }}
+                  />
+                  <Legend wrapperStyle={{ fontSize: 11 }} />
+                  <Bar dataKey="good_count" name="Good" fill="#16a34a" radius={[3, 3, 0, 0]} />
+                  <Bar dataKey="damaged_count" name="Damaged" fill="#ef4444" radius={[3, 3, 0, 0]} />
+                </RechartsBarChart>
+              </ResponsiveContainer>
             </div>
           </Card>
         </div>
