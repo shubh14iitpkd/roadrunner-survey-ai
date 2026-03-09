@@ -217,12 +217,20 @@ def agent_node(state: AgentState) -> dict:
     # the slice started mid-sequence (at an AIMessage), violating Gemini's ordering rules.
     history = _sanitize_messages_for_gemini(state["messages"])
 
-    response = llm_with_tools.invoke([system] + history)
+    MAX_RETRIES = 3
+    response = None
+    for attempt in range(1, MAX_RETRIES + 1):
+        response = llm_with_tools.invoke([system] + history)
+        has_tool_calls = bool(getattr(response, "tool_calls", None))
+        raw_content = response.content
+        content_empty = not raw_content if isinstance(raw_content, str) else not any(raw_content)
+        print(f"[Agent] attempt={attempt} | tool_calls={has_tool_calls} | content={str(raw_content)[:200]}")
+        if has_tool_calls or not content_empty:
+            break
+        if attempt < MAX_RETRIES:
+            print(f"[Agent] Empty response on attempt {attempt}, retrying...")
 
     has_tool_calls = bool(getattr(response, "tool_calls", None))
-    content_type = type(response.content).__name__
-    print(f"[Agent] tool_calls={has_tool_calls} | content_type={content_type} | content={str(response.content)[:200]}")
-
     result: dict = {"messages": [response]}
 
     # When agent produces a final text response (no tool calls), set final_response
