@@ -6,7 +6,7 @@ and the tool_node executes those tool calls.
 
 from langchain_core.messages import SystemMessage, AIMessage, HumanMessage, ToolMessage
 from langgraph.prebuilt import ToolNode
-from ai.lang_graph_chatbot.state import AgentState
+from ai.lang_graph_chatbot.state import AgentState, extract_text_content
 from ai.lang_graph_chatbot.tools import ALL_TOOLS
 from ai.lang_graph_chatbot.models import get_gemini_model
 
@@ -106,6 +106,29 @@ When the user asks for a chart/graph/visualization, determine chart type and cal
 **Bridges vs Flyovers vs Underpasses** (Structures) → call `get_inventory_counts_by_category("Structures")`, filter to those 3 labels
 **Vegetation vs Urban Furniture** (Beautification) → call `get_inventory_counts_by_category("Beautification")`, group by type
 
+## Geospatial Risk Questions
+When the user asks to "identify corridors / locations / junctions / risk zones" for a category or specific asset:
+
+| User question | Tool to call |
+|---|---|
+| Corridors with most damaged [category] assets | `get_category_route_risk(category_name=...)` |
+| Top [N] risk zones / locations for [category] | `get_category_route_risk(category_name=...)` |
+| Corridors with damaged [specific asset] (e.g. Guardrails, Road Marking Line) | `get_asset_type_route_risk(asset_name=...)` |
+| Locations / map of damaged [asset or category] | `get_asset_locations(category_name=..., condition="damaged")` |
+| Junctions / hotspots with damaged [category] | `get_category_route_risk(category_name=...)` (route-level, no junction data) |
+
+**Specific question mappings:**
+- "Identify locations with highest number of Damaged Signs" → `get_category_route_risk("Directional Signage")` then optionally `get_asset_locations(category_name="Directional Signage", condition="damaged")` for map
+- "Identify corridors with highest damaged lighting assets" → `get_category_route_risk("Roadway Lighting")`
+- "Identify junctions with maximum damaged ITS assets" → `get_category_route_risk("ITS")`
+- "Identify corridors with highest faded road markings" → `get_asset_type_route_risk("Road Marking Line")` or similar pavement label
+- "Identify top 5 corridors with damaged Guardrails" → `get_asset_type_route_risk("Guardrail")`
+- "Identify highest risk locations based on missing protective assets" → `get_category_route_risk("Other Infrastructure Assets")`
+- "Identify top risk structures by corridor" → `get_category_route_risk("Structures")`
+- "Identify top risk locations due to poor lighting" → `get_category_route_risk("Roadway Lighting")`
+- "Identify top 5 pavement risk zones" → `get_category_route_risk("Pavement")`
+- "Identify top 5 locations with degraded beautification" → `get_category_route_risk("Beautification")`
+
 ## Map blocks
 When a tool returns location data (get_asset_locations, get_damage_hotspots), you MUST include a map block AFTER your text explanation. Use this exact format:
 
@@ -196,7 +219,38 @@ def agent_node(state: AgentState) -> dict:
 
     response = llm_with_tools.invoke([system] + history)
 
-    return {"messages": [response]}
+    has_tool_calls = bool(getattr(response, "tool_calls", None))
+    content_type = type(response.content).__name__
+    print(f"[Agent] tool_calls={has_tool_calls} | content_type={content_type} | content={str(response.content)[:200]}")
+
+    result: dict = {"messages": [response]}
+
+    # When agent produces a final text response (no tool calls), set final_response
+    # directly here so the validator doesn't need to re-extract from messages.
+    # This avoids issues where extract_text_content returns empty for thinking-model
+    # content formats that aren't plain strings.
+    if not has_tool_calls:
+        text = extract_text_content(response.content)
+        if not text:
+            # Last-resort: stringify the raw content (handles unexpected formats)
+            raw = response.content
+            if isinstance(raw, list):
+                # Try to find any dict with a non-empty string value
+                for part in raw:
+                    if isinstance(part, dict):
+                        for val in part.values():
+                            if isinstance(val, str) and val.strip():
+                                text = val.strip()
+                                break
+                    if text:
+                        break
+            if not text and raw:
+                text = str(raw)
+        if text:
+            print(f"[Agent] Setting final_response: {text[:100]}")
+            result["final_response"] = text
+
+    return result
 
 
 # Pre-built ToolNode that executes tool calls

@@ -596,15 +596,18 @@ def list_detected_assets(route_id: Optional[int] = None) -> str:
 
 
 @tool
-def get_asset_locations(asset_name: str = "", category_name: str = "", route_id: Optional[int] = None, limit: int = 50) -> str:
+def get_asset_locations(asset_name: str = "", category_name: str = "", route_id: Optional[int] = None, condition: str = "", limit: int = 50) -> str:
     """
     Get locations (lat/lng) where assets were detected.
-    Use for "Where were traffic signs detected?", "Show locations of guardrails".
+    Use for "Where were traffic signs detected?", "Show locations of guardrails",
+    "Show damaged sign locations", "Map all damaged ITS assets".
 
     Args:
         asset_name: Optional specific asset type name (e.g. "Guardrail")
         category_name: Optional category name (e.g. "Roadway Lighting")
         route_id: Optional route ID
+        condition: Optional condition filter — pass "damaged" to return only damaged assets,
+                   or "good" for good assets. Leave empty for all.
         limit: Max results (default 50)
 
     Returns:
@@ -630,6 +633,17 @@ def get_asset_locations(asset_name: str = "", category_name: str = "", route_id:
     if route_id is not None:
         query["route_id"] = route_id
 
+    # Condition filter — match against the _classify_condition helper
+    if condition:
+        norm = condition.strip().lower()
+        if norm == "damaged":
+            query["condition"] = {"$in": ["damaged", "Damaged", "DAMAGED", "Faded", "faded",
+                                           "Poor", "poor", "Bad", "bad", "Broken", "broken",
+                                           "Missing", "missing"]}
+        elif norm == "good":
+            query["condition"] = {"$in": ["good", "Good", "GOOD", "Fair", "fair",
+                                           "Excellent", "excellent"]}
+
     assets = list(db.assets.find(query).limit(limit))
 
     locations = []
@@ -646,7 +660,8 @@ def get_asset_locations(asset_name: str = "", category_name: str = "", route_id:
             })
 
     return json.dumps({
-        "filter": {"asset_name": asset_name or None, "category_name": category_name or None, "route_id": route_id},
+        "filter": {"asset_name": asset_name or None, "category_name": category_name or None,
+                   "route_id": route_id, "condition": condition or None},
         "count": len(locations),
         "locations": locations,
     })
@@ -1376,6 +1391,94 @@ def get_category_route_risk(category_name: str, top_n: int = 5) -> str:
             "routes": [],
         })
 
+    route_data: dict = {}
+    for r in results:
+        rid = r["_id"]["route_id"]
+        if rid is None:
+            continue
+        entry = route_data.setdefault(rid, {"good": 0, "damaged": 0, "total": 0})
+        if _classify_condition(r["_id"]["condition"]) == "damaged":
+            entry["damaged"] += r["count"]
+        else:
+            entry["good"] += r["count"]
+        entry["total"] += r["count"]
+
+    route_ids = list(route_data.keys())
+    roads = {r["route_id"]: r for r in db.roads.find({"route_id": {"$in": route_ids}})}
+
+    ranked = []
+    for rid, data in route_data.items():
+        road = roads.get(rid, {})
+        ranked.append({
+            "route_id": rid,
+            "road_name": road.get("road_name", f"Route {rid}"),
+            "damaged": data["damaged"],
+            "good": data["good"],
+            "total": data["total"],
+            "damage_rate_pct": round(data["damaged"] / data["total"] * 100, 1) if data["total"] else 0,
+        })
+
+    ranked.sort(key=lambda x: x["damaged"], reverse=True)
+
+    return json.dumps({
+        "category": _cat_name(cid),
+        "source": "latest_surveys_only",
+        "top_risk_routes": ranked[:top_n],
+        "total_routes_with_data": len(ranked),
+    })
+
+
+@tool
+def get_asset_type_route_risk(asset_name: str, top_n: int = 5) -> str:
+    """
+    Rank corridors by damaged count for a SPECIFIC asset type (not just a category).
+    Use when the user asks about a specific asset label rather than an entire category.
+
+    Use for:
+    - "Identify top 5 corridors with damaged Guardrails"
+    - "Identify corridors with highest faded road markings"
+    - "Identify corridors with most damaged Street Light Poles"
+    - "Identify top risk corridors for Road Marking Line damage"
+    - Any corridor risk question mentioning a specific asset type by name
+
+    Prefer get_category_route_risk when the question mentions an entire category
+    (e.g. "Lighting", "Pavement", "ITS").
+
+    Args:
+        asset_name: Specific asset label (e.g. "Guardrail", "Road Marking Line",
+                    "Street Light Pole", "CCTV Camera")
+        top_n: Number of top risk corridors to return (default 5)
+
+    Returns:
+        JSON with corridors ranked by damaged count for the specific asset type.
+        Each entry includes road name, damaged count, total count, and damage rate %.
+    """
+    db = get_db()
+    aids = _resolve_asset_ids(asset_name)
+    if not aids:
+        return json.dumps({"error": f"Asset type '{asset_name}' not found in catalog"})
+
+    latest_ids = _get_latest_survey_ids()
+
+    pipeline = [
+        {"$match": {
+            "asset_id": {"$in": aids},
+            "survey_id": {"$in": latest_ids},
+        }},
+        {"$group": {
+            "_id": {"route_id": "$route_id", "condition": "$condition"},
+            "count": {"$sum": 1},
+        }},
+    ]
+    results = list(db.assets.aggregate(pipeline))
+
+    if not results:
+        return json.dumps({
+            "asset_type": asset_name,
+            "note": "No detected assets found in latest surveys",
+            "routes": [],
+        })
+
     # Pivot by route
     route_data: dict = {}
     for r in results:
@@ -1408,11 +1511,12 @@ def get_category_route_risk(category_name: str, top_n: int = 5) -> str:
     ranked.sort(key=lambda x: x["damaged"], reverse=True)
 
     return json.dumps({
-        "category": _cat_name(cid),
+        "asset_type": asset_name,
         "source": "latest_surveys_only",
-        "top_risk_routes": ranked[:top_n],
-        "total_routes_with_data": len(ranked),
+        "top_risk_corridors": ranked[:top_n],
+        "total_corridors_with_data": len(ranked),
     })
+
 
 
 # =============================================================================
@@ -1443,6 +1547,7 @@ ALL_TOOLS = [
     get_catalog_category_info,
     find_asset_category,
     get_inventory_counts_by_category,
-    # Analytics tools
+    # Analytics & risk tools
     get_category_route_risk,
+    get_asset_type_route_risk,
 ]

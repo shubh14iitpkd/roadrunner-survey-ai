@@ -330,6 +330,33 @@ Intent: visualization
 User: "Generate public realm quality dashboard summary"
 Intent: visualization
 
+User: "Identify locations with the highest number of Damaged Signs"
+Intent: tool
+
+User: "Identify corridors with the highest number of damaged lighting assets"
+Intent: tool
+
+User: "Identify junctions with maximum damaged ITS assets"
+Intent: tool
+
+User: "Identify corridors with highest faded road markings"
+Intent: tool
+
+User: "Identify top 5 corridors with damaged Guardrails"
+Intent: tool
+
+User: "Identify highest risk locations based on missing protective assets"
+Intent: tool
+
+User: "Identify top risk structures by corridor"
+Intent: tool
+
+User: "Identify top 5 pavement risk zones"
+Intent: tool
+
+User: "Identify top 5 locations with degraded beautification"
+Intent: tool
+
 Respond with ONLY the single word: expert, tool, or visualization. Nothing else."""
 
 
