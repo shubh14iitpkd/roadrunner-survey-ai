@@ -23,10 +23,10 @@ import { useAuth } from "@/contexts/AuthContext";
 import logo from "@/assets/roadsight-logo.jpg";
 
 const navigation = [
-  { name: "Dashboard", href: "/", icon: LayoutDashboard },
-  { name: "Defect Library", href: "/defect-library", icon: AlertTriangle },
-  { name: "Asset Library", href: "/asset-library", icon: Database },
-  { name: "Ask AI", href: "/ask-ai", icon: MessageSquare },
+  { name: "Dashboard", href: "/", icon: LayoutDashboard, adminOnly: true },
+  { name: "Defect Library", href: "/defect-library", icon: AlertTriangle, adminOnly: true },
+  { name: "Asset Library", href: "/asset-library", icon: Database, adminOnly: true },
+  { name: "Ask AI", href: "/ask-ai", icon: MessageSquare, adminOnly: true },
   { name: "Project Management", href: null, icon: null, isHeading: true },
   { name: "Road Register", href: "/roads", icon: Map },
   { name: "Survey Upload", href: "/upload", icon: Upload },
@@ -40,6 +40,9 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const location = useLocation();
   const navigate = useNavigate();
   const { user, logout } = useAuth();
+
+  const isAdmin = user?.role === "Admin";
+  const visibleNavigation = navigation.filter((item) => !item.adminOnly || isAdmin);
 
   return (
     <TooltipProvider delayDuration={0}>
@@ -91,7 +94,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
           {/* Navigation */}
           <nav className={cn("flex-1 py-3 space-y-0.5 overflow-y-auto", collapsed ? "px-1" : "px-2.5")}>
-            {navigation.map((item) => {
+            {visibleNavigation.map((item) => {
               if (item.isHeading) {
                 if (collapsed) return <div key={item.name} className="my-2 mx-2 border-t border-white/[0.08]" />;
                 return (

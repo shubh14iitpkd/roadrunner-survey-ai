@@ -11,6 +11,7 @@ import { UploadProvider } from "./contexts/UploadContext";
 import { LabelMapProvider } from "./contexts/LabelMapContext";
 import Layout from "./components/Layout";
 import ProtectedRoute from "./components/ProtectedRoute";
+import AdminRoute from "./components/AdminRoute";
 
 // Lazy load pages for better performance
 const Dashboard = lazy(() => import("./pages/Dashboard"));
@@ -58,14 +59,14 @@ const App = () => (
                       <UploadProvider>
                         <Layout>
                           <Routes>
-                            <Route path="/" element={<Dashboard />} />
+                            <Route path="/" element={<AdminRoute><Dashboard /></AdminRoute>} />
                             <Route path="/roads" element={<RoadRegister />} />
                             <Route path="/upload" element={<SurveyUpload />} />
                             <Route path="/videos" element={<VideoLibrary />} />
                             <Route path="/assets" element={<AssetRegister />} />
-                            <Route path="/defect-library" element={<AnomalyLibrary />} />
-                            <Route path="/asset-library" element={<AssetLibrary />} />
-                            <Route path="/ask-ai" element={<AskAI />} />
+                            <Route path="/defect-library" element={<AdminRoute><AnomalyLibrary /></AdminRoute>} />
+                            <Route path="/asset-library" element={<AdminRoute><AssetLibrary /></AdminRoute>} />
+                            <Route path="/ask-ai" element={<AdminRoute><AskAI /></AdminRoute>} />
                             <Route path="/settings" element={<Settings />} />
                             <Route path="*" element={<NotFound />} />
                           </Routes>

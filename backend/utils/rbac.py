@@ -12,7 +12,7 @@ def role_required(allowed_roles: Iterable[str]) -> Callable:
 
 	def decorator(fn: Callable) -> Callable:
 		@wraps(fn)
-		def wrapper(*args, **kwargs):  # type: ignore[no-redef]
+		def wrapper(*args, **kwargs):
 			# Allow OPTIONS requests (CORS preflight) without authentication
 			if request.method == 'OPTIONS':
 				return ('', 204)
