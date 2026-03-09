@@ -1,9 +1,8 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useEffect, useRef } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { MessageSquare, Send, Sparkles, MapPin, Waypoints, Loader2, X, Database, Brain, BarChart2 } from "lucide-react";
-import { api } from "@/lib/api";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -12,7 +11,9 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { VisualizationBlock } from "@/components/VisualizationBlock";
 import { MapBlock } from "@/components/MapBlock";
-import { ChatHistorySidebar, type ChatItem } from "@/components/ChatHistorySidebar";
+import { ChatHistorySidebar } from "@/components/ChatHistorySidebar";
+import { useChatContext } from "@/contexts/ChatContext";
+import { useState } from "react";
 
 // ── Thinking indicator ────────────────────────────────────────────────────────
 
@@ -77,52 +78,7 @@ function ThinkingIndicator({ busy }: { busy: boolean }) {
   );
 }
 
-
-interface Message {
-  role: "user" | "assistant";
-  content: string;
-  frames?: FrameData[];
-  timestamp?: string;
-}
-
-interface FrameData {
-  frame_id: string;
-  frame_number: number;
-  timestamp: number;
-  image_url?: string;
-  detections: Detection[];
-  location?: { lat: number; lon: number };
-}
-
-interface Detection {
-  class_name: string;
-  confidence: number;
-  bbox?: number[];
-}
-
-interface RouteInfo {
-  route_id: number;
-  road_name: string;
-  road_type: string;
-  estimated_distance_km?: number;
-}
-
-// Send message to backend API
-async function sendMessageToBackend(
-  chatId: string,
-  question: string,
-  routeId?: number
-): Promise<string> {
-  const response = await api.ai.sendMessage(chatId, "user", question, undefined, routeId);
-  // Backend returns { user_message: {...}, assistant_message: {...} }
-  console.log(response);
-  return response.assistant_message?.content || response.content || "(No response)";
-}
-
-const WELCOME_MESSAGE: Message = {
-  role: "assistant",
-  content: "Hello! I'm RoadSight AI Assistant. Select a route above to start analyzing. I can answer questions about survey history, asset totals, and conditions across the route.",
-};
+// ── Markdown components ───────────────────────────────────────────────────────
 
 const markdownComponents = {
   table({ children }: any) {
@@ -151,20 +107,11 @@ const markdownComponents = {
     const lang = match?.[1];
     const content = String(children).replace(/\n$/, "");
     if (lang === "visualization") {
-      return (
-        <VisualizationBlock
-          jsonString={content}
-        />
-      );
+      return <VisualizationBlock jsonString={content} />;
     }
     if (lang === "map") {
-      return (
-        <MapBlock
-          jsonString={content}
-        />
-      );
+      return <MapBlock jsonString={content} />;
     }
-    // Default code block rendering
     return (
       <code className={className} {...props}>
         {children}
@@ -173,192 +120,44 @@ const markdownComponents = {
   },
 };
 
-export default function AskAI() {
-  const [messages, setMessages] = useState<Message[]>([WELCOME_MESSAGE]);
-  const [input, setInput] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [chatId, setChatId] = useState<string | null>(null);
-  
-  // Route selection
-  const [routes, setRoutes] = useState<RouteInfo[]>([]);
-  const [selectedRouteId, setSelectedRouteId] = useState<string>(""); // Stored as string for Select component
-  const [selectedRoute, setSelectedRoute] = useState<RouteInfo | null>(null);
+// ── Page component ────────────────────────────────────────────────────────────
 
-  // Chat history sidebar
-  const [chats, setChats] = useState<ChatItem[]>([]);
-  const [chatsLoading, setChatsLoading] = useState(false);
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [isFirstMessage, setIsFirstMessage] = useState(true);
+export default function AskAI() {
+  const {
+    messages,
+    input,
+    setInput,
+    busy,
+    chatId,
+    routes,
+    selectedRouteId,
+    selectedRoute,
+    handleRouteSelect,
+    chats,
+    chatsLoading,
+    sidebarOpen,
+    setSidebarOpen,
+    handleSend,
+    handleSelectChat,
+    handleNewChat,
+    handleDeleteChat,
+  } = useChatContext();
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  const handleRouteSelect = (value: string) => {
-    console.log("Route selected:", value);
-    setSelectedRouteId(value);
-    const route = routes.find(r => r.route_id.toString() === value);
-    setSelectedRoute(route || null);
-  };
-  // Load roads
-  useEffect(() => {
-    (async () => {
-      try {
-        const resp = await api.roads.list();
-        if (resp?.items) {
-          const routeList = resp.items.map((r: any) => ({
-            route_id: r.route_id,
-            road_name: r.road_name,
-            road_type: r.road_type,
-            estimated_distance_km: r.estimated_distance_km,
-          }));
-          setRoutes(routeList);
-          console.log("Loaded routes:", routeList);
-        }
-      } catch (err) {
-        console.error("Failed to load routes:", err);
-      }
-    })();
-  }, []);
-
-  // Load chat history on mount
-  const loadChats = useCallback(async () => {
-    setChatsLoading(true);
-    try {
-      const resp = await api.ai.listChats();
-      setChats(resp?.items || []);
-    } catch (err) {
-      console.error("Failed to load chats:", err);
-    } finally {
-      setChatsLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    loadChats();
-  }, [loadChats]);
-
-  // Auto-scroll to bottom
+  // Auto-scroll to bottom when messages change
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  const ensureChat = async () => {
-    if (chatId) return chatId;
-    try {
-      const title = input.trim().slice(0, 60) || "Route Analysis Chat";
-      // Pass route_id if selected
-      const routeId = selectedRouteId ? parseInt(selectedRouteId) : undefined;
-      const resp = await api.ai.createChat(title, undefined, routeId);
-      const newChatId = resp.chat._id as string;
-      setChatId(newChatId);
-      setIsFirstMessage(true);
-      // Add to local chat list immediately
-      setChats(prev => [resp.chat, ...prev]);
-      return newChatId;
-    } catch {
-      return null;
-    }
-  };
-
-  const handleSend = async () => {
-    if (!input.trim() || busy) return;
-
-    const userMessage: Message = { role: "user", content: input };
-    const userInput = input;
-    setMessages(prev => [...prev, userMessage]);
-    setInput("");
-    setBusy(true);
-
-    const cid = await ensureChat();
-
-    try {
-      // Send message to backend
-      const routeId = selectedRouteId ? parseInt(selectedRouteId) : undefined;
-      const reply = await sendMessageToBackend(cid!, userInput, routeId);
-
-      const aiMessage: Message = {
-        role: "assistant",
-        content: reply,
-      };
-
-      setMessages(prev => [...prev, aiMessage]);
-
-      // Auto-rename chat to first user message
-      if (isFirstMessage && cid) {
-        const autoTitle = userInput.trim().slice(0, 60);
-        try {
-          await api.ai.renameChat(cid, autoTitle);
-          setChats(prev =>
-            prev.map(c => c._id === cid ? { ...c, title: autoTitle, last_message_preview: userInput.slice(0, 200) } : c)
-          );
-        } catch { /* ignore rename errors */ }
-        setIsFirstMessage(false);
-      } else if (cid) {
-        // Update last_message_preview in local state
-        setChats(prev =>
-          prev.map(c => c._id === cid ? { ...c, last_message_preview: userInput.slice(0, 200), updated_at: new Date().toISOString() } : c)
-        );
-      }
-    } catch (e: any) {
-      const aiMessage: Message = {
-        role: "assistant",
-        content: `Error: ${e?.message || e}`,
-      };
-      setMessages(prev => [...prev, aiMessage]);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  // Switch to an existing chat
-  const handleSelectChat = async (selectedChatId: string) => {
-    if (selectedChatId === chatId) return;
-    
-    setChatId(selectedChatId);
-    setIsFirstMessage(false);
-    setBusy(true);
-
-    try {
-      const resp = await api.ai.listMessages(selectedChatId);
-      const msgs: Message[] = (resp?.items || []).map((m: any) => ({
-        role: m.role as "user" | "assistant",
-        content: m.content,
-        timestamp: m.created_at,
-      }));
-      setMessages(msgs.length > 0 ? msgs : [WELCOME_MESSAGE]);
-    } catch (err) {
-      console.error("Failed to load messages:", err);
-      setMessages([WELCOME_MESSAGE]);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  // Start a new chat
-  const handleNewChat = () => {
-    setChatId(null);
-    setIsFirstMessage(true);
-    setMessages([WELCOME_MESSAGE]);
-  };
-
-  // Remove deleted chat from local list
-  const handleDeleteChat = (deletedChatId: string) => {
-    setChats(prev => prev.filter(c => c._id !== deletedChatId));
-    // If we deleted the active chat, reset to new chat
-    if (deletedChatId === chatId) {
-      handleNewChat();
-    }
-  };
-
-  console.log(selectedRouteId);
   const samplePrompts = selectedRouteId ? [
     "What is the condition of assets on this route?",
     "How many surveys have been done?",
-    "List all videos for this route",
     "Show me a summary of road damage",
     "How many traffic signs are there?"
   ] : [
     "How many routes do we have?",
-    "List all videos wth status completed",
+    "What's the condition of street lights?",
     "Which route has the most damage?",
   ];
 
@@ -409,7 +208,6 @@ export default function AskAI() {
                 )}
               </SelectContent>
             </Select>
-
           </div>
 
           {/* Route Info Badge */}

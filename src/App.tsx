@@ -12,6 +12,7 @@ import { LabelMapProvider } from "./contexts/LabelMapContext";
 import Layout from "./components/Layout";
 import ProtectedRoute from "./components/ProtectedRoute";
 import AdminRoute from "./components/AdminRoute";
+import { ChatProvider } from "./contexts/ChatContext";
 
 // Lazy load pages for better performance
 const Dashboard = lazy(() => import("./pages/Dashboard"));
@@ -57,6 +58,7 @@ const App = () => (
                   element={
                     <ProtectedRoute>
                       <UploadProvider>
+                        <ChatProvider>
                         <Layout>
                           <Routes>
                             <Route path="/" element={<AdminRoute><Dashboard /></AdminRoute>} />
@@ -71,6 +73,7 @@ const App = () => (
                             <Route path="*" element={<NotFound />} />
                           </Routes>
                         </Layout>
+                        </ChatProvider>
                       </UploadProvider>
                     </ProtectedRoute>
                   }
