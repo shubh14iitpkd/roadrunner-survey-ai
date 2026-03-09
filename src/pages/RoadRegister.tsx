@@ -24,6 +24,8 @@ import { toast } from "sonner";
 import { PieChart, Pie, Cell, ResponsiveContainer, Legend, Tooltip } from "recharts";
 import { Badge } from "@/components/ui/badge";
 import { api } from "@/lib/api";
+import { useAuth } from "@/contexts/AuthContext";
+import { useNavigate } from 'react-router-dom';
 
 const ROAD_TYPES = [
   "National/Expressway",
@@ -66,6 +68,9 @@ export default function RoadRegister() {
   const directionsRendererRef = useRef<google.maps.DirectionsRenderer | null>(null);
   const startMarkerRef = useRef<google.maps.Marker | null>(null);
   const endMarkerRef = useRef<google.maps.Marker | null>(null);
+
+  const { user } = useAuth();
+  const navigate = useNavigate();
 
   const loadRoads = async () => {
     try {
@@ -577,6 +582,13 @@ export default function RoadRegister() {
     setEditingRoadName("");
   };
 
+  const handleViewAssets = (route_id) => {
+    if (user?.role == "Admin") {
+      navigate(`/asset-library?route_id=${encodeURIComponent(route_id)}`);
+    } else {
+      toast.error("Only admins can view assets");
+    }
+  }
   return (
     <div className="space-y-6 p-5">
       {/* Compact Header */}
@@ -1103,12 +1115,10 @@ export default function RoadRegister() {
                       </Badge>
                     </td>
                     <td className="p-4">
-                      <Link to={`/asset-library?route_id=${encodeURIComponent(road.route_id)}`}>
-                        <Button variant="default" size="sm" className="gap-2">
+                        <Button variant="default" size="sm" className="gap-2" onClick={()=> handleViewAssets(road.route_id)}>
                           <Database className="h-4 w-4" />
                           View Assets
                         </Button>
-                      </Link>
                     </td>
                   </tr>
                 ))}

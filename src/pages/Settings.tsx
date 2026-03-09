@@ -287,7 +287,7 @@ export default function Settings() {
                     </div>
                     <Switch checked={darkMode} onCheckedChange={handleToggleDarkMode} />
                   </div>
-                  <div className="flex items-center justify-between">
+                  {user.role=="Admin" && <div className="flex items-center justify-between">
                     <div className="space-y-0.5">
                       <Label>Show Map Icons</Label>
                       <p className="text-sm text-muted-foreground">
@@ -295,13 +295,13 @@ export default function Settings() {
                       </p>
                     </div>
                     <Switch checked={wantsIcons} onCheckedChange={handleToggleIcons} />
-                  </div>
+                  </div>}
                 </div>
               </AccordionContent>
             </Card>
           </AccordionItem>
 
-          <AccordionItem value="asset-labels" className="border-0">
+          {user.role=="Admin" && <AccordionItem value="asset-labels" className="border-0">
             <Card className="card-shadow">
               <AccordionTrigger className="px-6 py-4 hover:no-underline">
                 <div className="flex items-center gap-3">
@@ -319,7 +319,7 @@ export default function Settings() {
                 <AssetLabelSettings />
               </AccordionContent>
             </Card>
-          </AccordionItem>
+          </AccordionItem>}
         </Accordion>
       </div>
     </div>

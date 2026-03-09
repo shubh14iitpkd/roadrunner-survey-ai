@@ -131,7 +131,7 @@ export default function SignUp() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="Road Surveyor">Road Surveyor</SelectItem>
-                <SelectItem value="Asset Manager">Asset Manager</SelectItem>
+                {/* <SelectItem value="Asset Manager">Asset Manager</SelectItem> */}
                 <SelectItem value="Admin">Admin</SelectItem>
               </SelectContent>
             </Select>

@@ -32,6 +32,8 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api, API_BASE } from "@/lib/api";
 import { useUpload, VideoStatus, VideoFile, demoDataCache } from "@/contexts/UploadContext";
+import { useAuth } from "@/contexts/AuthContext";
+
 import VideoLibraryUpload from "@/components/VideoLibraryUpload";
 import { set } from "date-fns";
 import { LibraryVideoItem } from "@/contexts/UploadContext";
@@ -47,6 +49,7 @@ export default function SurveyUpload() {
   const [surveyorName, setSurveyorName] = useState<string>("");
   const [isUploadDialogOpen, setIsUploadDialogOpen] = useState(false);
   const [s3BucketUrl, setS3BucketUrl] = useState("");
+  const { user } = useAuth();
   // gpxFiles state removed (not really needed if we just upload immediately, or we can keep local if needed for UI but context handles it)
   // Actually context doesn't expose gpxFiles map, but it updates video object.
   // The original code used gpxFiles map to store file objects for re-upload? Or just to show name?
@@ -686,12 +689,10 @@ export default function SurveyUpload() {
                           {/* GPS Mini Map */}
                           <div className="p-3 flex-1 flex justify-start">
                             {video.gpxFile ? (
-                              <Link to={`/gis?id=${video.routeId}`} className="h-3 w-3">
                                 <Badge variant="secondary" className="gap-1.5 text-xs font-medium bg-green-50 dark:bg-green-950/30 text-green-700 dark:text-green-400 border-green-200 dark:border-green-800">
                                   <MapPin className="h-3 w-3" />
                                   Yes
                                 </Badge>
-                              </Link>
                             ) : (
                               <Badge variant="secondary" className="gap-1.5 text-xs font-medium bg-red-50 dark:bg-red-950/30 text-red-700 dark:text-red-400 border-red-200 dark:border-red-800">
                                 No
@@ -769,7 +770,7 @@ export default function SurveyUpload() {
 
                               {video.status === "completed" && (
                                 <>
-                                  <Button
+                                  {user.role == "Admin" && (<Button
                                     size="sm"
                                     variant="outline"
                                     asChild
@@ -779,8 +780,8 @@ export default function SurveyUpload() {
                                       <Database className="h-3 w-3 mr-1" />
                                       Library
                                     </Link>
-                                  </Button>
-                                  <Button
+                                  </Button>)}
+                                  {user.role=="Admin" && <Button
                                     size="sm"
                                     variant="destructive"
                                     asChild
@@ -790,7 +791,7 @@ export default function SurveyUpload() {
                                       <AlertTriangle className="h-3 w-3 mr-1" />
                                       Defects
                                     </Link>
-                                  </Button>
+                                  </Button>}
                                   <Button
                                     size="sm"
                                     variant="ghost"
@@ -807,7 +808,7 @@ export default function SurveyUpload() {
                               )}
 
                               {/* Delete button */}
-                              <Button
+                              {user.role=="Admin" && <Button
                                 size="sm"
                                 variant="ghost"
                                 onClick={() => {
@@ -825,7 +826,7 @@ export default function SurveyUpload() {
                                 disabled={video.status === "uploading" || video.status === "processing" || isDeleting || !video.surveyId}
                               >
                                 <Trash2 className="h-3.5 w-3.5" />
-                              </Button>
+                              </Button>}
                           </div>
                         </div>
                       );
