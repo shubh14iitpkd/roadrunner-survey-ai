@@ -464,6 +464,71 @@ def update_asset(asset_id: str):
 		return jsonify({"error": "not found"}), 404
 	return jsonify({"ok": True})
 
+
+@assets_bp.patch("/<asset_id>/mark-good", endpoint="assets_mark_good")
+@role_required(["admin", "surveyor"])
+def mark_asset_good(asset_id: str):
+	"""
+	Mark an asset's condition as good
+	---
+	tags:
+	  - Assets
+	security:
+	  - Bearer: []
+	parameters:
+	  - name: asset_id
+	    in: path
+	    type: string
+	    required: true
+	    description: The MongoDB _id of the asset
+	  - name: body
+	    in: body
+	    required: true
+	    schema:
+	      type: object
+	      required:
+	        - name
+	        - user_id
+	      properties:
+	        name:
+	          type: string
+	          description: Full name of the surveyor marking the asset
+	        user_id:
+	          type: string
+	          description: ID of the surveyor
+	responses:
+	  200:
+	    description: Asset marked as good
+	  400:
+	    description: Missing required fields
+	  404:
+	    description: Asset not found
+	"""
+	body = request.get_json(silent=True) or {}
+	surveyor_name = (body.get("name") or "").strip()
+	surveyor_user_id = (body.get("user_id") or "").strip()
+	if not surveyor_name:
+		return jsonify({"error": "name is required"}), 400
+
+	db = get_db()
+	res = db.assets.find_one_and_update(
+		{"_id": ObjectId(asset_id)},
+		{
+			"$set": {
+				"condition": "good",
+				"modified_by": {
+					"user_id": surveyor_user_id,
+					"name": surveyor_name,
+					"changed_at": get_now_iso(),
+				},
+			}
+		},
+	)
+	if not res:
+		return jsonify({"error": "not found"}), 404
+	return jsonify({"ok": True})
+
+
 @assets_bp.get("/<user_id>/resolved-map", endpoint="resolved_map")
 def get_resolved_map(user_id: str):
 	"""

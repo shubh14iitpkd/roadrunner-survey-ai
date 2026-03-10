@@ -9,7 +9,7 @@ import {
 } from "@/components/ui/select";
 import { api } from "@/lib/api";
 import { exportToExcel } from "@/lib/excelExport";
-import { Download, AlertTriangle } from "lucide-react";
+import { Download, AlertTriangle, CheckCircle2, Loader2 } from "lucide-react";
 import {
   Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
@@ -22,6 +22,7 @@ import type { AssetRecord } from "@/types/asset";
 import AssetFilterStrip from "@/components/asset-library/AssetFilterStrip";
 import AssetDetailSidebar from "@/components/asset-library/AssetDetailSidebar";
 import AssetTable, { type ColumnDef } from "@/components/asset-library/AssetTable";
+import { useAuth } from "@/contexts/AuthContext";
 
 // Dummy issue types by category (until DB has real defect data)
 const DUMMY_ISSUES: Record<string, string[]> = {
@@ -34,7 +35,7 @@ const DUMMY_ISSUES: Record<string, string[]> = {
 };
 
 // ── Table columns for Defect Library ──────────────────────
-const DEFECT_COLUMNS: ColumnDef[] = [
+const BASE_DEFECT_COLUMNS: ColumnDef[] = [
   { key: "defectId", header: "Defect ID", className: "font-mono text-[11px] font-semibold py-1.5 px-1.5 whitespace-nowrap text-center", render: (a) => a.defectId },
   { key: "assetDisplayId", header: "Asset ID", className: "font-mono text-[11px] py-1.5 px-1.5 whitespace-nowrap text-center", render: (a) => a.assetDisplayId },
   { key: "assetType", header: "Asset Type", className: "text-[10px] leading-tight py-1.5 px-1.5 min-w-[180px] max-w-[220px] text-center", render: (a) => <span className="line-clamp-2">{a.assetType}</span> },
@@ -49,7 +50,53 @@ const DEFECT_COLUMNS: ColumnDef[] = [
   )},
 ];
 
+/** Builds column definitions including the interactive "Mark as Good" column. */
+function buildDefectColumns(
+  goodSet: Set<string>,
+  markingGood: Set<string>,
+  onMarkGood: (a: AssetRecord) => void,
+): ColumnDef[] {
+  return [
+    ...BASE_DEFECT_COLUMNS,
+    {
+      key: "markGood",
+      header: "Mark Good",
+      className: "py-1.5 px-2 text-center",
+      render: (a) => {
+        const assetKey = a.assetDisplayId ?? a.defectId;
+        const isMarked = goodSet.has(assetKey);
+        const isSaving = markingGood.has(assetKey);
+        return (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              if (!isMarked && !isSaving) onMarkGood(a);
+            }}
+            disabled={isMarked || isSaving}
+            title={isMarked ? "Marked as good" : "Mark this asset as good"}
+            className={cn(
+              "inline-flex items-center justify-center w-6 h-6 rounded-full transition-all",
+              isMarked
+                ? "text-emerald-600 bg-emerald-500/10 cursor-default"
+                : isSaving
+                ? "text-muted-foreground cursor-not-allowed"
+                : "text-muted-foreground/40 hover:text-emerald-600 hover:bg-emerald-500/10 cursor-pointer"
+            )}
+          >
+            {isSaving ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <CheckCircle2 className="h-3.5 w-3.5" />
+            )}
+          </button>
+        );
+      },
+    },
+  ];
+}
+
 export default function DefectLibrary() {
+  const { user } = useAuth();
   const [searchParams] = useSearchParams();
   const [roads, setRoads] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -77,6 +124,10 @@ export default function DefectLibrary() {
 
   // Dynamic defect data from API
   const [defects, setDefects] = useState<AssetRecord[]>([]);
+
+  // ── Mark as Good state ──
+  const [goodSet, setGoodSet] = useState<Set<string>>(new Set());
+  const [markingGood, setMarkingGood] = useState<Set<string>>(new Set());
 
   // ── Cached frame image via hook ──
   const { imageUrl, frameWidth, frameHeight, loading: imageLoading } = useFrameImage({
@@ -232,6 +283,30 @@ export default function DefectLibrary() {
     setSelectedSurveyIdx(0);
     setMarkerPopup(null);
   }, []);
+
+  const handleMarkGood = useCallback(async (asset: AssetRecord) => {
+    const assetKey = asset.assetDisplayId ?? asset.defectId;
+    const mongoId = asset.id;
+    if (!mongoId) {
+      toast.error("Cannot update asset: missing ID");
+      return;
+    }
+    const surveyorName = user
+      ? `${user.first_name} ${user.last_name}`.trim() || user.email
+      : "Unknown";
+    const surveyorId = user?.id ?? "";
+
+    setMarkingGood((prev) => new Set(prev).add(assetKey));
+    try {
+      await api.assets.markAsGood(mongoId, { name: surveyorName, user_id: surveyorId });
+      setGoodSet((prev) => new Set(prev).add(assetKey));
+      toast.success(`Asset ${asset.assetDisplayId} marked as good`);
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to mark asset as good");
+    } finally {
+      setMarkingGood((prev) => { const s = new Set(prev); s.delete(assetKey); return s; });
+    }
+  }, [user]);
 
   const handleExportExcel = () => {
     const headers = [
@@ -543,7 +618,7 @@ export default function DefectLibrary() {
         onRetry={loadData}
         idField="assetDisplayId"
         onClearFilters={clearFilters}
-        columns={DEFECT_COLUMNS}
+        columns={buildDefectColumns(goodSet, markingGood, handleMarkGood)}
       />
     </div>
   );

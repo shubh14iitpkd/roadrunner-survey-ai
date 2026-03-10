@@ -8,6 +8,7 @@ from db import get_db
 from utils.ids import get_now_iso, generate_survey_id
 from utils.rbac import role_required
 from utils.response import mongo_response
+from utils.is_demo_video import is_demo, get_video_key
 
 surveys_bp = Blueprint("surveys", __name__)
 
@@ -353,6 +354,8 @@ def delete_survey(survey_id: str):
     
     deleted_files = []
     preserved_files = []
+    reset_assets = 0       # demo video: good-marked assets reverted to damaged
+    deleted_assets = 0     # real video: assets hard-deleted
     
     for video in videos:
         video_id = video["_id"]
@@ -361,51 +364,73 @@ def delete_survey(survey_id: str):
         # 3. Delete frames associated with this video
         # db.frames.delete_many({"video_id": ObjectId(video_id)})
         
-        # 4. Check if video is from library (preserve library files)
-        is_library_video = "video_library" in storage_url
-        
-        if not is_library_video and storage_url:
-            # Delete the actual video file
-            # storage_url is like /uploads/filename.mp4
-            relative_path = storage_url.lstrip("/")
-            if relative_path.startswith("uploads/"):
-                relative_path = relative_path[8:]  # Remove 'uploads/' prefix
-            file_path = upload_root / relative_path
-            
-            if file_path.exists():
-                try:
-                    file_path.unlink()
-                    deleted_files.append(str(file_path))
-                except Exception as e:
-                    print(f"[DELETE] Failed to delete file {file_path}: {e}")
-            
-            # Also try to delete thumbnail if exists
-            thumb_url = video.get("thumbnail_url", "")
-            if thumb_url:
-                thumb_rel = thumb_url.lstrip("/")
-                if thumb_rel.startswith("uploads/"):
-                    thumb_rel = thumb_rel[8:]
-                thumb_path = upload_root / thumb_rel
-                if thumb_path.exists():
-                    try:
-                        thumb_path.unlink()
-                    except Exception:
-                        pass
-            
-            # Delete GPX file if exists
-            gpx_url = video.get("gpx_file_url", "")
-            if gpx_url:
-                gpx_rel = gpx_url.lstrip("/")
-                if gpx_rel.startswith("uploads/"):
-                    gpx_rel = gpx_rel[8:]
-                gpx_path = upload_root / gpx_rel
-                if gpx_path.exists():
-                    try:
-                        gpx_path.unlink()
-                    except Exception:
-                        pass
-        else:
+        # 4. Check if this video is a demo video
+        demo_video = is_demo(video_file=video)
+
+        if demo_video:
+            # Demo video: preserve assets, but reset any that were marked good
+            video_key = get_video_key(storage_url)
+            if video_key:
+                # Reset assets matched by video_key that have been marked good
+                res = db.assets.update_many(
+                    {"video_key": video_key, "modified_by": {"$exists": True}},
+                    {
+                        "$set": {"condition": "damaged"},
+                        "$unset": {"modified_by": ""},
+                    },
+                )
+                reset_assets += res.modified_count
             preserved_files.append(storage_url)
+        else:
+            # Real video: delete all associated assets from DB first
+            del_res = db.assets.delete_many({"survey_id": ObjectId(survey_id)})
+            deleted_assets += del_res.deleted_count
+
+            # Check if video is from library (preserve library files)
+            is_library_video = "video_library" in storage_url
+
+            if not is_library_video and storage_url:
+                # Delete the actual video file
+                # storage_url is like /uploads/filename.mp4
+                relative_path = storage_url.lstrip("/")
+                if relative_path.startswith("uploads/"):
+                    relative_path = relative_path[8:]  # Remove 'uploads/' prefix
+                file_path = upload_root / relative_path
+                
+                if file_path.exists():
+                    try:
+                        file_path.unlink()
+                        deleted_files.append(str(file_path))
+                    except Exception as e:
+                        print(f"[DELETE] Failed to delete file {file_path}: {e}")
+                
+                # Also try to delete thumbnail if exists
+                thumb_url = video.get("thumbnail_url", "")
+                if thumb_url:
+                    thumb_rel = thumb_url.lstrip("/")
+                    if thumb_rel.startswith("uploads/"):
+                        thumb_rel = thumb_rel[8:]
+                    thumb_path = upload_root / thumb_rel
+                    if thumb_path.exists():
+                        try:
+                            thumb_path.unlink()
+                        except Exception:
+                            pass
+                
+                # Delete GPX file if exists
+                gpx_url = video.get("gpx_file_url", "")
+                if gpx_url:
+                    gpx_rel = gpx_url.lstrip("/")
+                    if gpx_rel.startswith("uploads/"):
+                        gpx_rel = gpx_rel[8:]
+                    gpx_path = upload_root / gpx_rel
+                    if gpx_path.exists():
+                        try:
+                            gpx_path.unlink()
+                        except Exception:
+                            pass
+            else:
+                preserved_files.append(storage_url)
     
     # 5. Delete all videos from DB
     videos_deleted = db.videos.delete_many({"survey_id": ObjectId(survey_id)})
@@ -430,5 +455,9 @@ def delete_survey(survey_id: str):
         "ok": True,
         "deleted_videos": videos_deleted.deleted_count,
         "deleted_files": len(deleted_files),
-        "preserved_library_files": len(preserved_files)
+        "preserved_library_files": len(preserved_files),
+        "reset_good_assets": reset_assets,
+        "deleted_assets": deleted_assets,
     })
+
+

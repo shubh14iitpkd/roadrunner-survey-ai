@@ -24,4 +24,8 @@ export interface AssetRecord {
   category_id?: string;
   groupId?: string;
   box?: { x: number; y: number; width: number; height: number };
+  /** UI-only: true when this asset has been marked as good in this session */
+  isGood?: boolean;
+  /** Set when a surveyor marks the asset as good */
+  modifiedBy?: { name: string; changed_at: string };
 }
