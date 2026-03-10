@@ -41,7 +41,7 @@ const DEFECT_COLUMNS: ColumnDef[] = [
   { key: "category", header: "Category", className: "py-1.5 px-1.5 text-center", render: (a) => <CategoryBadge category={a.assetCategory} categoryId={a.category_id} /> },
   { key: "coords", header: "Coordinates", className: "font-mono text-[10px] py-1.5 px-1.5 whitespace-nowrap text-center", render: (a) => `${a.lat.toFixed(4)}, ${a.lng.toFixed(4)}` },
   { key: "road", header: "Road", className: "text-[11px] py-1.5 px-1.5 whitespace-nowrap text-center", render: (a) => a.roadName },
-  { key: "side", header: "Road Side", className: "text-[11px] py-1.5 px-1.5 text-center", render: (a) => a.side },
+  { key: "side", header: "Road Side", className: "tex1t-[11px] py-1.5 px-1.5 text-center", render: (a) => a.side },
   { key: "zone", header: "Zone", className: "text-[11px] py-1.5 px-1.5 text-center capitalize", render: (a) => a.zone },
   { key: "survey", header: "Survey", className: "text-[11px] py-1.5 px-1.5 whitespace-nowrap text-center", render: (a) => a.lastSurveyDate },
   { key: "issue", header: "Issue", className: "py-1.5 px-1.5 min-w-[100px] text-center", render: (a) => (
@@ -191,7 +191,7 @@ export default function DefectLibrary() {
   // ── Filtering ──
   const filteredDefects = useMemo(() => {
     const q = searchQuery.toLowerCase().trim();
-    return defects.filter((a) => {
+    const fil = defects.filter((a) => {
       if (categoryFilter !== "all" && a.assetCategory !== categoryFilter) return false;
       if (directionFilter !== "all" && a.side !== directionFilter) return false;
       if (selectedAssetTypes.length > 0 && !selectedAssetTypes.includes(a.assetType)) return false;
@@ -206,6 +206,10 @@ export default function DefectLibrary() {
       )) return false;
       return true;
     });
+
+    return fil.sort((a, b) =>
+      a.defectId.localeCompare(b.defectId)
+    )
   }, [defects, categoryFilter, selectedAssetTypes, directionFilter, zoneFilter, selectedRouteId, searchQuery]);
 
   // ── Navigation ──
