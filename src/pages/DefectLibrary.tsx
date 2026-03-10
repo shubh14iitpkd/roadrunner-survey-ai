@@ -42,7 +42,7 @@ const DEFECT_COLUMNS: ColumnDef[] = [
   { key: "coords", header: "Coordinates", className: "font-mono text-[10px] py-1.5 px-1.5 whitespace-nowrap text-center", render: (a) => `${a.lat.toFixed(4)}, ${a.lng.toFixed(4)}` },
   { key: "road", header: "Road", className: "text-[11px] py-1.5 px-1.5 whitespace-nowrap text-center", render: (a) => a.roadName },
   { key: "side", header: "Road Side", className: "text-[11px] py-1.5 px-1.5 text-center", render: (a) => a.side },
-  { key: "zone", header: "Zone", className: "text-[11px] py-1.5 px-1.5 text-center", render: (a) => a.zone },
+  { key: "zone", header: "Zone", className: "text-[11px] py-1.5 px-1.5 text-center capitalize", render: (a) => a.zone },
   { key: "survey", header: "Survey", className: "text-[11px] py-1.5 px-1.5 whitespace-nowrap text-center", render: (a) => a.lastSurveyDate },
   { key: "issue", header: "Issue", className: "py-1.5 px-1.5 min-w-[100px] text-center", render: (a) => (
     <span className="inline-flex items-center rounded-md bg-destructive/10 text-destructive px-1.5 py-0.5 text-[9px] font-semibold leading-tight line-clamp-2">{a.issue}</span>
@@ -508,7 +508,7 @@ export default function DefectLibrary() {
                                   </div>
                                   <div>
                                     <p className="text-muted-foreground text-[9px] uppercase tracking-wider">Side / Zone</p>
-                                    <p className="font-semibold text-foreground">{selectedDefect.side} · {selectedDefect.zone}</p>
+                                    <p className="font-semibold text-foreground">{selectedDefect.side} · {selectedDefect.zone?.toUpperCase()}</p>
                                   </div>
                                   <div>
                                     <p className="text-muted-foreground text-[9px] uppercase tracking-wider">Survey Date</p>

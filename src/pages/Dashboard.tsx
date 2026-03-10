@@ -239,7 +239,7 @@ export default function Dashboard() {
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <KPICard
             label="Road Network"
-            value={loading ? "..." : Number(kpis.kmSurveyed).toLocaleString("en-US", { maximumFractionDigits: 1 })}
+            value={loading ? "..." : Number(kpis.kmSurveyed).toLocaleString("en-US", { maximumFractionDigits: 2, minimumFractionDigits: 2 })}
             unit="km"
             icon={<Activity className="h-4 w-4" />}
             accent="primary"

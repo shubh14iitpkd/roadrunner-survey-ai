@@ -947,7 +947,16 @@ export default function RoadRegister() {
       <div className="px-6 space-y-6">
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <RoadKPICard label="Total Roads" value={String(totalRoads)} icon={<Map className="h-4 w-4" />} accent="primary" />
-          <RoadKPICard label="Total Length" value={Number(totalLength.toFixed(1)).toLocaleString("en-IN")} unit="km" icon={<Route className="h-4 w-4" />} accent="secondary" />
+          <RoadKPICard
+            label="Total Length"
+            value={totalLength.toLocaleString("en-IN", {
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2
+            })}
+            unit="km"
+            icon={<Route className="h-4 w-4" />}
+            accent="secondary"
+          />    
           <RoadKPICard label="Surveyed Roads" value={String(surveyedCount)} icon={<CircleCheck className="h-4 w-4" />} accent="destructive" />
         </div>
 
@@ -980,7 +989,7 @@ export default function RoadRegister() {
                     <div className="w-4 h-4 rounded-full" style={{ backgroundColor: CHART_COLORS[idx % CHART_COLORS.length] }} />
                     <span className="font-medium">{type}</span>
                   </div>
-                  <Badge variant="secondary" className="font-bold">{count as number} km</Badge>
+                  <Badge variant="secondary" className="font-bold">{(count as number).toFixed(2)} km</Badge>
                 </div>
               ))}
             </div>
@@ -1103,7 +1112,7 @@ export default function RoadRegister() {
                     </td>
                     <td className="p-4">
                       <Badge variant="secondary" className="font-semibold">
-                        {road.estimated_distance_km || "—"} km
+                        {road.estimated_distance_km?.toFixed(2) || "—"} km
                       </Badge>
                     </td>
                     <td className="p-4">
