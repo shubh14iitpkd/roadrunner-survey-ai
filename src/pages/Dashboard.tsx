@@ -27,7 +27,6 @@ import {
   exportDefectByRoadReport,
   exportRoadWiseAssetTypeReport,
 } from "@/lib/reportGenerator";
-import QatarRoutesMap from '@/components/QatarRoutesMap';
 
 const CATEGORY_COLORS = [
   "hsl(217, 91%, 60%)",   // DIRECTIONAL SIGNAGE - blue

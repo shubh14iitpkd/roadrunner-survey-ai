@@ -67,6 +67,7 @@ export default function AssetLibrary() {
   const [selectedAssetTypes, setSelectedAssetTypes] = useState<string[]>([]);
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
   const [directionFilter, setDirectionFilter] = useState<"all" | "LHS" | "RHS">("all");
+  const [conditionFilter, setConditionFilter] = useState<"all" | "good"| "damaged">("all");
   const [zoneFilter, setZoneFilter] = useState<"all" | "shoulder" | "median" | "pavement" | "overhead">("all");
 
   const [selectedAsset, setSelectedAsset] = useState<AssetRecord | null>(null);
@@ -200,6 +201,7 @@ export default function AssetLibrary() {
     const q = searchQuery.toLowerCase().trim();
     return assets.filter((a) => {
       if (categoryFilter !== "all" && a.assetCategory !== categoryFilter) return false;
+      if (conditionFilter !== "all" && a.condition !== conditionFilter) return false;
       if (directionFilter !== "all" && a.side !== directionFilter) return false;
       if (selectedAssetTypes.length > 0 && !selectedAssetTypes.includes(a.assetType)) return false;
       if (zoneFilter !== "all" && a.zone !== zoneFilter) return false;
@@ -213,7 +215,7 @@ export default function AssetLibrary() {
       )) return false;
       return true;
     });
-  }, [assets, categoryFilter, selectedAssetTypes, directionFilter, zoneFilter, selectedRouteId, searchQuery]);
+  }, [assets, conditionFilter, categoryFilter, selectedAssetTypes, directionFilter, zoneFilter, selectedRouteId, searchQuery]);
 
   const navigateAsset = useCallback((direction: 'prev' | 'next') => {
     if (!selectedAsset) return;
@@ -332,6 +334,8 @@ export default function AssetLibrary() {
         zoneFilter={zoneFilter}
         onZoneChange={setZoneFilter}
         categoryFilter={categoryFilter}
+        conditionFilter={conditionFilter}
+        onConditionChange={setConditionFilter}
         onCategoryChange={setCategoryFilter}
         selectedAssetTypes={selectedAssetTypes}
         onAssetTypesChange={setSelectedAssetTypes}

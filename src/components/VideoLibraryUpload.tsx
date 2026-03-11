@@ -144,7 +144,7 @@ export const VideoLibraryUpload: React.FC<VideoLibraryUploadProps> = ({
           )}
 
           <div className="rounded-lg bg-background border border-border">
-            <ul className="divide-y">
+            <ul className="divide-y overflow-y-auto max-h-72">
               {items.map((video, i) => {
                 const isCurrentlyUploading = uploadingItems.includes(video.name);
                 const isClickable = isFormComplete && !isCurrentlyUploading;

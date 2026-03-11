@@ -960,7 +960,7 @@ export default function RoadRegister() {
           <RoadKPICard label="Surveyed Roads" value={String(surveyedCount)} icon={<CircleCheck className="h-4 w-4" />} accent="destructive" />
         </div>
 
-        <Card className="p-8 shadow-elevated border-0 gradient-card">
+        {/* <Card className="p-8 shadow-elevated border-0 gradient-card">
           <h3 className="font-bold text-xl mb-6">Road Length Distribution</h3>
           <div className="grid md:grid-cols-2 gap-8 items-center">
             <ResponsiveContainer width="100%" height={250}>
@@ -979,7 +979,7 @@ export default function RoadRegister() {
                     <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
                   ))}
                 </Pie>
-                <Tooltip formatter={(value) => `${value} km`} labelFormatter={(label) => ``}/>
+                <Tooltip formatter={(value) => `${Number(value)?.toFixed(2)} km`} labelFormatter={(label) => ``}/>
               </PieChart>
             </ResponsiveContainer>
             <div className="space-y-3">
@@ -994,7 +994,7 @@ export default function RoadRegister() {
               ))}
             </div>
           </div>
-        </Card>
+        </Card> */}
       </div>
 
       {/* Search */}
@@ -1030,7 +1030,6 @@ export default function RoadRegister() {
                   <th className="text-left p-4 font-semibold text-sm whitespace-nowrap">Start Point</th>
                   <th className="text-left p-4 font-semibold text-sm whitespace-nowrap">End Point</th>
                   <th className="text-left p-4 font-semibold text-sm whitespace-nowrap">Distance</th>
-                  <th className="text-left p-4 font-semibold text-sm whitespace-nowrap">Type</th>
                   <th className="text-left p-4 font-semibold text-sm whitespace-nowrap">Side</th>
                   <th className="text-left p-4 font-semibold text-sm whitespace-nowrap">Actions</th>
                 </tr>
@@ -1114,9 +1113,6 @@ export default function RoadRegister() {
                       <Badge variant="secondary" className="font-semibold">
                         {road.estimated_distance_km?.toFixed(2) || "—"} km
                       </Badge>
-                    </td>
-                    <td className="p-4">
-                      <span className="text-sm">{road.road_type || "—"}</span>
                     </td>
                     <td className="p-4">
                       <Badge variant="outline" className="font-mono">

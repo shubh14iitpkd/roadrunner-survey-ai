@@ -7,6 +7,7 @@ import { getCategoryDotColor } from "@/components/CategoryBadge";
 
 type DirectionFilter = "all" | "LHS" | "RHS";
 type zoneFilter = "all" | "shoulder" | "median" | "pavement" | "overhead";
+type condFilter = "all" | "good" | "damaged";
 
 interface Road {
   route_id: number;
@@ -23,6 +24,8 @@ interface AssetFilterStripProps {
   categoryFilter: string;
   onCategoryChange: (v: string) => void;
   selectedAssetTypes: string[];
+  conditionFilter: condFilter;
+  onConditionChange: (v: condFilter) => void;
   onAssetTypesChange: (v: string[]) => void;
   searchQuery: string;
   onSearchChange: (v: string) => void;
@@ -47,6 +50,8 @@ export default function AssetFilterStrip({
   onZoneChange,
   categoryFilter,
   onCategoryChange,
+  conditionFilter,
+  onConditionChange,
   selectedAssetTypes,
   onAssetTypesChange,
   searchQuery,
@@ -77,6 +82,9 @@ export default function AssetFilterStrip({
   const directionActiveIdx = directionOptions.indexOf(directionFilter);
   const directionStepWidth = 40;
 
+  const conditionOptions = ["all", "good", "damaged"] as const;
+  const conditionActiveIdx = conditionOptions.indexOf(conditionFilter);
+  const conditionStepWidth = 56;
   // Selected road label for display
   const selectedRoad = roads.find(r => r.route_id === selectedRouteId);
 
@@ -105,6 +113,29 @@ export default function AssetFilterStrip({
       </div>
 
       <div className="h-5 w-px bg-border/60 shrink-0" />
+
+      {/* Good / Damaged toggle */}
+      <div className="flex items-center shrink-0">
+        <div className="relative flex rounded-full bg-muted/80 border border-border p-[3px] shrink-0 shadow-sm" style={{ width: conditionOptions.length * conditionStepWidth + 6 }}>
+          <span
+            className="absolute top-[3px] rounded-full bg-primary shadow-md z-10 transition-all duration-300 ease-in-out"
+            style={{ left: 3 + conditionActiveIdx * conditionStepWidth, width: conditionStepWidth, height: 18 }}
+          />
+          {conditionOptions.map((d) => (
+            <button
+              key={d}
+              onClick={() => onConditionChange(d)}
+              className={cn(
+                "relative z-20 flex items-center justify-center text-[9px] font-semibold uppercase tracking-wide transition-colors duration-200 whitespace-nowrap",
+                directionFilter === d ? "text-primary-foreground" : "text-muted-foreground hover:text-foreground"
+              )}
+              style={{ width: conditionStepWidth, height: 18 }}
+            >
+              {d}
+            </button>
+          ))}
+        </div>
+      </div>
 
       {/* LHS / RHS toggle */}
       <div className="flex items-center shrink-0">
