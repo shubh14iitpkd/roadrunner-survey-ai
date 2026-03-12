@@ -84,9 +84,3 @@ class LatLongEstimator:
             "bearing": object_bearing,
             "dist": distance_meters
         }
-        
-        
-
-
-        
-    

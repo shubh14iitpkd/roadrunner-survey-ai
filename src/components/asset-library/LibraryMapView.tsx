@@ -82,7 +82,7 @@ function nearestNeighborSort(assets: AssetRecord[]): AssetRecord[] {
 /* ── Helper: split spatially-sorted assets into segments ── */
 // Gap > POLYLINE_MAX_GAP_M metres between consecutive sorted points
 // starts a new segment so far-apart detections aren't linked.
-const POLYLINE_MAX_GAP_M = 200;
+const POLYLINE_MAX_GAP_M = 100;
 
 function splitIntoSegments(
   assets: AssetRecord[],
