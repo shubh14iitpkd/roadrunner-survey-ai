@@ -50,6 +50,7 @@ export default function VideoLibrary() {
   const [compareMode, setCompareMode] = useState(false);
   const [selectedForCompare, setSelectedForCompare] = useState<string[]>([]);
   const [showCompareView, setShowCompareView] = useState(false);
+  const [compareCats, setCompareCats] = useState<string[]>(["", ""]);
 
   useEffect(() => {
     let cancelled = false;
@@ -181,6 +182,14 @@ export default function VideoLibrary() {
 
   const handleStartComparison = () => {
     if (selectedForCompare.length === 2) {
+      const cats = selectedForCompare.map(id => {
+        const v = videos.find(v => v.id === id);
+        if (v?.categoryVideos && Object.keys(v.categoryVideos).length > 0) {
+          return Object.keys(v.categoryVideos).sort()[0];
+        }
+        return "";
+      });
+      setCompareCats(cats);
       setShowCompareView(true);
     }
   };
@@ -490,80 +499,81 @@ export default function VideoLibrary() {
           <DialogHeader className="p-6 pb-4">
             <div className="flex items-center justify-between">
               <DialogTitle className="text-2xl font-bold">Video Comparison</DialogTitle>
-              <Button variant="ghost" size="icon" onClick={handleCloseComparison}>
-                <X className="h-5 w-5" />
-              </Button>
             </div>
           </DialogHeader>
 
-          <div className="grid grid-cols-2 gap-4 p-6 pt-0 h-[calc(90vh-100px)]">
-            {selectedVideos.map((video, index) => (
-              <div key={video.id} className="space-y-3 flex flex-col">
-                <Card className="p-4 gradient-card border-0">
-                  <div className="space-y-2">
-                    <div className="flex items-start justify-between gap-2">
-                      <h3 className="font-semibold text-lg">{video.title}</h3>
-                      <Badge>Video {index + 1}</Badge>
-                    </div>
-                    <p className="text-sm text-muted-foreground">{video.roadName}</p>
-                    <div className="flex flex-wrap gap-2">
-                      <Badge variant="outline" className="text-xs">Route #{video.routeId}</Badge>
-                      <Badge variant="secondary" className="text-xs">{video.surveyDate}</Badge>
-                    </div>
-                    <p className="text-xs text-muted-foreground">Surveyor: {video.surveyorName}</p>
-                  </div>
-                </Card>
 
-                <Card className="flex-1 overflow-hidden gradient-card border-0">
-                  <div className="relative w-full h-full bg-gradient-to-br from-muted to-muted/50 flex items-center justify-center group">
-                    {video.thumbnailUrl ? (
-                      <>
-                        <img
-                          src={video.thumbnailUrl}
-                          alt={`Thumbnail for ${video.title}`}
-                          className="w-full h-full object-cover"
-                          onError={(e) => {
-                            e.currentTarget.style.display = 'none';
-                            e.currentTarget.nextElementSibling?.classList.remove('hidden');
-                          }}
+          <div className="grid grid-cols-2 gap-4 p-6 pt-0 h-[calc(90vh-100px)]">
+            {selectedVideos.map((video, index) => {
+              const hasCats = video.categoryVideos && Object.keys(video.categoryVideos).length > 0;
+              const activeCat = compareCats[index] || "";
+              const activeSrc = hasCats && activeCat && video.categoryVideos![activeCat]
+                ? video.categoryVideos![activeCat]
+                : (video.storageUrl || "");
+              return (
+                <div key={video.id} className="space-y-3 flex flex-col h-full">
+                  <Card className="p-4 gradient-card border-0">
+                    <div className="space-y-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <h3 className="font-semibold text-lg">{video.title}</h3>
+                        <Badge>Video {index + 1}</Badge>
+                      </div>
+                      <p className="text-sm text-muted-foreground">{video.roadName}</p>
+                      <div className="flex flex-wrap gap-2">
+                        <Badge variant="outline" className="text-xs">Route #{video.routeId}</Badge>
+                        <Badge variant="secondary" className="text-xs">{video.surveyDate}</Badge>
+                      </div>
+                      <p className="text-xs text-muted-foreground">Surveyor: {video.surveyorName}</p>
+                      {hasCats && (
+                        <div className="flex flex-wrap gap-2 mt-1">
+                          {Object.keys(video.categoryVideos!).sort().map(cat => (
+                            <Button
+                              key={cat}
+                              size="sm"
+                              variant={activeCat === cat ? "default" : "outline"}
+                              className={`text-xs h-7 ${activeCat === cat ? "bg-blue-600 text-white" : ""}`}
+                              onClick={() => {
+                                const newCats = [...compareCats];
+                                newCats[index] = cat;
+                                setCompareCats(newCats);
+                              }}
+                            >
+                              {CATEGORY_LABELS[cat] || cat}
+                            </Button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </Card>
+
+                  <Card className="flex-1 overflow-hidden gradient-card border-0 flex items-center justify-center min-h-0">
+                    <div className="relative w-full h-full">
+                      {activeSrc ? (
+                        <video
+                          key={activeSrc}
+                          src={activeSrc}
+                          controls
+                          className="absolute inset-0 w-full h-full object-contain rounded-lg"
                         />
-                        <div className="hidden">
+                      ) : (
+                        <div className="flex items-center justify-center h-full">
                           <VideoIcon className="h-24 w-24 text-muted-foreground/30" />
                         </div>
-                      </>
-                    ) : (
-                      <VideoIcon className="h-24 w-24 text-muted-foreground/30" />
-                    )}
-                    <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-3">
-                      <Play className="h-16 w-16 text-white" />
-                      <p className="text-white text-sm">Click to play video</p>
+                      )}
                     </div>
-                    <div className="absolute top-4 left-4 right-4">
-                      <div className="bg-black/70 backdrop-blur-sm rounded-lg p-3 text-white text-sm space-y-1">
-                        <div className="flex justify-between">
-                          <span>Time:</span>
-                          <span>00:00 / {video.duration}</span>
-                        </div>
-                        <div className="w-full bg-white/20 rounded-full h-1">
-                          <div className="bg-white rounded-full h-1 w-0"></div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </Card>
+                  </Card>
 
-                <div className="flex gap-2">
-                  <Button size="sm" className="flex-1 gap-2">
-                    <Play className="h-4 w-4" />
-                    Play
-                  </Button>
-                  <Button size="sm" variant="outline" className="gap-2">
-                    <Download className="h-4 w-4" />
-                    Download
-                  </Button>
+                  <div className="flex gap-2">
+                    <Button size="sm" variant="outline" className="flex-1 gap-2" asChild disabled={!activeSrc}>
+                      <a href={activeSrc} download>
+                        <Download className="h-4 w-4" />
+                        Download
+                      </a>
+                    </Button>
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </DialogContent>
       </Dialog>

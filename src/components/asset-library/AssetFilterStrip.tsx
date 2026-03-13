@@ -115,7 +115,7 @@ export default function AssetFilterStrip({
       <div className="h-5 w-px bg-border/60 shrink-0" />
 
       {/* Good / Damaged toggle */}
-      <div className="flex items-center shrink-0">
+      {countLabel!="defects" && <div className="flex items-center shrink-0">
         <div className="relative flex rounded-full bg-muted/80 border border-border p-[3px] shrink-0 shadow-sm" style={{ width: conditionOptions.length * conditionStepWidth + 6 }}>
           <span
             className="absolute top-[3px] rounded-full bg-primary shadow-md z-10 transition-all duration-300 ease-in-out"
@@ -135,7 +135,7 @@ export default function AssetFilterStrip({
             </button>
           ))}
         </div>
-      </div>
+      </div>}
 
       {/* LHS / RHS toggle */}
       <div className="flex items-center shrink-0">
