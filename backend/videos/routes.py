@@ -751,7 +751,7 @@ def process_video_with_ai(video_id: str):
 
     demo_matches = []
     if annotated_lib_path.exists():
-        search_pattern = f"*_{filename_no_ext}_annotated_compressed.mp4"
+        search_pattern = f"*{filename_no_ext}*.mp4"
         demo_matches = list(annotated_lib_path.glob(search_pattern))
 
     # demo_matches = []
@@ -1679,8 +1679,18 @@ def upload_library_video():
         sid = survey_id
     
     # link the survey id with demo assets
-    db.assets.update_many({ "video_key": key}, {"$set": { "survey_id": ObjectId(sid), "route_id": int(route_id), "survey_display_id": survey_display_id }})
+    assets_lib = db.video_lib_assets.find({"video_key" : key })
+    assets_to_insert = []
+    for asset in assets_lib:
+        asset.pop('_id', None) 
+        asset['video_id'] = video_id
+        asset['survey_id'] = ObjectId(sid)
+        asset['route_id'] = int(route_id)
+        asset['survey_display_id'] = survey_display_id
+        assets_to_insert.append(asset)    
     
+    db.assets.insert_many(assets_to_insert)
+
     if video_id:
         res = db.videos.find_one_and_update(
             {"_id": ObjectId(video_id)}, {"$set": update_doc}
