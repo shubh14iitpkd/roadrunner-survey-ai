@@ -86,21 +86,21 @@ export default function AssetTable({
           />
         </div>
       </div>
-      <div className="overflow-auto" style={{ flex: 1, minHeight: 0 }}>
+      <div className="overflow-auto w-full" style={{ flex: 1, minHeight: 0 }}>
         {loading ? (
-          <div className="p-3 space-y-2">
-            {Array.from({ length: 8 }).map((_, i) => (
+          <div className="p-3 space-y-2 w-full">
+            {Array.from({ length: 20 }).map((_, i) => (
               <div key={i} className="flex gap-3 items-center">
-                <Skeleton className="h-4 w-20" />
-                <Skeleton className="h-4 w-16" />
-                <Skeleton className="h-4 w-24" />
-                <Skeleton className="h-4 w-20" />
-                <Skeleton className="h-4 w-28" />
-                <Skeleton className="h-4 w-24" />
-                <Skeleton className="h-4 w-10" />
-                <Skeleton className="h-4 w-16" />
-                <Skeleton className="h-4 w-20" />
-                <Skeleton className="h-4 w-24" />
+                <Skeleton className="h-4 w-full" />
+                <Skeleton className="h-4 w-full" />
+                <Skeleton className="h-4 w-full" />
+                <Skeleton className="h-4 w-full" />
+                <Skeleton className="h-4 w-full" />
+                <Skeleton className="h-4 w-full" />
+                <Skeleton className="h-4 w-full" />
+                <Skeleton className="h-4 w-full" />
+                <Skeleton className="h-4 w-full" />
+                <Skeleton className="h-4 w-full" />
               </div>
             ))}
           </div>
