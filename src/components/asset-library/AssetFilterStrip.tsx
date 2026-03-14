@@ -95,7 +95,7 @@ export default function AssetFilterStrip({
         <span className={cn(countLabel === "defects" ? "border-destructive bg-destructive/10 text-destructive":"bg-primary/20 border-primary text-primary dark:border-muted-secondary/20 dark:bg-muted-secondary/10 dark:text-muted-secondary","inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] font-bold tabular-nums border")}>
           {filteredCount}
         </span>
-        <span className={cn("text-sm", countLabel === "defects" ? "text-destructive" : "text-primary dark:text-muted-secondary")}>{countLabel}</span>
+        <span className={cn("text-sm capitalize", countLabel === "defects" ? "text-destructive" : "text-primary dark:text-muted-secondary")}>{countLabel}</span>
         {(directionFilter !== "all" || zoneFilter !== "all") && (
           <div className="flex items-center gap-1 ml-1">
             {directionFilter !== "all" && (

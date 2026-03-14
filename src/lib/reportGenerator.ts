@@ -11,7 +11,7 @@ import capitalize from "@/helpers/capitalize";
 async function fetchDamagedAssets(filterAssetType?: string): Promise<any[]> {
   const qs = new URLSearchParams({ condition: "damaged" });
   const resp = await apiFetch(`/api/assets/master?${qs.toString()}`, { method: "POST" });
-
+  console.log("pikachu", resp)
   // The master endpoint may return an array or { items: [] }
   const items: any[] = Array.isArray(resp) ? resp : (resp?.items ?? resp?.assets ?? []);
   if (filterAssetType) {
@@ -23,11 +23,6 @@ async function fetchDamagedAssets(filterAssetType?: string): Promise<any[]> {
   return items;
 }
 
-/** Fetch top anomaly roads from the dashboard endpoint. */
-async function fetchTopAnomalyRoads(): Promise<any[]> {
-  const resp = await apiFetch("/api/dashboard/tables/top-anomaly-roads");
-  return Array.isArray(resp) ? resp : (resp?.items ?? []);
-}
 
 /** Map a raw asset record to a normalised row, resolving category_id via labelMap. */
 function assetToRow(asset: any, labelMap?: ResolvedMap | null) {
@@ -49,10 +44,12 @@ function assetToRow(asset: any, labelMap?: ResolvedMap | null) {
     asset.display_name ||
     asset.type ||
     "—";
-
+  const hist = asset.survey_history
+  const defectId = hist.length > 0 ? hist[hist.length-1]?.defect_id ?? asset.defect_id ?? mongoId : "-";
   return {
     id: mongoId.toUpperCase(),
-    anomalyId: asset.defect_id ?? mongoId,
+    anomalyId: defectId,
+    displayId: asset.master_display_id ?? asset.asset_display_id ?? "—",
     assetId: asset.asset_id ?? asset.id ?? "—",
     assetType: assetTypeName,
     assetCategory: categoryName,
@@ -61,7 +58,7 @@ function assetToRow(asset: any, labelMap?: ResolvedMap | null) {
     roadName: asset.road_name ?? asset.road ?? asset.route_name ?? "—",
     side: asset.side ?? "—",
     zone: asset.zone ?? "—",
-    lastSurveyDate: asset.survey_date ?? asset.last_survey_date ?? asset.date ?? "—",
+    lastSurveyDate: asset.last_seen_date ?? asset.survey_date ?? asset.last_survey_date ?? asset.date ?? "—",
     issueType: asset.issue ?? asset.condition_detail ?? asset.condition ?? "damaged",
   };
 }
@@ -76,7 +73,7 @@ export async function exportDefectByAssetTypeReport(filterAssetType?: string, la
   ];
 
   const data = rows.map(r => [
-    r.anomalyId, r.id, r.lat, r.lon,
+    r.anomalyId, r.displayId, r.lat, r.lon,
     r.roadName, capitalize(r.side), capitalize(r.zone), r.lastSurveyDate, capitalize(r.issueType),
   ]);
 
@@ -106,7 +103,7 @@ export async function exportDefectByRoadReport(filterRoad?: string, labelMap?: R
   ];
 
   const data = filtered.map(r => [
-    r.anomalyId, r.id, r.assetType, r.assetCategory,
+    r.anomalyId, r.displayId, r.assetType, r.assetCategory,
     r.lat, r.lon, capitalize(r.side), capitalize(r.zone),
     r.lastSurveyDate, capitalize(r.issueType),
   ]);
@@ -139,7 +136,7 @@ export async function exportRoadWiseAssetTypeReport(labelMap?: ResolvedMap | nul
   ];
 
   const data = rows.map(r => [
-    r.roadName, r.assetType, r.assetCategory, r.anomalyId, r.id,
+    r.roadName, r.assetType, r.assetCategory, r.anomalyId, r.displayId,
     r.lat, r.lon, capitalize(r.side), capitalize(r.zone),
     r.lastSurveyDate, capitalize(r.issueType),
   ]);

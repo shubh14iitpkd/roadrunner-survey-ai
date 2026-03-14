@@ -23,6 +23,7 @@ import AssetFilterStrip from "@/components/asset-library/AssetFilterStrip";
 import AssetDetailSidebar from "@/components/asset-library/AssetDetailSidebar";
 import AssetTable, { type ColumnDef } from "@/components/asset-library/AssetTable";
 import { useAuth } from "@/contexts/AuthContext";
+import capitalize from "@/helpers/capitalize";
 
 // Dummy issue types by category (until DB has real defect data)
 const DUMMY_ISSUES: Record<string, string[]> = {
@@ -42,7 +43,7 @@ const BASE_DEFECT_COLUMNS: ColumnDef[] = [
   { key: "category", header: "Category", className: "py-1.5 px-1.5 text-center", render: (a) => <CategoryBadge category={a.assetCategory} categoryId={a.category_id} /> },
   { key: "coords", header: "Coordinates", className: "font-mono text-[10px] py-1.5 px-1.5 whitespace-nowrap text-center", render: (a) => `${a.lat.toFixed(4)}, ${a.lng.toFixed(4)}` },
   { key: "road", header: "Road", className: "text-[11px] py-1.5 px-1.5 whitespace-nowrap text-center", render: (a) => a.roadName },
-  { key: "side", header: "Road Side", className: "tex1t-[11px] py-1.5 px-1.5 text-center", render: (a) => a.side },
+  { key: "side", header: "Road Side", className: "text-[11px] py-1.5 px-1.5 text-center", render: (a) => a.side },
   { key: "zone", header: "Zone", className: "text-[11px] py-1.5 px-1.5 text-center capitalize", render: (a) => a.zone },
   { key: "survey", header: "Survey", className: "text-[11px] py-1.5 px-1.5 whitespace-nowrap text-center", render: (a) => a.lastSurveyDate },
   { key: "issue", header: "Issue", className: "py-1.5 px-1.5 min-w-[100px] text-center", render: (a) => (
@@ -354,8 +355,8 @@ export default function DefectLibrary() {
     ];
     const rows = filteredDefects.map((a) => [
       a.defectId, a.assetDisplayId, a.assetType, a.assetCategory,
-      a.lat, a.lng, a.roadName, a.side,
-      a.zone, a.lastSurveyDate, a.issue,
+      a.lat, a.lng, a.roadName, capitalize(a.side),
+      capitalize(a.zone), a.lastSurveyDate, capitalize(a.issue),
     ]);
     exportToExcel({
       filename: `Defects Library Report.xlsx`,
