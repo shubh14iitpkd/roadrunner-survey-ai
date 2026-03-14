@@ -838,7 +838,7 @@ def process_video_with_ai(video_id: str):
                         {"_id": ObjectId(video_id)},
                         {
                             "$set": {
-                                "status": "completed",
+                                "status": "asset_linking",
                                 "progress": 100,
                                 "annotated_video_url": primary_annotated_url,
                                 "category_videos": category_videos,
@@ -881,6 +881,43 @@ def process_video_with_ai(video_id: str):
                                 )
                     except Exception as agge:
                         print(f"[PROCESS] Error calculating demo aggregates: {agge}")
+
+                    # ── Asset Linking (demo) ───────────────────────────────
+                    try:
+                        mongo_db.videos.update_one(
+                            {"_id": ObjectId(video_id)},
+                            {"$set": {"status": "asset_linking", "updated_at": get_now_iso()}},
+                        )
+                        from services.asset_linker import link_assets_for_video
+                        survey_doc = mongo_db.surveys.find_one(
+                            {"_id": ObjectId(survey_id)} if survey_id else {},
+                            {"survey_display_id": 1, "survey_date": 1}
+                        ) if survey_id else None
+                        survey_display_id_str = survey_doc.get("survey_display_id") if survey_doc else None
+                        survey_date_val = survey_doc.get("survey_date") if survey_doc else None
+
+                        video_library_path = upload_root / "video_library"
+                        linker_summary = link_assets_for_video(
+                            db=mongo_db,
+                            video_id=video_id,
+                            survey_id=survey_id,
+                            survey_display_id=survey_display_id_str,
+                            route_id=route_id,
+                            survey_date=survey_date_val,
+                            video_base_path=video_library_path,
+                        )
+                        print(f"[PROCESS] Demo asset linking complete for {video_id}: {linker_summary}")
+                    except Exception as link_err:
+                        print(f"[PROCESS] Warning: demo asset linking failed for {video_id}: {link_err}")
+                        import traceback
+                        traceback.print_exc()
+
+                    # Mark as truly completed
+                    mongo_db.videos.update_one(
+                        {"_id": ObjectId(video_id)},
+                        {"$set": {"status": "completed", "updated_at": get_now_iso()}},
+                    )
+                    # ── END Asset Linking (demo) ───────────────────────────
 
                 except Exception as e:
                     print(f"Error in demo processing: {e}")
@@ -1045,11 +1082,12 @@ def process_video_with_ai(video_id: str):
                 #         f"uploads/metadata/{video_id}_frame_metadata.json",
                 #     )
                 # )
+                # Set video to asset_linking phase first (before completed)
                 mongo_db.videos.update_one(
                     {"_id": ObjectId(video_id)},
                     {
                         "$set": {
-                            "status": "completed",
+                            "status": "asset_linking",
                             "progress": 100,
                             "annotated_video_url": annotated_video_url,
                             # "frames_directory": frames_directory,
@@ -1062,13 +1100,46 @@ def process_video_with_ai(video_id: str):
                     },
                 )
 
-                # TODO: store aggregates here
+                # ── Asset Linking ──────────────────────────────────────────
+                try:
+                    from services.asset_linker import link_assets_for_video
+                    survey_doc = mongo_db.surveys.find_one(
+                        {"_id": ObjectId(survey_id)} if survey_id else {},
+                        {"survey_display_id": 1, "survey_date": 1}
+                    ) if survey_id else None
+                    survey_display_id_str = survey_doc.get("survey_display_id") if survey_doc else None
+                    survey_date_val = survey_doc.get("survey_date") if survey_doc else None
+
+                    video_library_path = upload_root / "video_library"
+                    linker_summary = link_assets_for_video(
+                        db=mongo_db,
+                        video_id=video_id,
+                        survey_id=survey_id,
+                        survey_display_id=survey_display_id_str,
+                        route_id=route_id,
+                        survey_date=survey_date_val,
+                        video_base_path=video_library_path,
+                    )
+                    print(f"[PROCESS] Asset linking complete for video {video_id}: {linker_summary}")
+                except Exception as link_err:
+                    print(f"[PROCESS] Warning: asset linking failed for video {video_id}: {link_err}")
+                    import traceback
+                    traceback.print_exc()
+                # ── END Asset Linking ──────────────────────────────────────
+
+                # Now mark as fully completed
+                mongo_db.videos.update_one(
+                    {"_id": ObjectId(video_id)},
+                    {"$set": {"status": "completed", "updated_at": get_now_iso()}},
+                )
+
+                # store aggregates
                 if survey_id:
                     mongo_db.surveys.update_one(
                         {"_id": ObjectId(survey_id)},
                         {
                             "$set": {
-                                "totals": result.get("assets_summary", {"good": 0, "damaged": 0, "total_assets": 0}),
+
                                 "status": "processed",
                                 "updated_at": get_now_iso(),
                             }

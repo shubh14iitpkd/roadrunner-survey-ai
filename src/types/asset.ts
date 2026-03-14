@@ -28,4 +28,19 @@ export interface AssetRecord {
   isGood?: boolean;
   /** Set when a surveyor marks the asset as good */
   modifiedBy?: { name: string; changed_at: string };
+  /** Cross-survey timeline from master_assets.survey_history */
+  surveyHistory?: {
+    survey_display_id?: string;
+    survey_date?: string;
+    condition?: string;
+    confidence?: number;
+    asset_display_id?: string;
+    match_confidence?: number;
+    location?: { type: string; coordinates: number[] };
+    video_id?: string;
+    frame_number?: number;
+    box?: { x: number; y: number; width: number; height: number };
+  }[];
+  totalSurveysDetected?: number;
+  masterDisplayId?: string;
 }

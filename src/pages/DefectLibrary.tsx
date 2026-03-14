@@ -170,52 +170,91 @@ export default function DefectLibrary() {
 
       if (masterResp?.items) {
         const mapped: AssetRecord[] = masterResp.items.map((asset: any, idx: number) => {
-          const coords = asset.location?.coordinates || [];
+          const coords = asset.location?.coordinates || asset.canonical_location?.coordinates || [];
           const lng = coords[0] || 0;
           const lat = coords[1] || 0;
           const categoryId = asset.category_id || '';
           const categoryName = getCategoryDisplayName(categoryId);
           const assetTypeName = getAssetDisplayName(asset);
 
-          const rawVideoId = asset.video_id
-            ? (typeof asset.video_id === 'object' && (asset.video_id as any)?.$oid
-              ? (asset.video_id as any).$oid
-              : asset.video_id)
-            : asset.video_key;
-
           const mongoId = asset._id
             ? (typeof asset._id === 'object' && (asset._id as any)?.$oid ? (asset._id as any).$oid : String(asset._id))
             : `AST-${idx}`;
 
-          const surveyId = asset.survey_id
-            ? (typeof asset.survey_id === 'object' && (asset.survey_id as any)?.$oid ? (asset.survey_id as any).$oid : String(asset.survey_id))
-            : `SUR-${idx}`;
+          // Extract latest survey_history entry for video/frame/box
+          const history: any[] = asset.survey_history || [];
+          const latestEntry = history.length > 0 ? history[history.length - 1] : null;
+
+          const rawVideoId = latestEntry?.video_id
+            ? (typeof latestEntry.video_id === 'object' && (latestEntry.video_id as any)?.$oid
+              ? (latestEntry.video_id as any).$oid
+              : latestEntry.video_id)
+            : undefined;
+
+          const surveyId = asset.latest_survey_id
+            ? (typeof asset.latest_survey_id === 'object' && (asset.latest_survey_id as any)?.$oid
+              ? (asset.latest_survey_id as any).$oid
+              : String(asset.latest_survey_id))
+            : undefined;
+
+          // Format the last_seen_date
+          const lastDate = asset.last_seen_date
+            ? (typeof asset.last_seen_date === 'string'
+              ? asset.last_seen_date.split('T')[0]
+              : asset.last_seen_date)
+            : asset.created_at?.split?.('T')?.[0] || '—';
+
+          // Map survey_history for the timeline
+          const surveyHistory = history.map((h: any) => ({
+            survey_display_id: h.survey_display_id,
+            survey_date: h.survey_date,
+            condition: h.condition,
+            confidence: h.confidence,
+            asset_display_id: h.asset_display_id,
+            match_confidence: h.match_confidence,
+            location: h.location,
+            video_id: h.video_id
+              ? (typeof h.video_id === 'object' && (h.video_id as any)?.$oid
+                ? (h.video_id as any).$oid
+                : String(h.video_id))
+              : undefined,
+            frame_number: h.frame_number,
+            box: h.box,
+          }));
+
+          const condition = asset.condition || asset.latest_condition || 'damaged';
+
           return {
             id: mongoId,
-            defectId: asset.defect_id || `ANM-${String(idx + 1).padStart(4, '0')}`,
-            assetId: asset.asset_id,
-            assetDisplayId: asset.asset_display_id,
-            category_id: asset.category_id,
+            defectId: latestEntry?.defect_id ?? `DEF-${String(idx).padStart(6, '0')}`,
+            assetId: asset.asset_id || '',
+            assetDisplayId: asset.master_display_id || '',
+            masterDisplayId: asset.master_display_id || '',
+            category_id: categoryId,
             assetType: assetTypeName,
             assetCategory: categoryName,
+            condition,
+            markerColor: '#ef4444',
             lat,
             lng,
-            surveyId: surveyId,
-            roadName: asset.route_name,
+            surveyId,
+            roadName: asset.route_name || '',
             routeId: asset.route_id != null ? Number(asset.route_id) : undefined,
-            side: asset.side || 'Shoulder',
+            side: asset.side || 'Unknown',
             zone: asset.zone || 'Unknown',
-            lastSurveyDate: asset.survey_date || asset.created_at?.split('T')[0] || '—',
+            lastSurveyDate: lastDate,
             issue: asset.issue || getDummyIssue(categoryId, idx),
             severity: asset.severity || (idx % 3 === 0 ? 'High' : idx % 3 === 1 ? 'Medium' : 'Low'),
             videoId: rawVideoId ? String(rawVideoId) : undefined,
-            frameNumber: asset.frame_number,
-            box: asset.box ? {
-              x: asset.box.x,
-              y: asset.box.y,
-              width: asset.box.width ?? asset.box.w ?? 0,
-              height: asset.box.height ?? asset.box.h ?? 0,
+            frameNumber: latestEntry?.frame_number,
+            box: latestEntry?.box ? {
+              x: latestEntry.box.x,
+              y: latestEntry.box.y,
+              width: latestEntry.box.width ?? latestEntry.box.w ?? 0,
+              height: latestEntry.box.height ?? latestEntry.box.h ?? 0,
             } : undefined,
+            surveyHistory,
+            totalSurveysDetected: asset.total_surveys_detected ?? history.length,
           };
         });
         setDefects(mapped);
@@ -524,82 +563,88 @@ export default function DefectLibrary() {
                 );
               })()}
 
-              {/* Survey Information */}
+              {/* Survey History Timeline */}
               {selectedDefect && (() => {
-                const baseDate = new Date(selectedDefect.lastSurveyDate);
-                const surveyHistory = [
-                  { surveyId: selectedDefect.surveyId ?? "SRV-2025-Q3-01", date: selectedDefect.lastSurveyDate, detected: true, issue: selectedDefect.issue },
-                ];
-                const reversed = [...surveyHistory].reverse();
+                const history = selectedDefect.surveyHistory ?? [];
+                const reversed = [...history].reverse();
+                const latestIssue = selectedDefect.issue;
 
                 return (
                   <div className="px-5 py-3">
-                    {(() => {
-                      const latestSurvey = surveyHistory[surveyHistory.length - 1];
-                      const isDetected = latestSurvey.detected;
-                      return (
-                        <div className="flex items-center gap-2 mb-3">
-                          <AlertTriangle className={cn("h-3.5 w-3.5", isDetected ? "text-destructive" : "text-emerald-600")} />
-                          <span className={cn("text-xs font-semibold", isDetected ? "text-destructive" : "text-emerald-600")}>
-                            {isDetected ? `Defect Detected — ${latestSurvey.issue}` : `No Defect Detected`}
-                          </span>
-                        </div>
-                      );
-                    })()}
-
-                    <div className="relative">
-                      <div className="absolute left-[9px] top-[6px] bottom-[6px] w-px bg-border z-0" />
-                      <div className="space-y-2 relative z-10">
-                        {reversed.map((survey) => {
-                          const originalIdx = surveyHistory.indexOf(survey);
-                          const isSelected = selectedSurveyIdx === originalIdx;
-                          const borderColor = survey.detected ? "border-destructive/20" : "border-emerald-500/30";
-                          const bgColor = survey.detected ? "bg-destructive/5" : "bg-emerald-500/5";
-                          const statusLabel = survey.detected ? "Detected" : "Not Detected";
-                          const statusClass = survey.detected ? "text-destructive" : "text-emerald-600";
-                          const dotColor = survey.detected ? "bg-destructive" : "bg-emerald-500";
-
-                          return (
-                            <div key={survey.surveyId} className="flex items-start gap-3">
-                              <div className="flex flex-col items-center shrink-0 pt-4">
-                                <div className={cn("h-[18px] w-[18px] rounded-full border-[3px] border-background shadow-sm", dotColor)} />
-                              </div>
-                              <button
-                                onClick={() => setSelectedSurveyIdx(originalIdx)}
-                                className={cn(
-                                  "flex-1 text-left border rounded-lg px-5 py-3 transition-all",
-                                  bgColor, borderColor,
-                                  isSelected && "ring-2 ring-primary/30 shadow-sm"
-                                )}
-                              >
-                                <div className="grid grid-cols-5 gap-3 text-xs">
-                                  <div>
-                                    <p className="text-muted-foreground text-[9px] uppercase tracking-wider">Survey</p>
-                                    <p className="font-mono font-semibold text-foreground">{survey.surveyId?.slice(-8)}</p>
-                                  </div>
-                                  <div>
-                                    <p className="text-muted-foreground text-[9px] uppercase tracking-wider">Issue</p>
-                                    <p className={cn("font-semibold", survey.detected ? "text-destructive" : "text-emerald-600")}>{survey.detected ? survey.issue : "—"}</p>
-                                  </div>
-                                  <div>
-                                    <p className="text-muted-foreground text-[9px] uppercase tracking-wider">Asset Type</p>
-                                    <p className="font-semibold text-foreground">{selectedDefect.assetType}</p>
-                                  </div>
-                                  <div>
-                                    <p className="text-muted-foreground text-[9px] uppercase tracking-wider">Side / Zone</p>
-                                    <p className="font-semibold text-foreground">{selectedDefect.side} · {selectedDefect.zone?.toUpperCase()}</p>
-                                  </div>
-                                  <div>
-                                    <p className="text-muted-foreground text-[9px] uppercase tracking-wider">Survey Date</p>
-                                    <p className="font-semibold text-foreground">{survey.date}</p>
-                                  </div>
-                                </div>
-                              </button>
-                            </div>
-                          );
-                        })}
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-2">
+                        <AlertTriangle className="h-3.5 w-3.5 text-destructive" />
+                        <span className="text-xs font-semibold text-destructive">
+                          Defect Detected — {latestIssue}
+                        </span>
                       </div>
+                      <span className="text-[10px] text-muted-foreground">
+                        {selectedDefect.totalSurveysDetected ?? history.length} survey{(selectedDefect.totalSurveysDetected ?? history.length) !== 1 ? 's' : ''} detected
+                      </span>
                     </div>
+
+                    {reversed.length === 0 ? (
+                      <p className="text-xs text-muted-foreground italic">No survey history available.</p>
+                    ) : (
+                      <div className="relative">
+                        <div className="absolute left-[9px] top-[6px] bottom-[6px] w-px bg-border z-0" />
+                        <div className="space-y-2 relative z-10">
+                          {reversed.map((entry, rIdx) => {
+                            const entryCondition = entry.condition?.toLowerCase() ?? '';
+                            const isDamaged = entryCondition !== 'good';
+                            const isLatest = rIdx === 0;
+                            const isSelected = selectedSurveyIdx === rIdx;
+                            const borderColor = isDamaged ? "border-destructive/20" : "border-emerald-500/30";
+                            const bgColor = isDamaged ? "bg-destructive/5" : "bg-emerald-500/5";
+                            const dotColor = isDamaged ? "bg-destructive" : "bg-emerald-500";
+
+                            return (
+                              <div key={`${entry.survey_display_id}-${rIdx}`} className="flex items-start gap-3">
+                                <div className="flex flex-col items-center shrink-0 pt-4">
+                                  <div className={cn("h-[18px] w-[18px] rounded-full border-[3px] border-background shadow-sm", dotColor)} />
+                                </div>
+                                <button
+                                  onClick={() => setSelectedSurveyIdx(rIdx)}
+                                  className={cn(
+                                    "flex-1 text-left border rounded-lg px-5 py-3 transition-all",
+                                    bgColor, borderColor,
+                                    isSelected && "ring-2 ring-primary/30 shadow-sm"
+                                  )}
+                                >
+                                  <div className="flex items-center gap-2 mb-1">
+                                    {isLatest && (
+                                      <span className="text-[8px] font-bold uppercase tracking-wider text-primary bg-primary/10 dark:text-muted-secondary dark:bg-muted-secondary/10 rounded px-1.5 py-0.5">Latest</span>
+                                    )}
+                                  </div>
+                                  <div className="grid grid-cols-5 gap-3 text-xs">
+                                    <div>
+                                      <p className="text-muted-foreground text-[9px] uppercase tracking-wider">Survey</p>
+                                      <p className="font-mono font-semibold text-foreground">{entry.survey_display_id || '—'}</p>
+                                    </div>
+                                    <div>
+                                      <p className="text-muted-foreground text-[9px] uppercase tracking-wider">Issue</p>
+                                      <p className={cn("font-semibold capitalize", isDamaged ? "text-destructive" : "text-emerald-600")}>{isDamaged ? (entry.condition || '—') : "Good"}</p>
+                                    </div>
+                                    <div>
+                                      <p className="text-muted-foreground text-[9px] uppercase tracking-wider">Asset Type</p>
+                                      <p className="font-semibold text-foreground">{selectedDefect.assetType}</p>
+                                    </div>
+                                    <div>
+                                      <p className="text-muted-foreground text-[9px] uppercase tracking-wider">Side / Zone</p>
+                                      <p className="font-semibold text-foreground">{selectedDefect.side} · {selectedDefect.zone?.toUpperCase()}</p>
+                                    </div>
+                                    <div>
+                                      <p className="text-muted-foreground text-[9px] uppercase tracking-wider">Survey Date</p>
+                                      <p className="font-semibold text-foreground">{entry.survey_date || '—'}</p>
+                                    </div>
+                                  </div>
+                                </button>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 );
               })()}

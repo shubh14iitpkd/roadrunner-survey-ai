@@ -3,7 +3,7 @@ import { toast } from "sonner";
 import { api, API_BASE } from "@/lib/api";
 import { isDemoVideo, loadDemoData, convertToAssets, type ProcessedVideoData } from "@/services/demoDataService";
 
-export type VideoStatus = "queue" | "uploading" | "uploaded" | "processing" | "completed" | "error" | "failed";
+export type VideoStatus = "queue" | "uploading" | "uploaded" | "processing" | "asset_linking" | "completed" | "error" | "failed";
 
 // Store demo data globally so it can be accessed by other components
 export const demoDataCache = new Map<string, ProcessedVideoData>();
@@ -187,7 +187,7 @@ export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             // For simplicity, we'll poll everything that looks active on backend.
 
             const activeVideos = videos.filter(v =>
-                (v.status === "processing" || v.status === "uploading") && v.backendId
+                (v.status === "processing" || v.status === "uploading" || v.status === "asset_linking") && v.backendId
             );
             // console.log(activeVideos)
             if (activeVideos.length === 0) return;

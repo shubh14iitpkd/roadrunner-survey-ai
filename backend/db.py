@@ -113,3 +113,8 @@ def init_app_db(app: Flask) -> None:
 	# Counters (no unique flag on _id)
 	db["counters"].create_index([("_id", ASCENDING)], name="idx_counter_id")
 
+	# Master Assets — cross-survey asset identity
+	db["master_assets"].create_index([("canonical_location", "2dsphere")], name="idx_master_geo")
+	db["master_assets"].create_index([("asset_type", ASCENDING)], name="idx_master_asset_type")
+	db["master_assets"].create_index([("route_id", ASCENDING)], name="idx_master_route")
+	db["master_assets"].create_index([("master_display_id", ASCENDING)], unique=True, sparse=True, name="uniq_master_display_id")

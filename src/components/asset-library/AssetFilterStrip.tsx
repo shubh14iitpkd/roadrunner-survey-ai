@@ -24,8 +24,8 @@ interface AssetFilterStripProps {
   categoryFilter: string;
   onCategoryChange: (v: string) => void;
   selectedAssetTypes: string[];
-  conditionFilter: condFilter;
-  onConditionChange: (v: condFilter) => void;
+  conditionFilter?: condFilter;
+  onConditionChange?: (v: condFilter) => void;
   onAssetTypesChange: (v: string[]) => void;
   searchQuery: string;
   onSearchChange: (v: string) => void;

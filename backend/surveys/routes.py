@@ -367,74 +367,105 @@ def delete_survey(survey_id: str):
         # 4. Check if this video is a demo video
         demo_video = is_demo(video_file=video)
 
-        # if demo_video:
-        if False:
-            # Demo video: preserve assets, but reset any that were marked good
-            video_key = get_video_key(storage_url)
-            if video_key:
-                # Reset assets matched by video_key that have been marked good
-                res = db.assets.update_many(
-                    {"video_key": video_key, "modified_by": {"$exists": True}},
-                    {
-                        "$set": {"condition": "damaged"},
-                        "$unset": {"modified_by": ""},
-                    },
-                )
-                reset_assets += res.modified_count
-            preserved_files.append(storage_url)
-        else:
-            # Real video: delete all associated assets from DB first
-            del_res = db.assets.delete_many({"survey_id": ObjectId(survey_id)})
-            deleted_assets += del_res.deleted_count
+        # Real video: delete all associated assets from DB first
+        del_res = db.assets.delete_many({"survey_id": ObjectId(survey_id)})
+        deleted_assets += del_res.deleted_count
 
-            # Check if video is from library (preserve library files)
-            is_library_video = "video_library" in storage_url
+        # Check if video is from library (preserve library files)
+        is_library_video = "video_library" in storage_url
 
-            if not is_library_video and storage_url:
-                # Delete the actual video file
-                # storage_url is like /uploads/filename.mp4
-                relative_path = storage_url.lstrip("/")
-                if relative_path.startswith("uploads/"):
-                    relative_path = relative_path[8:]  # Remove 'uploads/' prefix
-                file_path = upload_root / relative_path
-                
-                if file_path.exists():
+        if not is_library_video and storage_url:
+            # Delete the actual video file
+            # storage_url is like /uploads/filename.mp4
+            relative_path = storage_url.lstrip("/")
+            if relative_path.startswith("uploads/"):
+                relative_path = relative_path[8:]  # Remove 'uploads/' prefix
+            file_path = upload_root / relative_path
+            
+            if file_path.exists():
+                try:
+                    file_path.unlink()
+                    deleted_files.append(str(file_path))
+                except Exception as e:
+                    print(f"[DELETE] Failed to delete file {file_path}: {e}")
+            
+            # Also try to delete thumbnail if exists
+            thumb_url = video.get("thumbnail_url", "")
+            if thumb_url:
+                thumb_rel = thumb_url.lstrip("/")
+                if thumb_rel.startswith("uploads/"):
+                    thumb_rel = thumb_rel[8:]
+                thumb_path = upload_root / thumb_rel
+                if thumb_path.exists():
                     try:
-                        file_path.unlink()
-                        deleted_files.append(str(file_path))
-                    except Exception as e:
-                        print(f"[DELETE] Failed to delete file {file_path}: {e}")
-                
-                # Also try to delete thumbnail if exists
-                thumb_url = video.get("thumbnail_url", "")
-                if thumb_url:
-                    thumb_rel = thumb_url.lstrip("/")
-                    if thumb_rel.startswith("uploads/"):
-                        thumb_rel = thumb_rel[8:]
-                    thumb_path = upload_root / thumb_rel
-                    if thumb_path.exists():
-                        try:
-                            thumb_path.unlink()
-                        except Exception:
-                            pass
-                
-                # Delete GPX file if exists
-                gpx_url = video.get("gpx_file_url", "")
-                if gpx_url:
-                    gpx_rel = gpx_url.lstrip("/")
-                    if gpx_rel.startswith("uploads/"):
-                        gpx_rel = gpx_rel[8:]
-                    gpx_path = upload_root / gpx_rel
-                    if gpx_path.exists():
-                        try:
-                            gpx_path.unlink()
-                        except Exception:
-                            pass
-            else:
-                preserved_files.append(storage_url)
+                        thumb_path.unlink()
+                    except Exception:
+                        pass
+            
+            # Delete GPX file if exists
+            gpx_url = video.get("gpx_file_url", "")
+            if gpx_url:
+                gpx_rel = gpx_url.lstrip("/")
+                if gpx_rel.startswith("uploads/"):
+                    gpx_rel = gpx_rel[8:]
+                gpx_path = upload_root / gpx_rel
+                if gpx_path.exists():
+                    try:
+                        gpx_path.unlink()
+                    except Exception:
+                        pass
+        else:
+            preserved_files.append(storage_url)
     
     # 5. Delete all videos from DB
     videos_deleted = db.videos.delete_many({"survey_id": ObjectId(survey_id)})
+
+    # 5b. Clean up master_assets linked to this survey
+    master_assets_deleted = 0
+    master_assets_updated = 0
+    try:
+        survey_oid = ObjectId(survey_id)
+
+        # Pull all survey_history entries that belong to this survey
+        db.master_assets.update_many(
+            {"survey_history.survey_id": survey_oid},
+            {"$pull": {"survey_history": {"survey_id": survey_oid}}},
+        )
+
+        # Delete master_assets that now have an empty survey_history
+        del_masters = db.master_assets.delete_many({"survey_history": {"$size": 0}})
+        master_assets_deleted = del_masters.deleted_count
+
+        # For surviving master_assets that were affected, re-derive denormalised fields
+        # from the new latest (last) entry in survey_history
+        affected = list(db.master_assets.find(
+            {"latest_survey_id": survey_oid},
+            {"_id": 1, "survey_history": {"$slice": -1}},
+        ))
+        for ma in affected:
+            history = ma.get("survey_history", [])
+            if history:
+                last = history[-1]
+                db.master_assets.update_one(
+                    {"_id": ma["_id"]},
+                    {
+                        "$set": {
+                            "latest_condition": last.get("condition"),
+                            "latest_survey_id": last.get("survey_id"),
+                            "latest_survey_display_id": last.get("survey_display_id"),
+                            "latest_confidence": last.get("confidence"),
+                            "last_seen_date": last.get("survey_date"),
+                            "issue": None if last.get("condition") == "good"
+                                     else last.get("condition"),
+                            "updated_at": get_now_iso(),
+                        },
+                        "$inc": {"total_surveys_detected": -1},
+                    },
+                )
+                master_assets_updated += 1
+        print(f"[DELETE] Master assets: {master_assets_deleted} deleted, {master_assets_updated} updated")
+    except Exception as e:
+        print(f"[DELETE] Warning: master_assets cleanup failed: {e}")
     
     # 6. Delete the survey
     db.surveys.delete_one({"_id": ObjectId(survey_id)})
@@ -459,6 +490,8 @@ def delete_survey(survey_id: str):
         "preserved_library_files": len(preserved_files),
         "reset_good_assets": reset_assets,
         "deleted_assets": deleted_assets,
+        "master_assets_deleted": master_assets_deleted,
+        "master_assets_updated": master_assets_updated,
     })
 
 

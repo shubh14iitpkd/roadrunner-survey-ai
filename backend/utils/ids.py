@@ -35,3 +35,7 @@ def generate_asset_display_id(db=None) -> str:
 def generate_survey_id(db=None) -> str:
 	seq = next_sequence("survey_id", db=db)
 	return f"SUR-{str(seq).rjust(6, '0')}"
+
+def generate_master_display_id(db=None) -> str:
+	seq = next_sequence("master_asset_id", db=db)
+	return f"AST-{str(seq).rjust(6, '0')}"

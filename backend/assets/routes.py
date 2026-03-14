@@ -249,17 +249,15 @@ def get_asset(asset_id: str):
 @role_required(["admin", "surveyor"])
 def get_master_assets():
 	"""
-	List assets with filters for master library
+	List master assets with filters for master library.
+	Reads from the master_assets collection which stores cross-survey
+	asset identities linked via embeddings.
 	---
 	tags:
 	  - Assets
 	security:
 	  - Bearer: []
 	parameters:
-	  - name: survey_id
-	    in: query
-	    type: string
-	    description: Filter by survey ID
 	  - name: route_id
 	    in: query
 	    type: integer
@@ -271,7 +269,7 @@ def get_master_assets():
 	  - name: condition
 	    in: query
 	    type: string
-	    description: Filter by condition
+	    description: Filter by condition (latest)
 	  - name: side
 	    in: query
 	    type: string
@@ -282,7 +280,7 @@ def get_master_assets():
 	    description: Filter by zone
 	responses:
 	  200:
-	    description: Assets retrieved successfully
+	    description: Master assets retrieved successfully
 	    schema:
 	      type: object
 	      properties:
@@ -293,31 +291,27 @@ def get_master_assets():
 	        asset_count:
 	          type: integer
 	"""
-	db=get_db()
-	# since we need to display all points on map we won't use pagination
-	survey_id = request.args.get("survey_id")
+	db = get_db()
 	route_id = request.args.get("route_id", type=int)
 	category = request.args.get("category")
 	condition = request.args.get("condition")
 	zone = request.args.get("zone")
 	road_side = request.args.get("side")
 
-	all_roads =  list(db.roads.find({}))
-	route_ids = [r.get("route_id") for r in all_roads]
-	all_surveys = list(db.surveys.find({ "route_id": {"$in": route_ids}, "is_latest": True }))
-	survey_ids = [s.get("_id") for s in all_surveys]
-
-	query = {"survey_id": {"$in": survey_ids}}
+	# Build query on master_assets
+	query = {}
+	if route_id is not None:
+		query["route_id"] = route_id
+	if category:
+		query["category_id"] = category
+	if condition:
+		query["latest_condition"] = condition
 	if zone:
 		query["zone"] = zone
-	if category:
-		query["category"] = category
-	if condition:
-		query["condition"] = condition
 	if road_side:
 		query["side"] = road_side
 
-	# Add route name to assets
+	# Lookup route names, exclude heavy fields (embedding, full survey_history)
 	pipeline = [
 		{"$match": query},
 		{
@@ -329,40 +323,36 @@ def get_master_assets():
 			}
 		},
 		{
-			"$lookup": {
-				"from": "surveys",
-				"localField": "survey_id",
-				"foreignField": "_id",
-				"as": "survey_info"
-			}
-		},
-		{
 			"$addFields": {
-				"route_name": { "$arrayElemAt": ["$road_info.road_name", 0] },
-				"survey_date": { "$arrayElemAt": ["$survey_info.survey_date", 0] }
+				"route_name": {"$arrayElemAt": ["$road_info.road_name", 0]},
+				# Expose denormalised fields under names the frontend expects
+				"condition": "$latest_condition",
+				"confidence": "$latest_confidence",
+				"location": "$canonical_location",
 			}
 		},
 		{
 			"$project": {
 				"road_info": 0,
-				"survey_info": 0
+				"embedding": 0,   # no need to send 512-d vector to the browser
 			}
-		}
+		},
 	]
-	all_assets = list(db.assets.aggregate(pipeline))
-	
-	return mongo_response({
-		"items": all_assets, 
-		"asset_count": len(all_assets), 
-		"routes": all_roads, 
-		"route_count": len(all_roads), 
-		"surveys": all_surveys, 
-		"survey_count": len(all_surveys)
-	})
-		
+	all_assets = list(db.master_assets.aggregate(pipeline))
 
-		
-	
+	# Also return routes + surveys metadata (as before)
+	all_roads = list(db.roads.find({}))
+	all_surveys = list(db.surveys.find({"is_latest": True}))
+
+	return mongo_response({
+		"items": all_assets,
+		"asset_count": len(all_assets),
+		"routes": all_roads,
+		"route_count": len(all_roads),
+		"surveys": all_surveys,
+		"survey_count": len(all_surveys),
+	})
+
 
 @assets_bp.post("/bulk", endpoint="assets_bulk")
 @role_required(["admin", "surveyor"])
@@ -469,7 +459,9 @@ def update_asset(asset_id: str):
 @role_required(["admin", "surveyor"])
 def mark_asset_good(asset_id: str):
 	"""
-	Mark an asset's condition as good
+	Mark a master asset's condition as good.
+	Updates both the master_assets record and the underlying
+	asset observation in db.assets.
 	---
 	tags:
 	  - Assets
@@ -480,7 +472,7 @@ def mark_asset_good(asset_id: str):
 	    in: path
 	    type: string
 	    required: true
-	    description: The MongoDB _id of the asset
+	    description: The MongoDB _id of the master asset
 	  - name: body
 	    in: body
 	    required: true
@@ -511,21 +503,45 @@ def mark_asset_good(asset_id: str):
 		return jsonify({"error": "name is required"}), 400
 
 	db = get_db()
-	res = db.assets.find_one_and_update(
+	now = get_now_iso()
+	modifier_info = {
+		"user_id": surveyor_user_id,
+		"name": surveyor_name,
+		"changed_at": now,
+	}
+
+	# 1. Update the master_assets record
+	res = db.master_assets.find_one_and_update(
 		{"_id": ObjectId(asset_id)},
 		{
 			"$set": {
-				"condition": "good",
-				"modified_by": {
-					"user_id": surveyor_user_id,
-					"name": surveyor_name,
-					"changed_at": get_now_iso(),
-				},
+				"latest_condition": "good",
+				"issue": None,
+				"modified_by": modifier_info,
+				"updated_at": now,
 			}
 		},
 	)
 	if not res:
-		return jsonify({"error": "not found"}), 404
+		# Fallback: try as a raw asset _id (backward compat)
+		res = db.assets.find_one_and_update(
+			{"_id": ObjectId(asset_id)},
+			{"$set": {"condition": "good", "modified_by": modifier_info}},
+		)
+		if not res:
+			return jsonify({"error": "not found"}), 404
+		return jsonify({"ok": True})
+
+	# 2. Also update the latest asset observation linked to this master
+	survey_history = res.get("survey_history", [])
+	if survey_history:
+		latest_obs_id = survey_history[-1].get("asset_observation_id")
+		if latest_obs_id:
+			db.assets.update_one(
+				{"_id": latest_obs_id},
+				{"$set": {"condition": "good", "modified_by": modifier_info}},
+			)
+
 	return jsonify({"ok": True})
 
 

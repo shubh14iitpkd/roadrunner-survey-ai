@@ -137,7 +137,7 @@ export default function SurveyUpload() {
   const totalUploaded = videos.filter(v => v.status === "uploaded" || v.status === "processing" || v.status === "completed").length;
   const totalProcessed = videos.filter(v => v.status === "completed").length;
   const inQueue = videos.filter(v => v.status === "queue").length;
-  const processing = videos.filter(v => v.status === "uploading" || v.status === "processing").length;
+  const processing = videos.filter(v => v.status === "uploading" || v.status === "processing" || v.status === "asset_linking").length;
 
   // Track uploads in progress for showing status
   const [uploadingItems, setUploadingItems] = useState<string[]>([]);
@@ -258,6 +258,8 @@ export default function SurveyUpload() {
         return <Loader2 className="h-4 w-4 text-purple-500 animate-spin" />;
       case "processing":
         return <Loader2 className="h-4 w-4 text-blue-500 animate-spin" />;
+      case "asset_linking":
+        return <Loader2 className="h-4 w-4 text-teal-500 animate-spin" />;
       case "uploaded":
         return <CheckCircle className="h-4 w-4 text-amber-500" />;
       case "completed":
@@ -274,6 +276,7 @@ export default function SurveyUpload() {
       uploading: "Uploading",
       uploaded: "Uploaded",
       processing: "Processing with AI",
+      asset_linking: "Linking Assets",
       completed: "Report Prepared",
       error: "Processing Failed - Retry",
       failed: "Processing Failed",
@@ -711,6 +714,7 @@ export default function SurveyUpload() {
                                     "text-[10px] font-medium px-1.5 py-0.5",
                                     video.status === "completed" && "bg-green-100 dark:bg-green-950/30 text-green-700 dark:text-green-400",
                                     video.status === "processing" && "bg-blue-100 dark:bg-blue-950/30 text-blue-700 dark:text-blue-400",
+                                    video.status === "asset_linking" && "bg-teal-100 dark:bg-teal-950/30 text-teal-700 dark:text-teal-400",
                                     video.status === "uploading" && "bg-purple-100 dark:bg-purple-950/30 text-purple-700 dark:text-purple-400",
                                     video.status === "uploaded" && "bg-amber-100 dark:bg-amber-950/30 text-amber-700 dark:text-amber-400",
                                     video.status === "queue" && "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400",
@@ -720,8 +724,8 @@ export default function SurveyUpload() {
                                   {getStatusLabel(video.status)}
                                 </Badge>
                               </div>
-                              {/* Progress bar for uploading/processing */}
-                              {(video.status === "uploading" || video.status === "processing") && (
+                              {/* Progress bar for uploading/processing/asset_linking */}
+                              {(video.status === "uploading" || video.status === "processing" || video.status === "asset_linking") && (
                                 <div className="flex items-center gap-2">
                                   <Progress value={video.progress} className="h-1.5 flex-1" />
                                   <span className="text-[10px] font-medium text-primary whitespace-nowrap">{video.progress}%</span>
@@ -743,7 +747,7 @@ export default function SurveyUpload() {
                                 </Button>
                               )}
 
-                              {video.status === "processing" && (
+                              {/* {video.status === "processing" && (
                                 <Button
                                   size="sm"
                                   variant="ghost"
@@ -755,7 +759,7 @@ export default function SurveyUpload() {
                                 >
                                   Cancel
                                 </Button>
-                              )}
+                              )} */}
 
                               {video.status === "error" && (
                                 <Button
