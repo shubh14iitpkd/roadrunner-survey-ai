@@ -51,7 +51,8 @@ def get_resolved_map(user_id: str | None = None):
         labels[aid] = {
             "display_name": labels_override.get(aid, {}).get("display_name") or l["display_name"],
             "default_name": l["default_name"],
-            "category_id": l.get("category_id")
+            "category_id": l.get("category_id"),
+            "group_id": l.get("group_id")
         }
     
     result = {"categories": categories, "labels": labels}

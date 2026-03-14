@@ -47,6 +47,13 @@ def _resolve_category_id(category_name: str) -> str | None:
             return cid
     return None
 
+def _resolve_group_id(group_name: str) -> str | None:
+    rm = get_resolved_map()
+    name_lower = group_name.strip().lower()
+    for _, info in rm["labels"].items():
+        if info["group_id"].lower() == name_lower or info["display_name"].lower() == name_lower:
+            return info["group_id"]
+    return None
 
 def _resolve_asset_ids(asset_name: str) -> list[str]:
     """
@@ -373,12 +380,24 @@ def list_assets_in_category(category_name: str, route_id: Optional[int] = None) 
     pipeline = [
         {"$match": query},
         {"$group": {
+            "_id": "$group_id",
+            "count": {"$sum": 1},
+            "good": {"$sum": {"$cond": [{"$eq": ["$latest_condition", "good"]}, 1, 0]}},
+            "damaged": {"$sum": {"$cond": [{"$ne": ["$latest_condition", "good"]}, 1, 0]}},
+        }},
+    ]
+
+    """
+    [
+        {"$match": { "category_id": type_category_2 }},
+        {"$group": {
             "_id": "$asset_id",
             "count": {"$sum": 1},
             "good": {"$sum": {"$cond": [{"$eq": ["$latest_condition", "good"]}, 1, 0]}},
             "damaged": {"$sum": {"$cond": [{"$ne": ["$latest_condition", "good"]}, 1, 0]}},
         }},
     ]
+    """
     results = list(db.master_assets.aggregate(pipeline))
 
     if not results:
@@ -711,7 +730,7 @@ def get_most_damaged_types(route_id: Optional[int] = None, limit: int = 10) -> s
     pipeline = [
         {"$match": query},
         {"$group": {
-            "_id": "$asset_id",
+            "_id": "$group_id",
             "count": {"$sum": 1},
             "good": {"$sum": {"$cond": [{"$eq": ["$latest_condition", "good"]}, 1, 0]}},
             "damaged": {"$sum": {"$cond": [{"$ne": ["$latest_condition", "good"]}, 1, 0]}},

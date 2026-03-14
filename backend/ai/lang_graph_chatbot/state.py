@@ -48,7 +48,6 @@ class AgentState(TypedDict):
         messages: Conversation history managed by LangGraph's add_messages reducer
         intent: Router classification — "expert", "tool", or "visualization"
         response_type: How to format the final answer (text or visualization)
-        video_id: Active video context for queries (None = use most recent)
         route_id: Active route context for queries
         user_id: User ID for display name resolution and preferences
         final_response: Validated output string to return to the caller
@@ -56,7 +55,6 @@ class AgentState(TypedDict):
     messages: Annotated[list, add_messages]
     intent: Optional[str]
     response_type: ResponseType
-    video_id: Optional[str]
     route_id: Optional[int]
     user_id: Optional[str]
     final_response: Optional[str]

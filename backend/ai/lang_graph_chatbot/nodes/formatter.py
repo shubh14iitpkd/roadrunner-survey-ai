@@ -5,11 +5,16 @@ data in the exact Recharts-compatible format — no post-processing needed.
 """
 
 import json
+import logging
+import time
+
 from langchain_core.messages import SystemMessage
 from ai.lang_graph_chatbot.state import AgentState
 from ai.lang_graph_chatbot.models import get_gemini_model
 from ai.lang_graph_chatbot.nodes.tool_node import _sanitize_messages_for_gemini
 from ai.lang_graph_chatbot.nodes.viz_schema import VisualizationOutput
+
+logger = logging.getLogger("chatbot.formatter")
 
 
 FORMATTER_PROMPT = """You are a data visualization formatter for a road survey AI.
@@ -58,8 +63,10 @@ def formatter_node(state: AgentState) -> dict:
     system = SystemMessage(content=FORMATTER_PROMPT)
     history = _sanitize_messages_for_gemini(state["messages"])
 
+    t0 = time.time()
     try:
         result: VisualizationOutput = structured_llm.invoke([system] + history)
+        elapsed = time.time() - t0
 
         # Build the chart dict — exclude intro_text, omit None fields
         chart_dict = result.model_dump(exclude={"intro_text"}, exclude_none=True)
@@ -67,10 +74,11 @@ def formatter_node(state: AgentState) -> dict:
 
         content = f"{result.intro_text}\n\n```visualization\n{chart_json}\n```"
 
-        print(f"[Formatter] Structured output OK: type={result.type}, title={result.title!r}")
+        logger.info(f"Formatter OK | {elapsed:.1f}s | type={result.type}, title={result.title!r}")
 
     except Exception as e:
-        print(f"[Formatter] Structured output failed: {e}")
+        elapsed = time.time() - t0
+        logger.error(f"Formatter structured output failed after {elapsed:.1f}s: {e}", exc_info=True)
         content = "I encountered an issue generating the chart. Please try rephrasing your question."
 
     return {

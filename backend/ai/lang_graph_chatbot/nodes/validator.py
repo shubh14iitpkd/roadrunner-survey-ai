@@ -4,8 +4,11 @@ Checks for empty/malformed output, ensures visualization/map JSON is parseable.
 """
 
 import json
+import logging
 import re
 from ai.lang_graph_chatbot.state import AgentState, ResponseType, extract_text_content
+
+logger = logging.getLogger("chatbot.validator")
 
 
 FALLBACK_RESPONSE = (
@@ -24,6 +27,8 @@ def validator_node(state: AgentState) -> dict:
     response = state.get("final_response")
     response_type = state.get("response_type", ResponseType.TEXT)
 
+    logger.info(f"Validator | type={response_type} | has_response={bool(response)} | response_len={len(response) if response else 0}")
+
     # For visualization the formatter always sets final_response directly.
     # Only use the message fallback if it's somehow empty.
     if response_type == ResponseType.VISUALIZATION and response and response.strip():
@@ -31,14 +36,17 @@ def validator_node(state: AgentState) -> dict:
 
     # Generic fallback: read from last AI message in state
     if not response:
+        logger.warning("Validator: no final_response, falling back to last AI message")
         for msg in reversed(state["messages"]):
             if hasattr(msg, "type") and msg.type == "ai" and msg.content:
                 response = extract_text_content(msg.content)
+                logger.info(f"Validator: recovered response from AI message (len={len(response)})")
                 break
 
     if isinstance(response, list):
         response = extract_text_content(response)
     if not response or not response.strip():
+        logger.warning("Validator: final response is empty, using fallback")
         return {"final_response": FALLBACK_RESPONSE}
 
     if response_type == ResponseType.VISUALIZATION:
@@ -48,6 +56,7 @@ def validator_node(state: AgentState) -> dict:
     else:
         response = _validate_text(response)
 
+    logger.info(f"Validator output (first 150): {response[:150]}")
     return {"final_response": response}
 
 

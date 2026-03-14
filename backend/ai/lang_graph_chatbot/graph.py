@@ -3,6 +3,8 @@ LangGraph Chatbot — Graph Assembly
 Wires together all nodes into a StateGraph with conditional edges.
 """
 
+import logging
+
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
 
@@ -12,6 +14,18 @@ from ai.lang_graph_chatbot.nodes.expert import expert_node
 from ai.lang_graph_chatbot.nodes.tool_node import agent_node, tool_node, should_continue_tools
 from ai.lang_graph_chatbot.nodes.formatter import formatter_node
 from ai.lang_graph_chatbot.nodes.validator import validator_node
+
+# Configure chatbot logging — all chatbot.* loggers inherit from this
+_chatbot_logger = logging.getLogger("chatbot")
+if not _chatbot_logger.handlers:
+    _handler = logging.StreamHandler()
+    _handler.setFormatter(logging.Formatter(
+        "[%(asctime)s] %(name)s %(levelname)s | %(message)s",
+        datefmt="%H:%M:%S",
+    ))
+    _chatbot_logger.addHandler(_handler)
+    _chatbot_logger.setLevel(logging.DEBUG)
+    _chatbot_logger.propagate = False
 
 # Global memory saver for conversation persistence across chat_ids
 _memory_saver = MemorySaver()

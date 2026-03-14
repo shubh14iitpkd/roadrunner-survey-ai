@@ -3,9 +3,14 @@ Expert Node — Handles general road-engineering Q&A.
 Uses the LLM with a domain-specific system prompt and full message history.
 """
 
+import logging
+import time
+
 from langchain_core.messages import SystemMessage, AIMessage
 from ai.lang_graph_chatbot.state import AgentState, extract_text_content
 from ai.lang_graph_chatbot.models import get_gemini_model
+
+logger = logging.getLogger("chatbot.expert")
 
 
 EXPERT_PROMPT = """You are RoadSightAI — a friendly road engineering expert.
@@ -36,9 +41,22 @@ def expert_node(state: AgentState) -> dict:
     # Take last 10 messages for context window management
     history = state["messages"][-10:]
 
-    response = llm.invoke([system] + history)
+    logger.info(f"Expert invocation | message_count={len(history)}")
+    t0 = time.time()
+    try:
+        response = llm.invoke([system] + history)
+    except Exception as e:
+        logger.error(f"Expert LLM call failed: {e}", exc_info=True)
+        return {
+            "messages": [],
+            "final_response": "I'm sorry, I encountered an error. Please try again.",
+        }
+    elapsed = time.time() - t0
+
+    text = extract_text_content(response.content)
+    logger.info(f"Expert response | {elapsed:.1f}s | first_150={text[:150]}")
 
     return {
         "messages": [response],
-        "final_response": extract_text_content(response.content),
+        "final_response": text,
     }
