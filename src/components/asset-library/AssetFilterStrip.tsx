@@ -99,12 +99,12 @@ export default function AssetFilterStrip({
         {(directionFilter !== "all" || zoneFilter !== "all") && (
           <div className="flex items-center gap-1 ml-1">
             {directionFilter !== "all" && (
-              <span className="inline-flex items-center rounded-full bg-primary/10 text-primary px-1.5 py-0.5 text-[9px] font-semibold border border-primary/20">
+              <span className="inline-flex items-center capitalize rounded-full bg-primary/10 text-primary px-1.5 py-0.5 text-[9px] font-semibold border border-primary/20">
                 {directionFilter}
               </span>
             )}
             {zoneFilter !== "all" && (
-              <span className="inline-flex items-center rounded-full bg-primary/10 text-primary px-1.5 py-0.5 text-[9px] font-semibold border border-primary/20">
+              <span className="inline-flex capitalize items-center rounded-full bg-primary/10 text-primary px-1.5 py-0.5 text-[9px] font-semibold border border-primary/20">
                 {zoneFilter}
               </span>
             )}
@@ -127,7 +127,7 @@ export default function AssetFilterStrip({
               onClick={() => onConditionChange(d)}
               className={cn(
                 "relative z-20 flex items-center justify-center text-[9px] font-semibold uppercase tracking-wide transition-colors duration-200 whitespace-nowrap",
-                directionFilter === d ? "text-primary-foreground" : "text-muted-foreground hover:text-foreground"
+                conditionFilter === d ? "text-primary-foreground" : "text-muted-foreground hover:text-foreground"
               )}
               style={{ width: conditionStepWidth, height: 18 }}
             >
