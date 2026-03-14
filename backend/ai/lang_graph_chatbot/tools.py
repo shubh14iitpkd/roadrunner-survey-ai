@@ -11,7 +11,6 @@ from langchain.tools import tool
 from pymongo import MongoClient
 from dotenv import load_dotenv
 
-from utils.is_demo_video import is_demo, get_video_key
 from ai.lang_graph_chatbot.get_resolved_map import get_resolved_map
 
 load_dotenv()
@@ -36,24 +35,6 @@ def get_db():
             serverSelectionTimeoutMS=5000,
         )
     return _client[DB_NAME]
-
-
-def _is_demo_video_id(video_id: str) -> bool:
-    if not video_id:
-        return False
-    return is_demo(video_url=video_id + ".mp4")
-
-
-def _get_asset_query_filter(video_id: str = "", route_id: Optional[int] = None) -> dict:
-    query = {}
-    if video_id:
-        if _is_demo_video_id(video_id):
-            query["video_key"] = video_id
-        else:
-            query["video_id"] = video_id
-    if route_id is not None:
-        query["route_id"] = route_id
-    return query
 
 
 # ---------- helpers for display names ----------
@@ -110,14 +91,9 @@ def _classify_condition(condition: str) -> str:
     return "good"
 
 
-def _get_latest_survey_ids() -> list:
-    """
-    Return the MongoDB _id list of all surveys where is_latest=True.
-    Used to scope detected-asset queries to the most recent survey per route.
-    """
-    db = get_db()
-    docs = db.surveys.find({"is_latest": True}, {"_id": 1})
-    return [d["_id"] for d in docs]
+def _is_damaged(condition: str) -> bool:
+    """Return True if the condition is classified as damaged."""
+    return _classify_condition(condition) == "damaged"
 
 
 # ---------- time helpers ----------
@@ -164,12 +140,11 @@ def list_videos(route_id: Optional[int] = None) -> str:
 
     data = []
     for v in videos:
-        storage_url = v.get("storage_url", "")
         data.append({
             "title": v.get("title", "Untitled"),
             "route_id": v.get("route_id"),
             "uploaded": str(v.get("created_at", "")),
-            "video_key": get_video_key(storage_url) if storage_url else None,
+            "video_id": str(v["_id"]),
         })
     return json.dumps({"count": len(data), "videos": data})
 
@@ -277,7 +252,7 @@ def describe_route(route_id: int) -> str:
         return json.dumps({"error": f"Route {route_id} not found"})
 
     survey_count = db.surveys.count_documents({"route_id": route_id})
-    asset_count = db.assets.count_documents({"route_id": route_id})
+    asset_count = db.master_assets.count_documents({"route_id": route_id})
     video_count = db.videos.count_documents({"route_id": route_id})
 
     return json.dumps({
@@ -299,13 +274,12 @@ def describe_route(route_id: int) -> str:
 
 
 @tool
-def get_asset_condition_summary(video_id: str = "", route_id: Optional[int] = None) -> str:
+def get_asset_condition_summary(route_id: Optional[int] = None) -> str:
     """
-    Overall good vs damaged summary for all assets on a video or route.
+    Overall good vs damaged summary for all assets on a route.
     Use for general asset health / condition overview.
 
     Args:
-        video_id: Optional specific video ID
         route_id: Optional route ID
 
     Returns:
@@ -313,29 +287,24 @@ def get_asset_condition_summary(video_id: str = "", route_id: Optional[int] = No
     """
     db = get_db()
 
-    if not video_id and route_id is None:
-        video = db.videos.find_one({}, sort=[("created_at", -1)])
-        if not video:
-            return json.dumps({"error": "No data found"})
-        storage_url = video.get("storage_url", "")
-        video_id = get_video_key(storage_url) if storage_url else str(video["_id"])
+    query: dict = {}
+    if route_id is not None:
+        query["route_id"] = route_id
 
-    asset_filter = _get_asset_query_filter(video_id, route_id)
     pipeline = [
-        {"$match": asset_filter},
-        {"$group": {"_id": "$condition", "count": {"$sum": 1}}},
+        {"$match": query},
+        {"$group": {"_id": "$latest_condition", "count": {"$sum": 1}}},
     ]
-    results = list(db.assets.aggregate(pipeline))
+    results = list(db.master_assets.aggregate(pipeline))
 
     if not results:
-        return json.dumps({"error": "No assets found", "video_id": video_id, "route_id": route_id})
+        return json.dumps({"error": "No assets found", "route_id": route_id})
 
     total = sum(r["count"] for r in results)
     good = sum(r["count"] for r in results if _classify_condition(r["_id"]) == "good")
     damaged = total - good
 
     return json.dumps({
-        "video_id": video_id or None,
         "route_id": route_id,
         "total": total,
         "good": good,
@@ -404,34 +373,32 @@ def list_assets_in_category(category_name: str, route_id: Optional[int] = None) 
     pipeline = [
         {"$match": query},
         {"$group": {
-            "_id": {"asset_id": "$asset_id", "condition": "$condition"},
-            "count": {"$sum": 1}
+            "_id": "$asset_id",
+            "count": {"$sum": 1},
+            "good": {"$sum": {"$cond": [{"$eq": ["$latest_condition", "good"]}, 1, 0]}},
+            "damaged": {"$sum": {"$cond": [{"$ne": ["$latest_condition", "good"]}, 1, 0]}},
         }},
     ]
-    results = list(db.assets.aggregate(pipeline))
+    results = list(db.master_assets.aggregate(pipeline))
 
     if not results:
         return json.dumps({"category": category_name, "route_id": route_id, "assets": [], "total": 0})
 
-    asset_data: dict[str, dict] = {}
-    for r in results:
-        aid = r["_id"]["asset_id"]
-        entry = asset_data.setdefault(aid, {"good": 0, "damaged": 0, "total": 0})
-        if _classify_condition(r["_id"]["condition"]) == "damaged":
-            entry["damaged"] += r["count"]
-        else:
-            entry["good"] += r["count"]
-        entry["total"] += r["count"]
-
     assets = []
-    for aid, data in sorted(asset_data.items(), key=lambda x: x[1]["total"], reverse=True):
-        assets.append({"name": _label_name(aid), "good": data["good"], "damaged": data["damaged"], "total": data["total"]})
+    for r in results:
+        assets.append({
+            "name": _label_name(r["_id"]),
+            "good": r["good"],
+            "damaged": r["damaged"],
+            "total": r["count"],
+        })
+    assets.sort(key=lambda x: x["total"], reverse=True)
 
     return json.dumps({
         "category": _cat_name(cid),
         "route_id": route_id,
         "assets": assets,
-        "total": sum(d["total"] for d in asset_data.values()),
+        "total": sum(r["count"] for r in results),
     })
 
 
@@ -459,9 +426,9 @@ def get_category_condition_breakdown(category_name: str, route_id: Optional[int]
 
     pipeline = [
         {"$match": query},
-        {"$group": {"_id": "$condition", "count": {"$sum": 1}}},
+        {"$group": {"_id": "$latest_condition", "count": {"$sum": 1}}},
     ]
-    results = list(db.assets.aggregate(pipeline))
+    results = list(db.master_assets.aggregate(pipeline))
 
     if not results:
         return json.dumps({"category": _cat_name(cid), "route_id": route_id, "error": "No assets found"})
@@ -508,9 +475,9 @@ def get_asset_type_condition(asset_name: str, route_id: Optional[int] = None) ->
 
     pipeline = [
         {"$match": query},
-        {"$group": {"_id": "$condition", "count": {"$sum": 1}}},
+        {"$group": {"_id": "$latest_condition", "count": {"$sum": 1}}},
     ]
-    results = list(db.assets.aggregate(pipeline))
+    results = list(db.master_assets.aggregate(pipeline))
 
     if not results:
         return json.dumps({"asset": asset_name, "route_id": route_id, "total": 0, "error": "No detections found"})
@@ -551,33 +518,25 @@ def list_detected_assets(route_id: Optional[int] = None) -> str:
     pipeline = [
         {"$match": query},
         {"$group": {
-            "_id": {"asset_id": "$asset_id", "category_id": "$category_id", "condition": "$condition"},
-            "count": {"$sum": 1}
+            "_id": {"asset_id": "$asset_id", "category_id": "$category_id"},
+            "count": {"$sum": 1},
+            "good": {"$sum": {"$cond": [{"$eq": ["$latest_condition", "good"]}, 1, 0]}},
+            "damaged": {"$sum": {"$cond": [{"$ne": ["$latest_condition", "good"]}, 1, 0]}},
         }},
     ]
-    results = list(db.assets.aggregate(pipeline))
+    results = list(db.master_assets.aggregate(pipeline))
 
     if not results:
         return json.dumps({"route_id": route_id, "categories": [], "grand_total": 0})
 
-    # Pivot: (category_id, asset_id) -> {good, damaged, total}
-    asset_data: dict[tuple, dict] = {}
-    for r in results:
-        key = (r["_id"]["category_id"], r["_id"]["asset_id"])
-        entry = asset_data.setdefault(key, {"good": 0, "damaged": 0, "total": 0})
-        if _classify_condition(r["_id"]["condition"]) == "damaged":
-            entry["damaged"] += r["count"]
-        else:
-            entry["good"] += r["count"]
-        entry["total"] += r["count"]
-
     by_category: dict[str, list] = {}
-    for (cid, aid), data in asset_data.items():
+    for r in results:
+        cid = r["_id"]["category_id"]
         by_category.setdefault(cid, []).append({
-            "name": _label_name(aid),
-            "good": data["good"],
-            "damaged": data["damaged"],
-            "total": data["total"],
+            "name": _label_name(r["_id"]["asset_id"]),
+            "good": r["good"],
+            "damaged": r["damaged"],
+            "total": r["count"],
         })
 
     categories = []
@@ -614,7 +573,7 @@ def get_asset_locations(asset_name: str = "", category_name: str = "", route_id:
         JSON array of assets with lat/lng, condition, and confidence
     """
     db = get_db()
-    query: dict = {"location": {"$exists": True}}
+    query: dict = {"canonical_location": {"$exists": True}}
 
     if asset_name:
         aids = _resolve_asset_ids(asset_name)
@@ -633,30 +592,27 @@ def get_asset_locations(asset_name: str = "", category_name: str = "", route_id:
     if route_id is not None:
         query["route_id"] = route_id
 
-    # Condition filter — match against the _classify_condition helper
+    # Condition filter
     if condition:
         norm = condition.strip().lower()
         if norm == "damaged":
-            query["condition"] = {"$in": ["damaged", "Damaged", "DAMAGED", "Faded", "faded",
-                                           "Poor", "poor", "Bad", "bad", "Broken", "broken",
-                                           "Missing", "missing"]}
+            query["latest_condition"] = {"$ne": "good"}
         elif norm == "good":
-            query["condition"] = {"$in": ["good", "Good", "GOOD", "Fair", "fair",
-                                           "Excellent", "excellent"]}
+            query["latest_condition"] = "good"
 
-    assets = list(db.assets.find(query).limit(limit))
+    assets = list(db.master_assets.find(query).limit(limit))
 
     locations = []
     for a in assets:
-        loc = a.get("location", {})
+        loc = a.get("canonical_location", {})
         coords = loc.get("coordinates", [])
         if len(coords) >= 2:
             locations.append({
                 "asset": _label_name(a.get("asset_id", "")),
-                "condition": a.get("condition"),
+                "condition": a.get("latest_condition"),
                 "lng": coords[0],
                 "lat": coords[1],
-                "confidence": a.get("confidence"),
+                "confidence": a.get("latest_confidence"),
             })
 
     return json.dumps({
@@ -683,11 +639,11 @@ def get_damage_hotspots(route_id: int, top_n: int = 5) -> str:
     db = get_db()
     query: dict = {
         "route_id": route_id,
-        "condition": {"$in": DAMAGED_CONDITIONS},
-        "location": {"$exists": True},
+        "latest_condition": {"$ne": "good"},
+        "canonical_location": {"$exists": True},
     }
 
-    damaged_assets = list(db.assets.find(query))
+    damaged_assets = list(db.master_assets.find(query))
 
     if not damaged_assets:
         return json.dumps({"route_id": route_id, "hotspots": [], "total_damaged": 0})
@@ -697,7 +653,7 @@ def get_damage_hotspots(route_id: int, top_n: int = 5) -> str:
     clusters: dict[tuple, dict] = {}
 
     for a in damaged_assets:
-        loc = a.get("location", {})
+        loc = a.get("canonical_location", {})
         coords = loc.get("coordinates", [])
         if len(coords) < 2:
             continue
@@ -755,37 +711,28 @@ def get_most_damaged_types(route_id: Optional[int] = None, limit: int = 10) -> s
     pipeline = [
         {"$match": query},
         {"$group": {
-            "_id": {"asset_id": "$asset_id", "condition": "$condition"},
-            "count": {"$sum": 1}
+            "_id": "$asset_id",
+            "count": {"$sum": 1},
+            "good": {"$sum": {"$cond": [{"$eq": ["$latest_condition", "good"]}, 1, 0]}},
+            "damaged": {"$sum": {"$cond": [{"$ne": ["$latest_condition", "good"]}, 1, 0]}},
         }},
     ]
-    results = list(db.assets.aggregate(pipeline))
+    results = list(db.master_assets.aggregate(pipeline))
 
     if not results:
         return json.dumps({"route_id": route_id, "assets": []})
 
-    # Pivot
-    asset_data: dict[str, dict] = {}
-    for r in results:
-        aid = r["_id"]["asset_id"]
-        entry = asset_data.setdefault(aid, {"good": 0, "damaged": 0, "total": 0})
-        if _classify_condition(r["_id"]["condition"]) == "damaged":
-            entry["damaged"] += r["count"]
-        else:
-            entry["good"] += r["count"]
-        entry["total"] += r["count"]
-
     # Sort by damage count descending, only include those with damage > 0
     ranked = []
-    for aid, data in asset_data.items():
-        if data["damaged"] > 0:
+    for r in results:
+        if r["damaged"] > 0:
             ranked.append({
-                "asset": _label_name(aid),
-                "category": _cat_name(get_resolved_map()["labels"].get(aid, {}).get("category_id", "")),
-                "damaged": data["damaged"],
-                "good": data["good"],
-                "total": data["total"],
-                "damage_rate_pct": round(data["damaged"] / data["total"] * 100, 1) if data["total"] else 0,
+                "asset": _label_name(r["_id"]),
+                "category": _cat_name(get_resolved_map()["labels"].get(r["_id"], {}).get("category_id", "")),
+                "damaged": r["damaged"],
+                "good": r["good"],
+                "total": r["count"],
+                "damage_rate_pct": round(r["damaged"] / r["count"] * 100, 1) if r["count"] else 0,
             })
 
     ranked.sort(key=lambda x: x["damaged"], reverse=True)
@@ -864,42 +811,34 @@ def rank_routes_by_damage(limit: int = 10) -> str:
 
     pipeline = [
         {"$group": {
-            "_id": {"route_id": "$route_id", "condition": "$condition"},
+            "_id": "$route_id",
             "count": {"$sum": 1},
+            "good": {"$sum": {"$cond": [{"$eq": ["$latest_condition", "good"]}, 1, 0]}},
+            "damaged": {"$sum": {"$cond": [{"$ne": ["$latest_condition", "good"]}, 1, 0]}},
         }},
     ]
-    results = list(db.assets.aggregate(pipeline))
+    results = list(db.master_assets.aggregate(pipeline))
 
     if not results:
         return json.dumps({"routes": [], "message": "No asset data found"})
 
-    # Pivot by route
-    route_data: dict[int, dict] = {}
-    for r in results:
-        rid = r["_id"]["route_id"]
-        if rid is None:
-            continue
-        entry = route_data.setdefault(rid, {"good": 0, "damaged": 0, "total": 0})
-        if _classify_condition(r["_id"]["condition"]) == "damaged":
-            entry["damaged"] += r["count"]
-        else:
-            entry["good"] += r["count"]
-        entry["total"] += r["count"]
-
     # Get road names
-    route_ids = list(route_data.keys())
+    route_ids = [r["_id"] for r in results if r["_id"] is not None]
     roads = {r["route_id"]: r for r in db.roads.find({"route_id": {"$in": route_ids}})}
 
     ranked = []
-    for rid, data in route_data.items():
+    for r in results:
+        rid = r["_id"]
+        if rid is None:
+            continue
         road = roads.get(rid, {})
         ranked.append({
             "route_id": rid,
             "road_name": road.get("road_name", f"Route {rid}"),
-            "damaged": data["damaged"],
-            "good": data["good"],
-            "total": data["total"],
-            "damage_rate_pct": round(data["damaged"] / data["total"] * 100, 1) if data["total"] else 0,
+            "damaged": r["damaged"],
+            "good": r["good"],
+            "total": r["count"],
+            "damage_rate_pct": round(r["damaged"] / r["count"] * 100, 1) if r["count"] else 0,
         })
 
     ranked.sort(key=lambda x: x["damaged"], reverse=True)
@@ -992,41 +931,47 @@ def get_route_condition_report(route_id: int) -> str:
     # Overall condition
     cond_pipeline = [
         {"$match": {"route_id": route_id}},
-        {"$group": {"_id": "$condition", "count": {"$sum": 1}}},
+        {"$group": {
+            "_id": None,
+            "total": {"$sum": 1},
+            "good": {"$sum": {"$cond": [{"$eq": ["$latest_condition", "good"]}, 1, 0]}},
+            "damaged": {"$sum": {"$cond": [{"$ne": ["$latest_condition", "good"]}, 1, 0]}},
+        }},
     ]
-    cond_results = list(db.assets.aggregate(cond_pipeline))
+    cond_results = list(db.master_assets.aggregate(cond_pipeline))
 
-    total = sum(r["count"] for r in cond_results)
-    if total == 0:
+    if not cond_results:
         return json.dumps({"route_id": route_id, "error": "No assets found for this route"})
 
-    good = sum(r["count"] for r in cond_results if _classify_condition(r["_id"]) == "good")
-    damaged = total - good
+    overall = cond_results[0]
+    total = overall["total"]
+    good = overall["good"]
+    damaged = overall["damaged"]
 
     # Damage by category
     cat_pipeline = [
-        {"$match": {"route_id": route_id, "condition": {"$in": DAMAGED_CONDITIONS}}},
+        {"$match": {"route_id": route_id}},
         {"$group": {
             "_id": "$category_id",
-            "damaged_count": {"$sum": 1},
+            "total": {"$sum": 1},
+            "damaged": {"$sum": {"$cond": [{"$ne": ["$latest_condition", "good"]}, 1, 0]}},
         }},
-        {"$sort": {"damaged_count": -1}},
+        {"$sort": {"damaged": -1}},
     ]
-    cat_damage = list(db.assets.aggregate(cat_pipeline))
+    cat_damage = list(db.master_assets.aggregate(cat_pipeline))
 
     categories_damaged = []
     for c in cat_damage:
-        cat_total = db.assets.count_documents({"route_id": route_id, "category_id": c["_id"]})
         categories_damaged.append({
             "category": _cat_name(c["_id"]),
-            "damaged": c["damaged_count"],
-            "total": cat_total,
-            "damage_rate_pct": round(c["damaged_count"] / cat_total * 100, 1) if cat_total else 0,
+            "damaged": c["damaged"],
+            "total": c["total"],
+            "damage_rate_pct": round(c["damaged"] / c["total"] * 100, 1) if c["total"] else 0,
         })
 
     # Top damaged asset types
     asset_pipeline = [
-        {"$match": {"route_id": route_id, "condition": {"$in": DAMAGED_CONDITIONS}}},
+        {"$match": {"route_id": route_id, "latest_condition": {"$ne": "good"}}},
         {"$group": {
             "_id": "$asset_id",
             "damaged_count": {"$sum": 1},
@@ -1034,7 +979,7 @@ def get_route_condition_report(route_id: int) -> str:
         {"$sort": {"damaged_count": -1}},
         {"$limit": 10},
     ]
-    top_damaged = list(db.assets.aggregate(asset_pipeline))
+    top_damaged = list(db.master_assets.aggregate(asset_pipeline))
 
     top_damaged_assets = []
     for a in top_damaged:
@@ -1079,7 +1024,7 @@ def get_survey_findings(route_id: Optional[int] = None, period: str = "all") -> 
     """
     db = get_db()
 
-    # First get relevant surveys to determine scope
+    # Get survey scope for metadata
     survey_query: dict = {}
     if route_id is not None:
         survey_query["route_id"] = route_id
@@ -1090,7 +1035,7 @@ def get_survey_findings(route_id: Optional[int] = None, period: str = "all") -> 
     survey_count = db.surveys.count_documents(survey_query)
     surveyed_route_ids = list(db.surveys.distinct("route_id", survey_query))
 
-    # Get asset aggregates for those routes
+    # Get asset aggregates from master_assets for those routes
     asset_query: dict = {}
     if surveyed_route_ids:
         asset_query["route_id"] = {"$in": surveyed_route_ids}
@@ -1100,11 +1045,13 @@ def get_survey_findings(route_id: Optional[int] = None, period: str = "all") -> 
     pipeline = [
         {"$match": asset_query},
         {"$group": {
-            "_id": {"category_id": "$category_id", "condition": "$condition"},
+            "_id": "$category_id",
             "count": {"$sum": 1},
+            "good": {"$sum": {"$cond": [{"$eq": ["$latest_condition", "good"]}, 1, 0]}},
+            "damaged": {"$sum": {"$cond": [{"$ne": ["$latest_condition", "good"]}, 1, 0]}},
         }},
     ]
-    results = list(db.assets.aggregate(pipeline))
+    results = list(db.master_assets.aggregate(pipeline))
 
     if not results:
         return json.dumps({
@@ -1115,27 +1062,16 @@ def get_survey_findings(route_id: Optional[int] = None, period: str = "all") -> 
             "grand_total": 0,
         })
 
-    # Pivot by category
-    cat_data: dict[str, dict] = {}
-    for r in results:
-        cid = r["_id"]["category_id"]
-        entry = cat_data.setdefault(cid, {"good": 0, "damaged": 0, "total": 0})
-        if _classify_condition(r["_id"]["condition"]) == "damaged":
-            entry["damaged"] += r["count"]
-        else:
-            entry["good"] += r["count"]
-        entry["total"] += r["count"]
-
     categories = []
     grand_total = 0
-    for cid, data in sorted(cat_data.items(), key=lambda x: x[1]["total"], reverse=True):
-        grand_total += data["total"]
+    for r in sorted(results, key=lambda x: x["count"], reverse=True):
+        grand_total += r["count"]
         categories.append({
-            "category": _cat_name(cid),
-            "total": data["total"],
-            "good": data["good"],
-            "damaged": data["damaged"],
-            "damage_rate_pct": round(data["damaged"] / data["total"] * 100, 1) if data["total"] else 0,
+            "category": _cat_name(r["_id"]),
+            "total": r["count"],
+            "good": r["good"],
+            "damaged": r["damaged"],
+            "damage_rate_pct": round(r["damaged"] / r["count"] * 100, 1) if r["count"] else 0,
         })
 
     return json.dumps({
@@ -1253,74 +1189,60 @@ def find_asset_category(asset_name: str) -> str:
 @tool
 def get_inventory_counts_by_category(category_name: str, route_id: Optional[int] = None) -> str:
     """
-    Count detected assets by label and condition for a category,
-    using only the latest survey per route (is_latest=True).
+    Count detected assets by label and condition for a category.
 
     Use for:
     - "Count Signage assets by label and condition"
     - "Count Roadway Lighting assets by label and condition"
     - "Count ITS assets by label and condition"
     - "Count Pavement assets by label and condition"
-    - Any per-category breakdown of detected counts from current surveys
+    - Any per-category breakdown of detected counts
 
     Args:
         category_name: Category display name (e.g. "Directional Signage", "ITS")
         route_id: Optional route ID to restrict to a single route
 
     Returns:
-        JSON with per-label good/damaged counts, latest surveys only
+        JSON with per-label good/damaged counts
     """
     cid = _resolve_category_id(category_name)
     if not cid:
         return json.dumps({"error": f"Category '{category_name}' not found"})
 
-    latest_ids = _get_latest_survey_ids()
-
     db = get_db()
-    query: dict = {
-        "category_id": cid,
-        "survey_id": {"$in": latest_ids},
-    }
+    query: dict = {"category_id": cid}
     if route_id is not None:
         query["route_id"] = route_id
 
     pipeline = [
         {"$match": query},
         {"$group": {
-            "_id": {"asset_id": "$asset_id", "condition": "$condition"},
-            "count": {"$sum": 1}
+            "_id": "$asset_id",
+            "count": {"$sum": 1},
+            "good": {"$sum": {"$cond": [{"$eq": ["$latest_condition", "good"]}, 1, 0]}},
+            "damaged": {"$sum": {"$cond": [{"$ne": ["$latest_condition", "good"]}, 1, 0]}},
         }},
     ]
-    results = list(db.assets.aggregate(pipeline))
+    results = list(db.master_assets.aggregate(pipeline))
 
     if not results:
         return json.dumps({
             "category": _cat_name(cid),
             "route_id": route_id,
-            "note": "No detected assets found in latest surveys for this category",
+            "note": "No detected assets found for this category",
             "assets": [],
             "total": 0,
         })
 
-    asset_data: dict[str, dict] = {}
-    for r in results:
-        aid = r["_id"]["asset_id"]
-        entry = asset_data.setdefault(aid, {"good": 0, "damaged": 0, "total": 0})
-        if _classify_condition(r["_id"]["condition"]) == "damaged":
-            entry["damaged"] += r["count"]
-        else:
-            entry["good"] += r["count"]
-        entry["total"] += r["count"]
-
     assets = sorted(
         [
             {
-                "label": _label_name(aid),
-                "good": d["good"],
-                "damaged": d["damaged"],
-                "total": d["total"],
+                "label": _label_name(r["_id"]),
+                "good": r["good"],
+                "damaged": r["damaged"],
+                "total": r["count"],
             }
-            for aid, d in asset_data.items()
+            for r in results
         ],
         key=lambda x: x["total"],
         reverse=True,
@@ -1329,9 +1251,8 @@ def get_inventory_counts_by_category(category_name: str, route_id: Optional[int]
     return json.dumps({
         "category": _cat_name(cid),
         "route_id": route_id,
-        "source": "latest_surveys_only",
         "assets": assets,
-        "total": sum(d["total"] for d in asset_data.values()),
+        "total": sum(r["count"] for r in results),
     })
 
 
@@ -1343,7 +1264,7 @@ def get_inventory_counts_by_category(category_name: str, route_id: Optional[int]
 @tool
 def get_category_route_risk(category_name: str, top_n: int = 5) -> str:
     """
-    Rank routes by damaged asset count within a specific category, using latest surveys only.
+    Rank routes by damaged asset count within a specific category.
     Use for risk corridor / risk location / risk zone questions per category.
 
     Use for:
@@ -1362,67 +1283,54 @@ def get_category_route_risk(category_name: str, top_n: int = 5) -> str:
         top_n: Number of top risk routes to return (default 5)
 
     Returns:
-        JSON with routes ranked by damaged count for the given category, latest surveys only.
+        JSON with routes ranked by damaged count for the given category.
         Each entry includes damaged count, total count, damage rate %, and road name.
     """
     cid = _resolve_category_id(category_name)
     if not cid:
         return json.dumps({"error": f"Category '{category_name}' not found"})
 
-    latest_ids = _get_latest_survey_ids()
-
     db = get_db()
     pipeline = [
-        {"$match": {
-            "category_id": cid,
-            "survey_id": {"$in": latest_ids},
-        }},
+        {"$match": {"category_id": cid}},
         {"$group": {
-            "_id": {"route_id": "$route_id", "condition": "$condition"},
+            "_id": "$route_id",
             "count": {"$sum": 1},
+            "good": {"$sum": {"$cond": [{"$eq": ["$latest_condition", "good"]}, 1, 0]}},
+            "damaged": {"$sum": {"$cond": [{"$ne": ["$latest_condition", "good"]}, 1, 0]}},
         }},
     ]
-    results = list(db.assets.aggregate(pipeline))
+    results = list(db.master_assets.aggregate(pipeline))
 
     if not results:
         return json.dumps({
             "category": _cat_name(cid),
-            "note": "No detected assets found in latest surveys",
+            "note": "No detected assets found",
             "routes": [],
         })
 
-    route_data: dict = {}
-    for r in results:
-        rid = r["_id"]["route_id"]
-        if rid is None:
-            continue
-        entry = route_data.setdefault(rid, {"good": 0, "damaged": 0, "total": 0})
-        if _classify_condition(r["_id"]["condition"]) == "damaged":
-            entry["damaged"] += r["count"]
-        else:
-            entry["good"] += r["count"]
-        entry["total"] += r["count"]
-
-    route_ids = list(route_data.keys())
+    route_ids = [r["_id"] for r in results if r["_id"] is not None]
     roads = {r["route_id"]: r for r in db.roads.find({"route_id": {"$in": route_ids}})}
 
     ranked = []
-    for rid, data in route_data.items():
+    for r in results:
+        rid = r["_id"]
+        if rid is None:
+            continue
         road = roads.get(rid, {})
         ranked.append({
             "route_id": rid,
             "road_name": road.get("road_name", f"Route {rid}"),
-            "damaged": data["damaged"],
-            "good": data["good"],
-            "total": data["total"],
-            "damage_rate_pct": round(data["damaged"] / data["total"] * 100, 1) if data["total"] else 0,
+            "damaged": r["damaged"],
+            "good": r["good"],
+            "total": r["count"],
+            "damage_rate_pct": round(r["damaged"] / r["count"] * 100, 1) if r["count"] else 0,
         })
 
     ranked.sort(key=lambda x: x["damaged"], reverse=True)
 
     return json.dumps({
         "category": _cat_name(cid),
-        "source": "latest_surveys_only",
         "top_risk_routes": ranked[:top_n],
         "total_routes_with_data": len(ranked),
     })
@@ -1458,61 +1366,47 @@ def get_asset_type_route_risk(asset_name: str, top_n: int = 5) -> str:
     if not aids:
         return json.dumps({"error": f"Asset type '{asset_name}' not found in catalog"})
 
-    latest_ids = _get_latest_survey_ids()
-
     pipeline = [
-        {"$match": {
-            "asset_id": {"$in": aids},
-            "survey_id": {"$in": latest_ids},
-        }},
+        {"$match": {"asset_id": {"$in": aids}}},
         {"$group": {
-            "_id": {"route_id": "$route_id", "condition": "$condition"},
+            "_id": "$route_id",
             "count": {"$sum": 1},
+            "good": {"$sum": {"$cond": [{"$eq": ["$latest_condition", "good"]}, 1, 0]}},
+            "damaged": {"$sum": {"$cond": [{"$ne": ["$latest_condition", "good"]}, 1, 0]}},
         }},
     ]
-    results = list(db.assets.aggregate(pipeline))
+    results = list(db.master_assets.aggregate(pipeline))
 
     if not results:
         return json.dumps({
             "asset_type": asset_name,
-            "note": "No detected assets found in latest surveys",
+            "note": "No detected assets found",
             "routes": [],
         })
 
-    # Pivot by route
-    route_data: dict = {}
-    for r in results:
-        rid = r["_id"]["route_id"]
-        if rid is None:
-            continue
-        entry = route_data.setdefault(rid, {"good": 0, "damaged": 0, "total": 0})
-        if _classify_condition(r["_id"]["condition"]) == "damaged":
-            entry["damaged"] += r["count"]
-        else:
-            entry["good"] += r["count"]
-        entry["total"] += r["count"]
-
     # Enrich with road names
-    route_ids = list(route_data.keys())
+    route_ids = [r["_id"] for r in results if r["_id"] is not None]
     roads = {r["route_id"]: r for r in db.roads.find({"route_id": {"$in": route_ids}})}
 
     ranked = []
-    for rid, data in route_data.items():
+    for r in results:
+        rid = r["_id"]
+        if rid is None:
+            continue
         road = roads.get(rid, {})
         ranked.append({
             "route_id": rid,
             "road_name": road.get("road_name", f"Route {rid}"),
-            "damaged": data["damaged"],
-            "good": data["good"],
-            "total": data["total"],
-            "damage_rate_pct": round(data["damaged"] / data["total"] * 100, 1) if data["total"] else 0,
+            "damaged": r["damaged"],
+            "good": r["good"],
+            "total": r["count"],
+            "damage_rate_pct": round(r["damaged"] / r["count"] * 100, 1) if r["count"] else 0,
         })
 
     ranked.sort(key=lambda x: x["damaged"], reverse=True)
 
     return json.dumps({
         "asset_type": asset_name,
-        "source": "latest_surveys_only",
         "top_risk_corridors": ranked[:top_n],
         "total_corridors_with_data": len(ranked),
     })
