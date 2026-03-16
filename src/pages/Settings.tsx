@@ -154,15 +154,15 @@ export default function Settings() {
                 <div className="space-y-4">
                   <div className="space-y-2">
                     <Label htmlFor="name">Full Name</Label>
-                    <Input id="name" value={fullName} onChange={(e) => setFullName(e.target.value)} />
+                    <Input id="name" value={fullName} onChange={(e) => setFullName(e.target.value)} readOnly />
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="email">Email</Label>
-                    <Input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+                    <Input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} readOnly />
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="organization">Organization</Label>
-                    <Input id="organization" value={organization} onChange={(e) => setOrganization(e.target.value)} />
+                    <Input id="organization" value={organization} onChange={(e) => setOrganization(e.target.value)} readOnly/>
                   </div>
                   {/* <Button onClick={handleSave} className="mt-4">Save Changes</Button> */}
                 </div>
