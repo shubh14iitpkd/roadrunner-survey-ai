@@ -10,7 +10,14 @@ from db import init_app_db
 
 def create_app() -> Flask:
 	import os
-	load_dotenv()
+	env = os.getenv("ENV", "dev")
+	if env == "dev":
+		load_dotenv(".env.development")
+		print("USING DEV ENV")
+	else:
+		load_dotenv(".env.production")
+		print("USING PROD ENV")
+	# load_dotenv()
 	app = Flask(__name__)
 	app.config.from_object(Config())
 

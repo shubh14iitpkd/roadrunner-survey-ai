@@ -70,3 +70,8 @@ cleanup.sh
 **/all_assets_extracted.json
 # ignore model files
 **/*.pt 
+
+db_dock
+**/.env.*
+
+build.sh

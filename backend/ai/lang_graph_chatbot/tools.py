@@ -9,11 +9,8 @@ from datetime import datetime, timedelta
 from typing import Optional
 from langchain.tools import tool
 from pymongo import MongoClient
-from dotenv import load_dotenv
 
 from ai.lang_graph_chatbot.get_resolved_map import get_resolved_map
-
-load_dotenv()
 
 MONGO_URI = os.environ.get("MONGO_URI", "mongodb://localhost:27017")
 DB_NAME = os.environ.get("DB_NAME", "roadrunner")
