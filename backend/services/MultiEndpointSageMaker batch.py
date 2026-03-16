@@ -11,10 +11,8 @@ from io import BytesIO
 from PIL import Image
 from typing import Dict, List, Tuple, Optional
 import concurrent.futures
-from dotenv import load_dotenv
 from datetime import datetime
 from botocore.config import Config as BotoConfig
-load_dotenv()
 
 class MultiEndpointSageMaker:
     def __init__(self):

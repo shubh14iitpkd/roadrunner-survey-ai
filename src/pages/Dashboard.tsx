@@ -491,7 +491,7 @@ export default function Dashboard() {
                   />
                   <Legend wrapperStyle={{ fontSize: 11 }} />
                   <Bar dataKey="good_count" name="Good" fill="#16a34a" radius={[3, 3, 0, 0]} />
-                  <Bar dataKey="damaged_count" name="Damaged" fill="#ef4444" radius={[3, 3, 0, 0]} />
+                  <Bar dataKey="damaged_count" name="Poor" fill="#ef4444" radius={[3, 3, 0, 0]} />
                 </RechartsBarChart>
               </ResponsiveContainer>
             </div>

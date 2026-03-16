@@ -68,7 +68,7 @@ const App = () => (
                             <Route path="/assets" element={<AssetRegister />} />
                             <Route path="/defect-library" element={<AdminRoute><AnomalyLibrary /></AdminRoute>} />
                             <Route path="/asset-library" element={<AdminRoute><AssetLibrary /></AdminRoute>} />
-                            <Route path="/ask-ai" element={<AdminRoute><AskAI /></AdminRoute>} />
+                            <Route path="/roadgpt" element={<AdminRoute><AskAI /></AdminRoute>} />
                             <Route path="/settings" element={<Settings />} />
                             <Route path="*" element={<NotFound />} />
                           </Routes>

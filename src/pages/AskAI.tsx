@@ -171,7 +171,7 @@ export default function AskAI() {
               <Sparkles className="h-5 w-5 text-white" />
             </div>
             <div className="flex-1">
-              <h1 className="text-2xl font-bold">Ask AI</h1>
+              <h1 className="text-2xl font-bold">RoadGPT</h1>
               <p className="text-sm text-muted-foreground">Query road network data with natural language</p>
             </div>
             <ChatHistorySidebar

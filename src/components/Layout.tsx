@@ -26,7 +26,7 @@ const navigation = [
   { name: "Dashboard", href: "/", icon: LayoutDashboard, adminOnly: true },
   { name: "Defect Library", href: "/defect-library", icon: AlertTriangle, adminOnly: true },
   { name: "Asset Library", href: "/asset-library", icon: Database, adminOnly: true },
-  { name: "Ask AI", href: "/ask-ai", icon: MessageSquare, adminOnly: true },
+  { name: "RoadGPT", href: "/roadgpt", icon: MessageSquare, adminOnly: true },
   { name: "Project Management", href: null, icon: null, isHeading: true },
   { name: "Road Register", href: "/roads", icon: Map },
   { name: "Survey Upload", href: "/upload", icon: Upload },
