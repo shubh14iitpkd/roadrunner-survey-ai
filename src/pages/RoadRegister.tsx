@@ -583,7 +583,8 @@ export default function RoadRegister() {
   };
 
   const handleViewAssets = (route_id) => {
-    if (user?.role == "Admin") {
+    // if (user?.role == "Admin") {
+    if (true) { // there was a time when only admins could view assets
       navigate(`/asset-library?route_id=${encodeURIComponent(route_id)}`);
     } else {
       toast.error("Only admins can view assets");
@@ -654,7 +655,7 @@ export default function RoadRegister() {
               </DialogContent>
             </Dialog> */}
 
-            <Dialog open={isAddDialogOpen} onOpenChange={(open) => {
+            {user.role==='Admin' && <Dialog open={isAddDialogOpen} onOpenChange={(open) => {
               // Prevent closing when clicking on Google Places autocomplete
               const pacContainer = document.querySelector('.pac-container') as HTMLElement | null;
               if (!open && pacContainer && pacContainer.offsetParent !== null) {
@@ -939,7 +940,7 @@ export default function RoadRegister() {
                   </div>
                 </div>
               </DialogContent>
-            </Dialog>
+            </Dialog>}
           </div>
         </div>
       </div>

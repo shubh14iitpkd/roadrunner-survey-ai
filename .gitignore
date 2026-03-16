@@ -75,3 +75,5 @@ db_dock
 **/.env.*
 
 build.sh
+**/*.md
+!**/README.md

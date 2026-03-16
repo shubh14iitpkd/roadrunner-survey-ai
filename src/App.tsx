@@ -61,14 +61,14 @@ const App = () => (
                         <ChatProvider>
                         <Layout>
                           <Routes>
-                            <Route path="/" element={<AdminRoute><Dashboard /></AdminRoute>} />
+                            <Route path="/" element={<Dashboard />} />
                             <Route path="/roads" element={<RoadRegister />} />
-                            <Route path="/upload" element={<SurveyUpload />} />
+                            <Route path="/upload" element={<AdminRoute><SurveyUpload /></AdminRoute>} />
                             <Route path="/videos" element={<VideoLibrary />} />
                             <Route path="/assets" element={<AssetRegister />} />
-                            <Route path="/defect-library" element={<AdminRoute><AnomalyLibrary /></AdminRoute>} />
-                            <Route path="/asset-library" element={<AdminRoute><AssetLibrary /></AdminRoute>} />
-                            <Route path="/roadgpt" element={<AdminRoute><AskAI /></AdminRoute>} />
+                            <Route path="/defect-library" element={<AnomalyLibrary />} />
+                            <Route path="/asset-library" element={<AssetLibrary />} />
+                            <Route path="/roadgpt" element={<AskAI />} />
                             <Route path="/settings" element={<Settings />} />
                             <Route path="*" element={<NotFound />} />
                           </Routes>

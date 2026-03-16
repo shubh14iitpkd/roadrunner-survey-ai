@@ -23,13 +23,13 @@ import { useAuth } from "@/contexts/AuthContext";
 import logo from "@/assets/roadsight-logo.jpg";
 
 const navigation = [
-  { name: "Dashboard", href: "/", icon: LayoutDashboard, adminOnly: true },
-  { name: "Defect Library", href: "/defect-library", icon: AlertTriangle, adminOnly: true },
-  { name: "Asset Library", href: "/asset-library", icon: Database, adminOnly: true },
-  { name: "RoadGPT", href: "/roadgpt", icon: MessageSquare, adminOnly: true },
-  { name: "Project Management", href: null, icon: null, isHeading: true },
+  { name: "Dashboard", href: "/", icon: LayoutDashboard, adminOnly: false },
+  { name: "Asset Library", href: "/asset-library", icon: Database, adminOnly: false },
+  { name: "Defect Library", href: "/defect-library", icon: AlertTriangle, adminOnly: false },
+  { name: "RoadGPT", href: "/roadgpt", icon: MessageSquare, adminOnly: false },
+  { name: "Management", href: null, icon: null, isHeading: true },
   { name: "Road Register", href: "/roads", icon: Map },
-  { name: "Survey Upload", href: "/upload", icon: Upload },
+  { name: "Survey Upload", href: "/upload", icon: Upload, adminOnly: true },
   { name: "Video Library", href: "/videos", icon: FileVideo },
   { name: "Settings", href: "/settings", icon: Settings },
 ];
