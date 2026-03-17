@@ -533,7 +533,7 @@ export default function Dashboard() {
             <Table>
               <TableHeader className="top-0 z-10 bg-card">
                 <TableRow className="border-b hover:bg-transparent">
-                  <TableHead className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Defect Type</TableHead>
+                  <TableHead className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Asset Type</TableHead>
                   <TableHead className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Category</TableHead>
                   <TableHead className="text-sm font-semibold uppercase tracking-wider text-muted-foreground text-right">Count</TableHead>
                   <TableHead className="text-sm font-semibold uppercase tracking-wider text-muted-foreground text-right w-48">Actions</TableHead>

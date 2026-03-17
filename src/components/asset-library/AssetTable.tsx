@@ -8,7 +8,7 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { Search, X, RefreshCw, AlertCircle, ChevronLeft, ChevronRight } from "lucide-react";
+import { Search, X, RefreshCw, AlertCircle, ChevronLeft, ChevronRight, ArrowUp, ArrowDown, ArrowUpDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { AssetRecord } from "@/types/asset";
 
@@ -17,6 +17,8 @@ export interface ColumnDef {
   header: string;
   render: (item: AssetRecord) => React.ReactNode;
   className?: string;
+  /** Return a sortable value for this column. If omitted, column is not sortable. */
+  getValue?: (item: AssetRecord) => string | number;
 }
 
 interface AssetTableProps {
@@ -49,14 +51,44 @@ export default function AssetTable({
 }: AssetTableProps) {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
+  const [sortKey, setSortKey] = useState<string | null>(null);
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+
+  const handleSort = (colKey: string) => {
+    if (sortKey === colKey) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortKey(colKey);
+      setSortDir("asc");
+    }
+    setPage(1);
+  };
 
   // Reset page when items or search change
   useEffect(() => { setPage(1); }, [items.length, searchQuery]);
 
-  const totalPages = Math.ceil(items.length / pageSize);
+  const sortedItems = useMemo(() => {
+    if (!sortKey) return items;
+    const col = columns.find((c) => c.key === sortKey);
+    if (!col?.getValue) return items;
+    const getter = col.getValue;
+    return [...items].sort((a, b) => {
+      const va = getter(a);
+      const vb = getter(b);
+      let cmp: number;
+      if (typeof va === "number" && typeof vb === "number") {
+        cmp = va - vb;
+      } else {
+        cmp = String(va).localeCompare(String(vb), undefined, { numeric: true, sensitivity: "base" });
+      }
+      return sortDir === "asc" ? cmp : -cmp;
+    });
+  }, [items, sortKey, sortDir, columns]);
+
+  const totalPages = Math.ceil(sortedItems.length / pageSize);
   const pagedItems = useMemo(
-    () => items.slice((page - 1) * pageSize, page * pageSize),
-    [items, page, pageSize]
+    () => sortedItems.slice((page - 1) * pageSize, page * pageSize),
+    [sortedItems, page, pageSize]
   );
 
   // Auto-scroll to selected row
@@ -132,14 +164,31 @@ export default function AssetTable({
           <Table>
             <TableHeader className="sticky top-0 z-10 bg-card">
               <TableRow className="border-b border-border hover:bg-transparent">
-                {columns.map((col) => (
-                  <TableHead
-                    key={col.key}
-                    className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground px-1.5 py-1 whitespace-nowrap text-center"
-                  >
-                    {col.header}
-                  </TableHead>
-                ))}
+                {columns.map((col) => {
+                  const sortable = !!col.getValue;
+                  const isActive = sortKey === col.key;
+                  return (
+                    <TableHead
+                      key={col.key}
+                      className={cn(
+                        "text-[9px] font-semibold uppercase tracking-wider text-muted-foreground px-1.5 py-1 whitespace-nowrap text-center",
+                        sortable && "cursor-pointer select-none hover:text-foreground"
+                      )}
+                      onClick={sortable ? () => handleSort(col.key) : undefined}
+                    >
+                      <span className="inline-flex items-center gap-0.5 justify-center">
+                        {col.header}
+                        {sortable && (
+                          isActive
+                            ? sortDir === "asc"
+                              ? <ArrowUp className="h-2.5 w-2.5" />
+                              : <ArrowDown className="h-2.5 w-2.5" />
+                            : <ArrowUpDown className="h-2.5 w-2.5 opacity-30" />
+                        )}
+                      </span>
+                    </TableHead>
+                  );
+                })}
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -167,11 +216,11 @@ export default function AssetTable({
           </Table>
         )}
       </div>
-      {items.length > 0 && (
+      {sortedItems.length > 0 && (
         <div className="flex items-center justify-between px-4 py-1 border-t border-border text-[11px] text-muted-foreground">
           <div className="flex items-center gap-2">
             <span className="tabular-nums">
-              {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, items.length)} of {items.length}
+              {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, sortedItems.length)} of {sortedItems.length}
             </span>
             <Select value={String(pageSize)} onValueChange={(v) => { setPageSize(Number(v)); setPage(1); }}>
               <SelectTrigger className="h-5 w-14 text-[10px] border-border bg-background">

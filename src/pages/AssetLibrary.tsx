@@ -35,11 +35,11 @@ const conditionToColor = (condition: string): string => {
 
 // ── Table columns for Asset Library (no Issue / Defect ID) ──
 const ASSET_COLUMNS: ColumnDef[] = [
-  { key: "assetDisplayId", header: "Asset ID", className: "font-mono text-[11px] py-1.5 px-1.5 whitespace-nowrap text-center", render: (a) => a.assetDisplayId },
-  { key: "assetType", header: "Asset Type", className: "text-[10px] leading-tight py-1.5 px-1.5 min-w-[180px] max-w-[220px] text-center", render: (a) => <span className="line-clamp-2">{a.assetType}</span> },
-  { key: "category", header: "Category", className: "py-1.5 px-1.5 text-center", render: (a) => <CategoryBadge category={a.assetCategory} categoryId={a.category_id} /> },
+  { key: "assetDisplayId", header: "Asset ID", className: "font-mono text-[11px] py-1.5 px-1.5 whitespace-nowrap text-center", render: (a) => a.assetDisplayId, getValue: (a) => a.assetDisplayId },
+  { key: "assetType", header: "Asset Type", className: "text-[10px] leading-tight py-1.5 px-1.5 min-w-[180px] max-w-[220px] text-center", render: (a) => <span className="line-clamp-2">{a.assetType}</span>, getValue: (a) => a.assetType },
+  { key: "category", header: "Category", className: "py-1.5 px-1.5 text-center", render: (a) => <CategoryBadge category={a.assetCategory} categoryId={a.category_id} />, getValue: (a) => a.assetCategory },
   {
-    key: "condition", header: "Condition", className: "py-1.5 px-1.5 text-center", render: (a) => (
+    key: "condition", header: "Condition", className: "py-1.5 px-1.5 text-center", getValue: (a) => a.condition ?? '', render: (a) => (
       <span className={`inline-flex capitalize items-center rounded-md px-1.5 py-0.5 text-[9px] font-semibold leading-tight ${DAMAGED_CONDITIONS.has((a.condition ?? '').toLowerCase())
         ? 'bg-destructive/10 text-destructive'
         : a.condition?.toLowerCase() === 'good'
@@ -49,10 +49,10 @@ const ASSET_COLUMNS: ColumnDef[] = [
     )
   },
   { key: "coords", header: "Coordinates", className: "font-mono text-[10px] py-1.5 px-1.5 whitespace-nowrap text-center", render: (a) => `${a.lat.toFixed(4)}, ${a.lng.toFixed(4)}` },
-  { key: "road", header: "Road", className: "text-[11px] py-1.5 px-1.5 whitespace-nowrap text-center", render: (a) => a.roadName },
-  { key: "side", header: "Road Side", className: "text-[11px] py-1.5 px-1.5 text-center", render: (a) => a.side },
-  { key: "zone", header: "Zone", className: "text-[11px] capitalize py-1.5 px-1.5 text-center", render: (a) => a.zone },
-  { key: "survey", header: "Survey", className: "text-[11px] py-1.5 px-1.5 whitespace-nowrap text-center", render: (a) => a.lastSurveyDate },
+  { key: "road", header: "Road", className: "text-[11px] py-1.5 px-1.5 whitespace-nowrap text-center", render: (a) => a.roadName, getValue: (a) => a.roadName },
+  { key: "side", header: "Road Side", className: "text-[11px] py-1.5 px-1.5 text-center", render: (a) => a.side, getValue: (a) => a.side },
+  { key: "zone", header: "Zone", className: "text-[11px] capitalize py-1.5 px-1.5 text-center", render: (a) => a.zone, getValue: (a) => a.zone },
+  { key: "survey", header: "Survey", className: "text-[11px] py-1.5 px-1.5 whitespace-nowrap text-center", render: (a) => a.lastSurveyDate, getValue: (a) => a.lastSurveyDate },
 ];
 
 export default function AssetLibrary() {
