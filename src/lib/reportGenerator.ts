@@ -68,12 +68,12 @@ export async function exportDefectByAssetTypeReport(filterAssetType?: string, la
   const rows = assets.map(a => assetToRow(a, labelMap));
 
   const headers = [
-    "Defect ID", "Asset ID", "Latitude", "Longitude",
+    "Defect ID", "Asset ID", "Asset Type", "Asset Category", "Latitude", "Longitude",
     "Road Name", "Side", "Zone", "Last Survey Date", "Issue Type",
   ];
 
   const data = rows.map(r => [
-    r.anomalyId, r.displayId, r.lat, r.lon,
+    r.anomalyId, r.displayId, r.assetType, r.assetCategory, r.lat, r.lon,
     r.roadName, capitalize(r.side), capitalize(r.zone), r.lastSurveyDate, capitalize(r.issueType),
   ]);
 
