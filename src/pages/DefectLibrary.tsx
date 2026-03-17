@@ -348,25 +348,31 @@ export default function DefectLibrary() {
     }
   }, [user]);
 
-  const handleExportExcel = () => {
-    const headers = [
-      "Defect ID", "Asset ID", "Asset Type", "Category", "Latitude", "Longitude",
-      "Road Name", "Side", "Zone", "Last Survey Date", "Issue Type",
-    ];
-    const rows = filteredDefects.map((a) => [
-      a.defectId, a.assetDisplayId, a.assetType, a.assetCategory,
-      a.lat, a.lng, a.roadName, capitalize(a.side),
-      capitalize(a.zone), a.lastSurveyDate, capitalize(a.issue),
-    ]);
-    exportToExcel({
-      filename: `Defects Library Report.xlsx`,
-      sheetName: "Defects",
-      title: "RoadSight AI — Defect Library Report",
-      subtitle: `Generated: ${new Date().toLocaleDateString()} | ${filteredDefects.length} defects`,
-      headers,
-      rows,
-    });
-    toast.success("Defects report exported as Excel");
+  const [exporting, setExporting] = useState(false);
+  const handleExportExcel = async () => {
+    setExporting(true);
+    try {
+      const headers = [
+        "Defect ID", "Asset ID", "Asset Type", "Category", "Latitude", "Longitude",
+        "Road Name", "Side", "Zone", "Last Survey Date", "Issue Type",
+      ];
+      const rows = filteredDefects.map((a) => [
+        a.defectId, a.assetDisplayId, a.assetType, a.assetCategory,
+        a.lat, a.lng, a.roadName, capitalize(a.side),
+        capitalize(a.zone), a.lastSurveyDate, capitalize(a.issue),
+      ]);
+      exportToExcel({
+        filename: `Defects Library Report.xlsx`,
+        sheetName: "Defects",
+        title: "RoadSight AI — Defect Library Report",
+        subtitle: `Generated: ${new Date().toLocaleDateString()} | ${filteredDefects.length} defects`,
+        headers,
+        rows,
+      });
+      toast.success("Defects report exported as Excel");
+    } finally {
+      setExporting(false);
+    }
   };
 
   const assetTypeOptions = useMemo(() => {
@@ -446,8 +452,8 @@ export default function DefectLibrary() {
                 <SelectItem value="2026">Survey 2026</SelectItem>
               </SelectContent>
             </Select> */}
-            <Button variant="outline" size="sm" className="h-7 text-[11px] gap-1.5" onClick={handleExportExcel}>
-              <Download className="h-3 w-3" />
+            <Button variant="outline" size="sm" className="h-7 text-[11px] gap-1.5" disabled={exporting} onClick={handleExportExcel}>
+              {exporting ? <Loader2 className="h-3 w-3 animate-spin" /> : <Download className="h-3 w-3" />}
               Export Report
             </Button>
           </div>

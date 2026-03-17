@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { api } from "@/lib/api";
 import { exportToExcel } from "@/lib/excelExport";
-import { Download, Database } from "lucide-react";
+import { Download, Database, Loader2 } from "lucide-react";
 import {
   Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
@@ -267,24 +267,33 @@ export default function AssetLibrary() {
     setMarkerPopup(null);
   }, []);
 
-  const handleExportExcel = () => {
-    const headers = [
-      "Asset ID", "Asset Type", "Category", "Condition",
-      "Latitude", "Longitude", "Road Name", "Side", "Zone", "Survey Date",
-    ];
-    const rows = filteredAssets.map((a) => [
-      a.assetDisplayId, a.assetType, a.assetCategory, capitalize(a.condition),
-      a.lat, a.lng, a.roadName, capitalize(a.side), capitalize(a.zone), a.lastSurveyDate,
-    ]);
-    exportToExcel({
-      filename: "Asset_Library_Report.xlsx",
-      sheetName: "Assets",
-      title: "RoadSight AI — Asset Library Report",
-      subtitle: `Generated: ${new Date().toLocaleDateString()} | ${filteredAssets.length} assets`,
-      headers,
-      rows,
-    });
-    toast.success("Asset report exported as Excel");
+  const [exporting, setExporting] = useState(false);
+  const handleExportExcel = async () => {
+    setExporting(true);
+    // the export was so blazingly fast I could not see the loader
+    // await new Promise(resolve => setTimeout(resolve, 4000));
+    console.log("Exporting Excel with assets:", exporting);
+    try {
+      const headers = [
+        "Asset ID", "Asset Type", "Category", "Condition",
+        "Latitude", "Longitude", "Road Name", "Side", "Zone", "Survey Date",
+      ];
+      const rows = filteredAssets.map((a) => [
+        a.assetDisplayId, a.assetType, a.assetCategory, capitalize(a.condition),
+        a.lat, a.lng, a.roadName, capitalize(a.side), capitalize(a.zone), a.lastSurveyDate,
+      ]);
+      exportToExcel({
+        filename: "Asset_Library_Report.xlsx",
+        sheetName: "Assets",
+        title: "RoadSight AI — Asset Library Report",
+        subtitle: `Generated: ${new Date().toLocaleDateString()} | ${filteredAssets.length} assets`,
+        headers,
+        rows,
+      });
+      toast.success("Asset report exported as Excel");
+    } finally {
+      setExporting(false);
+    }
   };
 
   const assetTypeOptions = useMemo(() => {
@@ -349,8 +358,8 @@ export default function AssetLibrary() {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" className="h-7 text-[11px] gap-1.5" onClick={handleExportExcel}>
-              <Download className="h-3 w-3" />
+            <Button variant="outline" size="sm" className="h-7 text-[11px] gap-1.5" disabled={exporting} onClick={handleExportExcel}>
+              {exporting ? <Loader2 className="h-3 w-3 animate-spin" /> : <Download className="h-3 w-3" />}
               Export Report
             </Button>
           </div>

@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils";
 import {
   TrendingUp, AlertTriangle, Package, Calendar,
   MapPin, Eye, ChevronLeft, ChevronRight, Map, ArrowUpRight, Activity, X, Download,
-  BarChart
+  BarChart, Loader2
 } from "lucide-react";
 import {
   PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Sector,
@@ -104,6 +104,15 @@ export default function Dashboard() {
 
   // Anomaly data from API
   const [defectByAsset, setDefectByAsset] = useState<any[]>([]);
+
+  // Export loading states
+  const [exportingKeys, setExportingKeys] = useState<Set<string>>(new Set());
+  const startExport = useCallback(async (key: string, fn: () => Promise<void>) => {
+    setExportingKeys(prev => new Set(prev).add(key));
+    try { await fn(); } catch (e) { console.error(e); } finally {
+      setExportingKeys(prev => { const s = new Set(prev); s.delete(key); return s; });
+    }
+  }, []);
 
   // Helper to get category display name from labelMap
   const getCategoryDisplayName = useCallback((item) => {
@@ -512,9 +521,10 @@ export default function Dashboard() {
               variant="outline"
               size="sm"
               className="h-7 text-sm gap-1.5"
-              onClick={() => { exportDefectByAssetTypeReport(undefined, labelMapData).catch(console.error); }}
+              disabled={exportingKeys.has("defect-asset-all")}
+              onClick={() => startExport("defect-asset-all", () => exportDefectByAssetTypeReport(undefined, labelMapData))}
              >
-              <Download className="h-3 w-3" />
+              {exportingKeys.has("defect-asset-all") ? <Loader2 className="h-3 w-3 animate-spin" /> : <Download className="h-3 w-3" />}
               Export Report
             </Button>
           </div>
@@ -547,9 +557,10 @@ export default function Dashboard() {
                           variant="ghost"
                           size="sm"
                           className="h-7 text-[11px] gap-1 text-muted-foreground hover:text-foreground"
-                           onClick={() => { exportDefectByAssetTypeReport(row.type_id, labelMapData).catch(console.error); }}
+                          disabled={exportingKeys.has(`defect-asset-${row.type_id}`)}
+                          onClick={() => startExport(`defect-asset-${row.type_id}`, () => exportDefectByAssetTypeReport(row.type_id, labelMapData))}
                          >
-                           <Download className="h-3 w-3" />
+                           {exportingKeys.has(`defect-asset-${row.type_id}`) ? <Loader2 className="h-3 w-3 animate-spin" /> : <Download className="h-3 w-3" />}
                            Report
                         </Button>
                         <Button
@@ -592,9 +603,10 @@ export default function Dashboard() {
                 variant="outline"
                 size="sm"
                 className="h-7 text-sm gap-1.5"
-                onClick={() => { exportDefectByRoadReport(undefined, labelMapData).catch(console.error); }}
+                disabled={exportingKeys.has("defect-road-all")}
+                onClick={() => startExport("defect-road-all", () => exportDefectByRoadReport(undefined, labelMapData))}
                >
-                <Download className="h-3 w-3" />
+                {exportingKeys.has("defect-road-all") ? <Loader2 className="h-3 w-3 animate-spin" /> : <Download className="h-3 w-3" />}
                 Export Report
               </Button>
               {/* <Button
@@ -637,9 +649,10 @@ export default function Dashboard() {
                           variant="ghost"
                           size="sm"
                           className="h-7 text-[11px] gap-1 text-muted-foreground hover:text-foreground"
-                           onClick={() => { exportDefectByRoadReport(row.road, labelMapData).catch(console.error); }}
+                          disabled={exportingKeys.has(`defect-road-${row.road}`)}
+                          onClick={() => startExport(`defect-road-${row.road}`, () => exportDefectByRoadReport(row.road, labelMapData))}
                          >
-                           <Download className="h-3 w-3" />
+                           {exportingKeys.has(`defect-road-${row.road}`) ? <Loader2 className="h-3 w-3 animate-spin" /> : <Download className="h-3 w-3" />}
                            Report
                         </Button>
                         <Button
