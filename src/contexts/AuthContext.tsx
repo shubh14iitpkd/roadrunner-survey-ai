@@ -88,22 +88,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         last_name: userData.last_name,
         organisation: userData.organisation,
       });
-      const tokens = { access_token: resp.access_token, refresh_token: resp.refresh_token };
-      localStorage.setItem("auth_tokens", JSON.stringify(tokens));
-      const backendUser = resp.user;
-      const mapped: User = {
-        id: backendUser._id,
-        email: backendUser.email,
-        first_name: backendUser.first_name || userData.first_name || backendUser.name || "",
-        last_name: backendUser.last_name || userData.last_name || "",
-        organisation: backendUser.organisation || userData.organisation || "",
-        role: backendUser.role,
-        verified: true,
-      };
-      setUser(mapped);
-      setIsAuthenticated(true);
-      localStorage.setItem("auth_user", JSON.stringify(mapped));
-      return { success: true, userId: mapped.id };
+      // Account is pending approval — don't auto-login
+      return { success: true, pendingApproval: true };
     } catch (e: any) {
       return { success: false, error: e.message };
     }

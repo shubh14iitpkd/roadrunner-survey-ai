@@ -229,6 +229,13 @@ export const api = {
 			apiFetch(`/api/users/${userId}/preferences/category`, { method: "PUT", body: JSON.stringify({ category_id: categoryId, display_name: displayName }) }),
 		updatePassword: (userId: string, payload: any) =>
 			apiFetch(`/api/users/${userId}/password`, { method: "PUT", body: JSON.stringify(payload) }),
+		list: () => apiFetch("/api/users/"),
+		approve: (userId: string) =>
+			apiFetch(`/api/users/${userId}/approve`, { method: "PUT" }),
+		updateRole: (userId: string, role: string) =>
+			apiFetch(`/api/users/${userId}/role`, { method: "PUT", body: JSON.stringify({ role }) }),
+		revoke: (userId: string) =>
+			apiFetch(`/api/users/${userId}`, { method: "DELETE" }),
 	},
 	frames: {
 		list: (params?: { video_id?: string; survey_id?: string; route_id?: number; has_detections?: boolean; limit?: number; offset?: number }) => {

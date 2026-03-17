@@ -3,6 +3,8 @@ from flask import Blueprint, jsonify, request
 from bson import ObjectId
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from utils.security import hash_password, verify_password
+from utils.rbac import role_required
+from utils.roles import normalize_to_canonical, to_display_role
 
 user_bp = Blueprint("user", __name__)
 
@@ -189,5 +191,156 @@ def update_password(user_id: str):
     except Exception as e:
         print(f"[USER] {e}")
         return jsonify({"error": str(e)}), 500
+
+
+@user_bp.get("/")
+@jwt_required()
+@role_required(["admin"])
+def list_users():
+    """
+    List all users (admin only)
+    ---
+    tags:
+      - User
+    security:
+      - Bearer: []
+    responses:
+      200:
+        description: List of all users
+    """
+    db = get_db()
+    users = list(db.users.find({}, {
+        "password_hash": 0,
+    }))
+    result = []
+    for u in users:
+        result.append({
+            "_id": str(u["_id"]),
+            "name": u.get("name", ""),
+            "first_name": u.get("first_name", ""),
+            "last_name": u.get("last_name", ""),
+            "email": u.get("email", ""),
+            "organisation": u.get("organisation", ""),
+            "role": to_display_role(normalize_to_canonical(u.get("role"))),
+            "is_approved": u.get("is_approved", False),
+        })
+    return jsonify({"users": result})
+
+
+@user_bp.put("/<user_id>/approve")
+@jwt_required()
+@role_required(["admin"])
+def approve_user(user_id: str):
+    """
+    Approve a user account (admin only)
+    ---
+    tags:
+      - User
+    security:
+      - Bearer: []
+    parameters:
+      - name: user_id
+        in: path
+        type: string
+        required: true
+    responses:
+      200:
+        description: User approved
+      404:
+        description: User not found
+    """
+    db = get_db()
+    result = db.users.update_one(
+        {"_id": ObjectId(user_id)},
+        {"$set": {"is_approved": True}}
+    )
+    if result.matched_count == 0:
+        return jsonify({"error": "user not found"}), 404
+    return jsonify({"ok": True, "message": "user approved"})
+
+
+@user_bp.put("/<user_id>/role")
+@jwt_required()
+@role_required(["admin"])
+def update_role(user_id: str):
+    """
+    Update a user's role (admin only)
+    ---
+    tags:
+      - User
+    security:
+      - Bearer: []
+    parameters:
+      - name: user_id
+        in: path
+        type: string
+        required: true
+      - name: body
+        in: body
+        required: true
+        schema:
+          type: object
+          properties:
+            role:
+              type: string
+    responses:
+      200:
+        description: Role updated
+      400:
+        description: Missing role
+      404:
+        description: User not found
+    """
+    data = request.get_json(silent=True) or {}
+    role_input = data.get("role")
+    if not role_input:
+        return jsonify({"error": "role is required"}), 400
+
+    canonical = normalize_to_canonical(role_input)
+    db = get_db()
+    result = db.users.update_one(
+        {"_id": ObjectId(user_id)},
+        {"$set": {"role": canonical}}
+    )
+    if result.matched_count == 0:
+        return jsonify({"error": "user not found"}), 404
+    return jsonify({"ok": True, "message": "role updated", "role": to_display_role(canonical)})
+
+
+@user_bp.delete("/<user_id>")
+@jwt_required()
+@role_required(["admin"])
+def revoke_user(user_id: str):
+    """
+    Revoke (delete) a non-admin user account (admin only)
+    ---
+    tags:
+      - User
+    security:
+      - Bearer: []
+    parameters:
+      - name: user_id
+        in: path
+        type: string
+        required: true
+    responses:
+      200:
+        description: User revoked
+      403:
+        description: Cannot revoke admin accounts
+      404:
+        description: User not found
+    """
+    db = get_db()
+    user = db.users.find_one({"_id": ObjectId(user_id)})
+    if not user:
+        return jsonify({"error": "user not found"}), 404
+
+    canonical_role = normalize_to_canonical(user.get("role"))
+    if canonical_role == "admin":
+        return jsonify({"error": "cannot revoke admin accounts"}), 403
+
+    db.users.delete_one({"_id": ObjectId(user_id)})
+    return jsonify({"ok": True, "message": "user revoked"})
 
 

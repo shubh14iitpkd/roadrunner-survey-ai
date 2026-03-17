@@ -23,6 +23,7 @@ export default function SignUp() {
     role: "" as "Road Surveyor" | "Asset Manager" | "Admin" | "",
   });
   const [loading, setLoading] = useState(false);
+  const [pendingApproval, setPendingApproval] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -51,11 +52,7 @@ export default function SignUp() {
     setLoading(false);
 
     if (result.success) {
-      toast({
-        title: "Account created successfully!",
-        description: "Welcome to RoadSight AI",
-      });
-      navigate("/");
+      setPendingApproval(true);
     } else {
       toast({
         variant: "destructive",
@@ -64,6 +61,25 @@ export default function SignUp() {
       });
     }
   };
+
+  if (pendingApproval) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background p-4">
+        <Card className="w-full max-w-md p-8 card-shadow">
+          <div className="flex justify-center mb-6">
+            <img src={logo} alt="RoadSight AI" className="h-16 w-auto object-contain dark:brightness-0 dark:invert" />
+          </div>
+          <h1 className="text-2xl font-bold text-center mb-2">Account Created</h1>
+          <p className="text-muted-foreground text-center mb-6">
+            Your account has been created successfully. You will be able to log in once an admin approves your account.
+          </p>
+          <Button className="w-full" onClick={() => navigate("/login")}>
+            Go to Login
+          </Button>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-background p-4">
@@ -131,8 +147,6 @@ export default function SignUp() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="Road Surveyor">Road Surveyor</SelectItem>
-                {/* <SelectItem value="Asset Manager">Asset Manager</SelectItem> */}
-                <SelectItem value="Admin">Admin</SelectItem>
               </SelectContent>
             </Select>
           </div>

@@ -83,33 +83,15 @@ def signup():
 		"password_hash": password_hash,
 		"role": canonical_role,  # store canonical
 		"is_verified": True,
+		"is_approved": False,
 	}
-	insert_result = db.users.insert_one(user_doc)
-	user_id = str(insert_result.inserted_id)
+	db.users.insert_one(user_doc)
 
-	access_token = create_access_token(
-		identity=user_id,
-		expires_delta=timedelta(hours=12),
-		additional_claims={"email": email_raw, "role": canonical_role},
-	)
-	refresh_token = create_refresh_token(
-		identity=user_id,
-		additional_claims={"email": email_raw, "role": canonical_role},
-	)
 	return (
 		jsonify(
 			{
-				"access_token": access_token,
-				"refresh_token": refresh_token,
-				"user": {
-					"_id": user_id,
-					"email": email_raw,
-					"name": name,
-					"first_name": first_name,
-					"last_name": last_name,
-					"organisation": organisation,
-					"role": to_display_role(canonical_role),
-				},
+				"message": "Account created successfully. You can log in once an admin approves your account.",
+				"pending_approval": True,
 			}
 		),
 		201,
@@ -156,6 +138,9 @@ def login():
 	user = db.users.find_one({"email_lower": email})
 	if not user or not verify_password(password, user.get("password_hash", "")):
 		return jsonify({"error": "invalid credentials"}), 401
+
+	if not user.get("is_approved", False):
+		return jsonify({"error": "Your account is pending admin approval. Please try again later."}), 403
 
 	user_id = str(user["_id"])  # BSON ObjectId -> string
 	canonical_role = normalize_to_canonical(user.get("role"))
