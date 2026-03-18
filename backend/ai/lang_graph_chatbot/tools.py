@@ -571,11 +571,11 @@ def list_detected_assets(route_id: Optional[int] = None) -> str:
 
 
 @tool
-def get_asset_locations(asset_name: str = "", category_name: str = "", route_id: Optional[int] = None, condition: str = "", limit: int = 50) -> str:
+def get_asset_locations(asset_name: str = "", category_name: str = "", route_id: Optional[int] = None, condition: str = "", limit: int = 20) -> str:
     """
-    Get locations (lat/lng) where assets were detected.
+    Get locations (lat/lng) where assets were detected and listing assets.
     Use for "Where were traffic signs detected?", "Show locations of guardrails",
-    "Show damaged sign locations", "Map all damaged ITS assets".
+    "Show damaged sign locations", "Map all damaged ITS assets", "List of all street lights".
 
     Args:
         asset_name: Optional specific asset type name (e.g. "Guardrail")
@@ -583,10 +583,12 @@ def get_asset_locations(asset_name: str = "", category_name: str = "", route_id:
         route_id: Optional route ID
         condition: Optional condition filter — pass "damaged" to return only damaged assets,
                    or "good" for good assets. Leave empty for all.
-        limit: Max results (default 50)
+        limit: Max results (default 20)
 
     Returns:
         JSON array of assets with lat/lng, condition, and confidence
+
+    Instruction: if response contains list of data, format result in tabular form and include the message if provided.
     """
     db = get_db()
     query: dict = {"canonical_location": {"$exists": True}}
@@ -616,6 +618,7 @@ def get_asset_locations(asset_name: str = "", category_name: str = "", route_id:
         elif norm == "good":
             query["latest_condition"] = "good"
 
+    total_count = db.master_assets.count_documents(query)
     assets = list(db.master_assets.find(query).limit(limit))
 
     locations = []
@@ -631,12 +634,21 @@ def get_asset_locations(asset_name: str = "", category_name: str = "", route_id:
                 "confidence": a.get("latest_confidence"),
             })
 
-    return json.dumps({
+    result = {
         "filter": {"asset_name": asset_name or None, "category_name": category_name or None,
                    "route_id": route_id, "condition": condition or None},
         "count": len(locations),
         "locations": locations,
-    })
+    }
+
+    if total_count > limit:
+        result["message"] = (
+            f"Showing {limit} of {total_count} total matching assets. "
+            "RoadGPT can display a maximum of 20 assets at a time. "
+            "Please use the Asset Library to view the full list."
+        )
+
+    return json.dumps(result)
 
 
 @tool
