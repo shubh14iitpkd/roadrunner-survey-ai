@@ -637,6 +637,76 @@ def update_icon_config():
 	return jsonify({"ok": True})
 
 
+@assets_bp.put("/move-category", endpoint="move_asset_category")
+@role_required(["admin"])
+def move_asset_category():
+	"""
+	Move asset types to a different category.
+	Updates system_asset_labels, master_assets, and assets collections.
+	---
+	tags:
+	  - Assets
+	security:
+	  - Bearer: []
+	parameters:
+	  - name: body
+	    in: body
+	    required: true
+	    schema:
+	      type: object
+	      required:
+	        - asset_ids
+	        - new_category_id
+	      properties:
+	        asset_ids:
+	          type: array
+	          items:
+	            type: string
+	        new_category_id:
+	          type: string
+	responses:
+	  200:
+	    description: Asset category updated
+	  400:
+	    description: Missing required fields
+	"""
+	data = request.get_json(silent=True) or {}
+	asset_ids = data.get("asset_ids") or []
+	new_category_id = data.get("new_category_id")
+
+	if not asset_ids:
+		return jsonify({"error": "asset_ids required"}), 400
+	if not new_category_id:
+		return jsonify({"error": "new_category_id required"}), 400
+
+	db = get_db()
+
+	# Verify the target category exists
+	cat = db.system_asset_categories.find_one({"category_id": new_category_id})
+	if not cat:
+		return jsonify({"error": "category not found"}), 404
+
+	# Update system_asset_labels
+	db.system_asset_labels.update_many(
+		{"asset_id": {"$in": asset_ids}},
+		{"$set": {"category_id": new_category_id}}
+	)
+
+	# Update master_assets
+	db.master_assets.update_many(
+		{"asset_id": {"$in": asset_ids}},
+		{"$set": {"category_id": new_category_id}}
+	)
+
+	# Update individual asset observations
+	db.assets.update_many(
+		{"asset_id": {"$in": asset_ids}},
+		{"$set": {"category_id": new_category_id}}
+	)
+
+	return jsonify({"ok": True, "updated_category": new_category_id})
+
+
 @assets_bp.get("/available-icons", endpoint="available_icons")
 @role_required(["admin", "surveyor", "viewer"])
 def list_available_icons():
@@ -776,13 +846,15 @@ def get_resolved_map(user_id: str):
 		aid = l["asset_id"]
 		entry = {
 			"asset_id": aid,
-			"category_id": l.get("category_id"),  # Include category_id for tree building
+			"category_id": l.get("category_id"),
+			"category_name": l.get("category_name"),  
 			"default_name": l["default_name"],
 			"group_id": l.get("group_id"),
 			"default_group_id": l.get("default_group_id", ""),
 			"original_display_name": l["display_name"],
 			"display_name": labels_override.get(aid, {}).get("display_name") or l["display_name"]
 		}
+		
 		# Include icon config if present
 		if l.get("icon_url"):
 			entry["icon_url"] = l["icon_url"]

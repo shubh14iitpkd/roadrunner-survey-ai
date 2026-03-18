@@ -242,6 +242,8 @@ export const api = {
 			apiFetch(`/api/users/${userId}`, { method: "DELETE" }),
 		updateAssetIconConfig: (assetIds: string[], config: { icon_url?: string; icon_size?: [number, number]; icon_anchor?: [number, number]; display_name?: string; reset?: boolean }) =>
 			apiFetch(`/api/assets/icon-config`, { method: "PUT", body: JSON.stringify({ asset_ids: assetIds, ...config }) }),
+		moveAssetCategory: (assetIds: string[], newCategoryId: string) =>
+			apiFetch(`/api/assets/move-category`, { method: "PUT", body: JSON.stringify({ asset_ids: assetIds, new_category_id: newCategoryId }) }),
 		uploadAssetIcon: (file: File) => {
 			const formData = new FormData();
 			formData.append("icon", file);

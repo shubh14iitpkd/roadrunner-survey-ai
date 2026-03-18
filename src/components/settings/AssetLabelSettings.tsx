@@ -17,7 +17,7 @@ import { Badge } from "@/components/ui/badge";
 import AssetIconEditDialog from "./AssetIconEditDialog";
 
 export default function AssetLabelSettings() {
-  const { data, loading, updateCategoryLabel, updateAssetLabel, updateAssetIcon } = useLabelMap();
+  const { data, loading, updateCategoryLabel, updateAssetLabel, updateAssetIcon, updateAssetCategory } = useLabelMap();
   const { toast } = useToast();
 
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -33,6 +33,7 @@ export default function AssetLabelSettings() {
     iconUrl?: string;
     iconSize?: [number, number];
     iconAnchor?: [number, number];
+    categoryId?: string;
   } | null>(null);
 
   const handleEdit = (id: string, currentValue: string) => {
@@ -119,8 +120,8 @@ export default function AssetLabelSettings() {
   const allLabels = Object.values(data.labels);
 
   // Group labels by group_id; labels without group_id stay individual
-  const groupedLabels: { groupKey: string; displayName: string; groupId: string | null; assetIds: string[]; originalDisplayName: string; iconUrl?: string; iconSize?: [number, number]; iconAnchor?: [number, number] }[] = [];
-  const groupMap = new Map<string, { displayName: string; groupId: string; assetIds: string[]; originalDisplayName: string; iconUrl?: string; iconSize?: [number, number]; iconAnchor?: [number, number] }>();
+  const groupedLabels: { groupKey: string; displayName: string; groupId: string | null; assetIds: string[]; originalDisplayName: string; iconUrl?: string; iconSize?: [number, number]; iconAnchor?: [number, number]; categoryId?: string }[] = [];
+  const groupMap = new Map<string, { displayName: string; groupId: string; assetIds: string[]; originalDisplayName: string; iconUrl?: string; iconSize?: [number, number]; iconAnchor?: [number, number]; categoryId?: string }>();
 
   for (const label of allLabels) {
     const gid = (label as any).group_id as string | undefined;
@@ -134,6 +135,7 @@ export default function AssetLabelSettings() {
           iconUrl: label.icon_url,
           iconSize: label.icon_size,
           iconAnchor: label.icon_anchor,
+          categoryId: label.category_id,
         });
       }
       groupMap.get(gid)!.assetIds.push(label.asset_id!);
@@ -147,6 +149,7 @@ export default function AssetLabelSettings() {
         iconUrl: label.icon_url,
         iconSize: label.icon_size,
         iconAnchor: label.icon_anchor,
+        categoryId: label.category_id,
       });
     }
   }
@@ -160,6 +163,7 @@ export default function AssetLabelSettings() {
       iconUrl: group.iconUrl,
       iconSize: group.iconSize,
       iconAnchor: group.iconAnchor,
+      categoryId: group.categoryId,
     });
   }
 
@@ -353,6 +357,7 @@ export default function AssetLabelSettings() {
                                   iconUrl: group.iconUrl,
                                   iconSize: group.iconSize,
                                   iconAnchor: group.iconAnchor,
+                                  categoryId: group.categoryId,
                                 });
                               }}
                             >
@@ -393,9 +398,18 @@ export default function AssetLabelSettings() {
         currentIconUrl={iconEditTarget?.iconUrl}
         currentIconSize={iconEditTarget?.iconSize}
         currentIconAnchor={iconEditTarget?.iconAnchor}
+        currentCategoryId={iconEditTarget?.categoryId}
+        categories={categories.map((c) => ({ category_id: c.category_id!, display_name: c.display_name }))}
         onSave={async (assetIds, config) => {
-          await updateAssetIcon(assetIds, config);
-          toast({ title: "Saved", description: "Asset icon configuration updated" });
+          const { category_id, ...iconConfig } = config;
+          const hasIconChanges = Object.keys(iconConfig).length > 0;
+          if (hasIconChanges) {
+            await updateAssetIcon(assetIds, iconConfig);
+          }
+          if (category_id) {
+            await updateAssetCategory(assetIds, category_id);
+          }
+          toast({ title: "Saved", description: "Asset configuration updated" });
           setIconEditTarget(null);
         }}
       />

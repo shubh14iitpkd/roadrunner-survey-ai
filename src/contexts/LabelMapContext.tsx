@@ -26,6 +26,7 @@ export interface LabelMapContextType {
   updateCategoryLabel: (categoryId: string, displayName: string) => Promise<void>;
   updateAssetLabel: (assetIds: string[], displayName: string) => Promise<void>;
   updateAssetIcon: (assetIds: string[], iconConfig: { icon_url?: string; icon_size?: [number, number]; icon_anchor?: [number, number]; display_name?: string; reset?: boolean }) => Promise<void>;
+  updateAssetCategory: (assetIds: string[], newCategoryId: string) => Promise<void>;
   refreshData: () => Promise<void>;
 }
 
@@ -126,6 +127,21 @@ export function LabelMapProvider({ children }: { children: ReactNode }) {
     });
   };
 
+  const updateAssetCategory = async (assetIds: string[], newCategoryId: string) => {
+    await api.user.moveAssetCategory(assetIds, newCategoryId);
+
+    setData((prev) => {
+      if (!prev) return prev;
+      const updatedLabels = { ...prev.labels };
+      for (const aid of assetIds) {
+        if (updatedLabels[aid]) {
+          updatedLabels[aid] = { ...updatedLabels[aid], category_id: newCategoryId };
+        }
+      }
+      return { ...prev, labels: updatedLabels };
+    });
+  };
+
   const refreshData = async () => {
     await fetchData();
   };
@@ -139,6 +155,7 @@ export function LabelMapProvider({ children }: { children: ReactNode }) {
         updateCategoryLabel,
         updateAssetLabel,
         updateAssetIcon,
+        updateAssetCategory,
         refreshData,
       }}
     >

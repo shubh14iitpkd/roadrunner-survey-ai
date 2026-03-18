@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { RotateCcw, Loader2, Upload, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { api, API_BASE } from "@/lib/api";
@@ -21,12 +22,15 @@ interface AssetIconEditDialogProps {
   currentIconUrl?: string;
   currentIconSize?: [number, number];
   currentIconAnchor?: [number, number];
+  currentCategoryId?: string;
+  categories?: { category_id: string; display_name: string }[];
   onSave: (assetIds: string[], config: {
     icon_url?: string;
     icon_size?: [number, number];
     icon_anchor?: [number, number];
     display_name?: string;
     reset?: boolean;
+    category_id?: string;
   }) => Promise<void>;
 }
 
@@ -39,6 +43,8 @@ export default function AssetIconEditDialog({
   currentIconUrl,
   currentIconSize,
   currentIconAnchor,
+  currentCategoryId,
+  categories,
   onSave,
 }: AssetIconEditDialogProps) {
   const { toast } = useToast();
@@ -48,6 +54,7 @@ export default function AssetIconEditDialog({
   const [editDisplayName, setEditDisplayName] = useState(displayName);
   const [iconSize, setIconSize] = useState<[number, number]>(currentIconSize || DEFAULT_ICON_SIZE);
   const [iconAnchor, setIconAnchor] = useState<[number, number]>(currentIconAnchor || DEFAULT_ICON_ANCHOR);
+  const [selectedCategoryId, setSelectedCategoryId] = useState<string | undefined>(currentCategoryId);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
 
@@ -65,6 +72,7 @@ export default function AssetIconEditDialog({
       setEditDisplayName(displayName);
       setIconSize(currentIconSize || DEFAULT_ICON_SIZE);
       setIconAnchor(currentIconAnchor || DEFAULT_ICON_ANCHOR);
+      setSelectedCategoryId(currentCategoryId);
 
       // Fetch available icons from backend
       setLoadingIcons(true);
@@ -79,7 +87,8 @@ export default function AssetIconEditDialog({
     selectedIconUrl !== currentIconUrl ||
     editDisplayName !== displayName ||
     iconSize[0] !== (currentIconSize?.[0] ?? DEFAULT_ICON_SIZE[0]) ||
-    iconSize[1] !== (currentIconSize?.[1] ?? DEFAULT_ICON_SIZE[1]);
+    iconSize[1] !== (currentIconSize?.[1] ?? DEFAULT_ICON_SIZE[1]) ||
+    selectedCategoryId !== currentCategoryId;
 
   const hasCustomization = !!currentIconUrl || displayName !== originalDisplayName;
 
@@ -131,6 +140,9 @@ export default function AssetIconEditDialog({
       if (editDisplayName !== displayName) {
         config.display_name = editDisplayName;
       }
+      if (selectedCategoryId !== currentCategoryId) {
+        config.category_id = selectedCategoryId;
+      }
       await onSave(assetIds, config);
       onOpenChange(false);
     } finally {
@@ -174,6 +186,30 @@ export default function AssetIconEditDialog({
               </p>
             )}
           </div>
+
+          {/* Category */}
+          {categories && categories.length > 0 && (
+            <div className="space-y-2">
+              <Label className="text-xs font-medium">Category</Label>
+              <Select value={selectedCategoryId} onValueChange={setSelectedCategoryId}>
+                <SelectTrigger className="h-8 text-sm">
+                  <SelectValue placeholder="Select category" />
+                </SelectTrigger>
+                <SelectContent>
+                  {categories.map((cat) => (
+                    <SelectItem key={cat.category_id} value={cat.category_id}>
+                      {cat.display_name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {selectedCategoryId !== currentCategoryId && (
+                <p className="text-[10px] text-muted-foreground">
+                  Moving this asset type will update all existing records.
+                </p>
+              )}
+            </div>
+          )}
 
           {/* Current Icon Preview */}
           <div className="space-y-2">
