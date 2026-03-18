@@ -63,7 +63,7 @@ export default function Login() {
             />
           </div>
 
-          <div className="space-y-2">
+          <div className="space-y-2 !mb-6">
             <Label htmlFor="password">Password</Label>
             <Input
               id="password"
@@ -74,7 +74,7 @@ export default function Login() {
             />
           </div>
 
-          <div className="flex justify-end">
+          {/* <div className="flex justify-end">
             <Button
               variant="link"
               className="p-0 h-auto text-sm dark:text-foreground"
@@ -88,7 +88,7 @@ export default function Login() {
             >
               Forgot password?
             </Button>
-          </div>
+          </div> */}
 
           <Button type="submit" className="w-full" disabled={loading}>
             {loading ? "Logging in..." : "Login"}

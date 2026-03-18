@@ -238,12 +238,11 @@ export default function LeafletMapView({ selectedRoadNames = [], roads = [], sel
       const latLng: L.LatLngTuple = [lat, lng];
       const color = getMarkerColor(asset.condition);
 
-      // console.log(getAssetIconFromId(asset.asset_id))
       const wantsIcons = localStorage.getItem('wants_icons') !== 'false';
       let circleMarker;
-      if (wantsIcons && isAssetIconExist(asset.asset_id)) {
+      if (wantsIcons && isAssetIconExist(asset.asset_id, labelMapData)) {
         circleMarker = L.marker(latLng, {
-          icon: getAssetIconFromId(asset.asset_id)
+          icon: getAssetIconFromId(asset.asset_id, labelMapData)
         }).addTo(mapRef.current!);
       } else {
         circleMarker = L.circleMarker(latLng, {

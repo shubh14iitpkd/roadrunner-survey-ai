@@ -19,7 +19,10 @@ function getAccessToken(): string | null {
 
 export async function apiFetch(path: string, options: RequestInit = {}) {
 	const headers = new Headers(options.headers || {});
-	headers.set("Content-Type", "application/json");
+	// Don't set Content-Type for FormData (browser sets multipart boundary automatically)
+	if (!(options.body instanceof FormData)) {
+		headers.set("Content-Type", "application/json");
+	}
 	const token = getAccessToken();
 	if (token) headers.set("Authorization", `Bearer ${token}`);
 	const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
@@ -201,6 +204,7 @@ export const api = {
 		update: (asset_id: string, payload: any) => apiFetch(`/api/assets/${asset_id}`, { method: "PUT", body: JSON.stringify(payload) }),
 		markAsGood: (asset_id: string, modifier: { name: string; user_id: string }) =>
 			apiFetch(`/api/assets/${asset_id}/mark-good`, { method: "PATCH", body: JSON.stringify(modifier) }),
+		getAvailableIcons: () => apiFetch("/api/assets/available-icons"),
 	},
 	categories: {
 		list: () => apiFetch("/api/categories/"),
@@ -236,6 +240,13 @@ export const api = {
 			apiFetch(`/api/users/${userId}/role`, { method: "PUT", body: JSON.stringify({ role }) }),
 		revoke: (userId: string) =>
 			apiFetch(`/api/users/${userId}`, { method: "DELETE" }),
+		updateAssetIconConfig: (assetIds: string[], config: { icon_url?: string; icon_size?: [number, number]; icon_anchor?: [number, number]; display_name?: string; reset?: boolean }) =>
+			apiFetch(`/api/assets/icon-config`, { method: "PUT", body: JSON.stringify({ asset_ids: assetIds, ...config }) }),
+		uploadAssetIcon: (file: File) => {
+			const formData = new FormData();
+			formData.append("icon", file);
+			return apiFetch(`/api/assets/upload-icon`, { method: "POST", body: formData });
+		},
 	},
 	frames: {
 		list: (params?: { video_id?: string; survey_id?: string; route_id?: number; has_detections?: boolean; limit?: number; offset?: number }) => {

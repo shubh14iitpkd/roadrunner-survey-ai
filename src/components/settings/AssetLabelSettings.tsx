@@ -5,23 +5,35 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { API_BASE } from "@/lib/api";
 import {
   Accordion,
   AccordionContent,
   AccordionItem,
   AccordionTrigger,
 } from "@/components/ui/accordion";
-import { Pencil, Check, X, Tag, Search, AlertCircle } from "lucide-react";
+import { Pencil, Check, X, Tag, Search, AlertCircle, ImageIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import AssetIconEditDialog from "./AssetIconEditDialog";
 
 export default function AssetLabelSettings() {
-  const { data, loading, updateCategoryLabel, updateAssetLabel } = useLabelMap();
+  const { data, loading, updateCategoryLabel, updateAssetLabel, updateAssetIcon } = useLabelMap();
   const { toast } = useToast();
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
   const [saving, setSaving] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+
+  // Icon edit dialog state
+  const [iconEditTarget, setIconEditTarget] = useState<{
+    displayName: string;
+    originalDisplayName: string;
+    assetIds: string[];
+    iconUrl?: string;
+    iconSize?: [number, number];
+    iconAnchor?: [number, number];
+  } | null>(null);
 
   const handleEdit = (id: string, currentValue: string) => {
     setEditingId(id);
@@ -107,8 +119,8 @@ export default function AssetLabelSettings() {
   const allLabels = Object.values(data.labels);
 
   // Group labels by group_id; labels without group_id stay individual
-  const groupedLabels: { groupKey: string; displayName: string; groupId: string | null; assetIds: string[]; originalDisplayName: string }[] = [];
-  const groupMap = new Map<string, { displayName: string; groupId: string; assetIds: string[]; originalDisplayName: string }>();
+  const groupedLabels: { groupKey: string; displayName: string; groupId: string | null; assetIds: string[]; originalDisplayName: string; iconUrl?: string; iconSize?: [number, number]; iconAnchor?: [number, number] }[] = [];
+  const groupMap = new Map<string, { displayName: string; groupId: string; assetIds: string[]; originalDisplayName: string; iconUrl?: string; iconSize?: [number, number]; iconAnchor?: [number, number] }>();
 
   for (const label of allLabels) {
     const gid = (label as any).group_id as string | undefined;
@@ -119,6 +131,9 @@ export default function AssetLabelSettings() {
           groupId: gid,
           assetIds: [],
           originalDisplayName: label.original_display_name,
+          iconUrl: label.icon_url,
+          iconSize: label.icon_size,
+          iconAnchor: label.icon_anchor,
         });
       }
       groupMap.get(gid)!.assetIds.push(label.asset_id!);
@@ -129,6 +144,9 @@ export default function AssetLabelSettings() {
         groupId: null,
         assetIds: [label.asset_id!],
         originalDisplayName: label.original_display_name,
+        iconUrl: label.icon_url,
+        iconSize: label.icon_size,
+        iconAnchor: label.icon_anchor,
       });
     }
   }
@@ -139,6 +157,9 @@ export default function AssetLabelSettings() {
       groupId: gid,
       assetIds: group.assetIds,
       originalDisplayName: group.originalDisplayName,
+      iconUrl: group.iconUrl,
+      iconSize: group.iconSize,
+      iconAnchor: group.iconAnchor,
     });
   }
 
@@ -167,7 +188,7 @@ export default function AssetLabelSettings() {
             return (
               <div
                 key={id}
-                className={`group flex items-center justify-between p-3 rounded-lg border bg-card transition-all duration-200 hover:shadow-sm hover:border-primary/20 ${isEditing ? 'ring-2 ring-primary/20 border-primary' : ''}`}
+                className={`dark:hover:border-muted-secondary group flex items-center justify-between p-3 rounded-lg border bg-card transition-all duration-200 hover:shadow-sm hover:border-primary/20 ${isEditing ? 'ring-2 ring-primary/20 border-primary' : ''}`}
               >
                 {isEditing ? (
                   <div className="flex items-center gap-2 flex-1 animate-in fade-in zoom-in-95 duration-200">
@@ -265,7 +286,7 @@ export default function AssetLabelSettings() {
                     value={key} 
                     className={`border rounded-md px-3 bg-card transition-colors hover:bg-accent/5 ${isEditing ? 'border-primary/50 ring-1 ring-primary/20 bg-accent/10' : ''}`}
                   >
-                    <div className="flex items-center justify-between py-2.5">
+                    <div className="flex items-center dark:hover:border-muted-secondary justify-between py-2.5">
                       {isEditing ? (
                         <div className="flex items-center gap-2 flex-1 animate-in fade-in zoom-in-95 duration-200">
                           <Input
@@ -299,32 +320,57 @@ export default function AssetLabelSettings() {
                         </div>
                       ) : (
                         <>
-                          <div className="flex-1 min-w-0 pr-4">
-                            <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-2 flex-1 min-w-0 pr-4">
+                            {/* Icon preview */}
+                            {group.iconUrl ? (
+                              <img src={`${API_BASE}${group.iconUrl}`} alt="" className="w-5 h-5 object-contain shrink-0" />
+                            ) : (
+                              <div className="w-5 h-5 rounded-full bg-muted flex items-center justify-center shrink-0">
+                                <div className="w-2 h-2 rounded-full bg-muted-foreground/30" />
+                              </div>
+                            )}
+                            <div className="flex items-center gap-2 min-w-0">
                               <span className="font-medium text-sm">{group.displayName}</span>
                               {group.displayName !== group.originalDisplayName && (
                                 <Badge variant="outline" className="text-xs h-5 px-1.5 font-normal text-muted-foreground">
                                   Default: {group.originalDisplayName}
                                 </Badge>
                               )}
-                              {/* {group.assetIds.length > 1 && (
-                                <Badge variant="secondary" className="text-xs h-5 px-1.5 font-normal">
-                                  {group.assetIds.length} variants
-                                </Badge>
-                              )} */}
                             </div>
                           </div>
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            className="h-7 w-7 text-muted-foreground hover:text-foreground"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleEdit(`label-${key}`, group.displayName);
-                            }}
-                          >
-                            <Pencil className="h-3.5 w-3.5" />
-                          </Button>
+                          <div className="flex items-center gap-0.5">
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                              title="Edit icon & display name"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setIconEditTarget({
+                                  displayName: group.displayName,
+                                  originalDisplayName: group.originalDisplayName,
+                                  assetIds: group.assetIds,
+                                  iconUrl: group.iconUrl,
+                                  iconSize: group.iconSize,
+                                  iconAnchor: group.iconAnchor,
+                                });
+                              }}
+                            >
+                              <Pencil className="h-3.5 w-3.5" />
+                            </Button>
+                            {/* <Button
+                              size="icon"
+                              variant="ghost"
+                              className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                              title="Edit display name"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleEdit(`label-${key}`, group.displayName);
+                              }}
+                            >
+                              <Pencil className="h-3.5 w-3.5" />
+                            </Button> */}
+                          </div>
                         </>
                       )}
                     </div>
@@ -336,6 +382,23 @@ export default function AssetLabelSettings() {
           </div>
         </ScrollArea>
       </div>
+
+      {/* Icon Edit Dialog */}
+      <AssetIconEditDialog
+        open={!!iconEditTarget}
+        onOpenChange={(open) => { if (!open) setIconEditTarget(null); }}
+        displayName={iconEditTarget?.displayName ?? ""}
+        originalDisplayName={iconEditTarget?.originalDisplayName ?? ""}
+        assetIds={iconEditTarget?.assetIds ?? []}
+        currentIconUrl={iconEditTarget?.iconUrl}
+        currentIconSize={iconEditTarget?.iconSize}
+        currentIconAnchor={iconEditTarget?.iconAnchor}
+        onSave={async (assetIds, config) => {
+          await updateAssetIcon(assetIds, config);
+          toast({ title: "Saved", description: "Asset icon configuration updated" });
+          setIconEditTarget(null);
+        }}
+      />
     </div>
   );
 }

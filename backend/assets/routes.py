@@ -1,4 +1,5 @@
 import os
+import re
 import math
 
 from flask import Blueprint, jsonify, request
@@ -545,6 +546,185 @@ def mark_asset_good(asset_id: str):
 	return jsonify({"ok": True})
 
 
+@assets_bp.put("/icon-config", endpoint="update_icon_config")
+@role_required(["admin"])
+def update_icon_config():
+	"""
+	Update icon configuration for asset types (admin only).
+	Updates icon_url, icon_size, icon_anchor on system_asset_labels.
+	---
+	tags:
+	  - Assets
+	security:
+	  - Bearer: []
+	parameters:
+	  - name: body
+	    in: body
+	    required: true
+	    schema:
+	      type: object
+	      required:
+	        - asset_ids
+	      properties:
+	        asset_ids:
+	          type: array
+	          items:
+	            type: string
+	        icon_url:
+	          type: string
+	        icon_size:
+	          type: array
+	          items:
+	            type: integer
+	        icon_anchor:
+	          type: array
+	          items:
+	            type: integer
+	        display_name:
+	          type: string
+	        reset:
+	          type: boolean
+	          description: If true, removes icon overrides and resets display_name to default
+	responses:
+	  200:
+	    description: Icon config updated
+	  400:
+	    description: Missing asset_ids
+	"""
+	data = request.get_json(silent=True) or {}
+	asset_ids = data.get("asset_ids") or []
+	if not asset_ids:
+		return jsonify({"error": "asset_ids required"}), 400
+
+	db = get_db()
+	reset = data.get("reset", False)
+
+	if reset:
+		# Remove icon fields and reset display_name to default_name
+		for aid in asset_ids:
+			doc = db.system_asset_labels.find_one({"asset_id": aid})
+			
+			gid = doc.get("default_group_id", "")
+			if doc:
+				db.system_asset_labels.update_one(
+					{"asset_id": aid},
+					{
+						"$unset": {"icon_url": "", "icon_size": "", "icon_anchor": ""},
+						"$set": {"display_name": gid, "group_id": gid }
+					}
+				)
+		return jsonify({"ok": True, "message": "icon config reset"})
+
+	update_fields = {}
+	if "icon_url" in data:
+		update_fields["icon_url"] = data["icon_url"]
+	if "icon_size" in data:
+		update_fields["icon_size"] = data["icon_size"]
+	if "icon_anchor" in data:
+		update_fields["icon_anchor"] = data["icon_anchor"]
+	if "display_name" in data:
+		update_fields["display_name"] = data["display_name"]
+
+	if not update_fields:
+		return jsonify({"error": "no fields to update"}), 400
+
+	for aid in asset_ids:
+		db.system_asset_labels.update_one(
+			{"asset_id": aid},
+			{"$set": update_fields}
+		)
+
+	return jsonify({"ok": True})
+
+
+@assets_bp.get("/available-icons", endpoint="available_icons")
+@role_required(["admin", "surveyor", "viewer"])
+def list_available_icons():
+	"""
+	List available icon files from UPLOAD_DIR/asset-map-icons/.
+	---
+	tags:
+	  - Assets
+	security:
+	  - Bearer: []
+	responses:
+	  200:
+	    description: List of available icons with their URLs
+	"""
+	from pathlib import Path
+	upload_root = Path(os.getenv("UPLOAD_DIR", Path(__file__).resolve().parents[1] / "uploads"))
+	icons_dir = upload_root / "asset-map-icons"
+	icons = []
+	if icons_dir.is_dir():
+		for f in sorted(icons_dir.iterdir()):
+			if f.suffix.lower() in (".png", ".svg", ".jpg", ".jpeg", ".webp"):
+				icons.append({
+					"filename": f.name,
+					"icon_url": f"/uploads/asset-map-icons/{f.name}",
+				})
+	return jsonify({"icons": icons})
+
+
+@assets_bp.post("/upload-icon", endpoint="upload_icon")
+@role_required(["admin"])
+def upload_icon():
+	"""
+	Upload a custom icon file for asset types (admin only).
+	Saved to UPLOAD_DIR/asset-map-icons/ and served at /uploads/asset-map-icons/<filename>.
+	---
+	tags:
+	  - Assets
+	security:
+	  - Bearer: []
+	consumes:
+	  - multipart/form-data
+	parameters:
+	  - name: icon
+	    in: formData
+	    type: file
+	    required: true
+	    description: Icon file (PNG, SVG, JPG, WEBP, max 500KB)
+	responses:
+	  200:
+	    description: Icon uploaded successfully
+	  400:
+	    description: Invalid file
+	"""
+	from pathlib import Path
+	if "icon" not in request.files:
+		return jsonify({"error": "icon file required"}), 400
+
+	file = request.files["icon"]
+	if not file.filename:
+		return jsonify({"error": "empty filename"}), 400
+
+	# Validate extension
+	allowed = {".png", ".svg", ".jpg", ".jpeg", ".webp"}
+	ext = os.path.splitext(file.filename)[1].lower()
+	if ext not in allowed:
+		return jsonify({"error": f"invalid file type. Allowed: {', '.join(allowed)}"}), 400
+
+	# Validate size (500KB max)
+	file.seek(0, 2)
+	size = file.tell()
+	file.seek(0)
+	if size > 500 * 1024:
+		return jsonify({"error": "file too large (max 500KB)"}), 400
+
+	# Save to UPLOAD_DIR/asset-map-icons/
+	upload_root = Path(os.getenv("UPLOAD_DIR", Path(__file__).resolve().parents[1] / "uploads"))
+	icons_dir = upload_root / "asset-map-icons"
+	icons_dir.mkdir(parents=True, exist_ok=True)
+
+	# Sanitize filename
+	safe_name = re.sub(r"[^\w.\-]", "-", os.path.basename(file.filename))
+	dest = icons_dir / safe_name
+	file.save(dest)
+
+	icon_url = f"/uploads/asset-map-icons/{safe_name}"
+	return jsonify({"ok": True, "filename": safe_name, "icon_url": icon_url})
+
+
 @assets_bp.get("/<user_id>/resolved-map", endpoint="resolved_map")
 def get_resolved_map(user_id: str):
 	"""
@@ -594,14 +774,23 @@ def get_resolved_map(user_id: str):
 	resolved_labels = {}
 	for l in system_labels:
 		aid = l["asset_id"]
-		resolved_labels[aid] = {
+		entry = {
 			"asset_id": aid,
 			"category_id": l.get("category_id"),  # Include category_id for tree building
 			"default_name": l["default_name"],
 			"group_id": l.get("group_id"),
+			"default_group_id": l.get("default_group_id", ""),
 			"original_display_name": l["display_name"],
 			"display_name": labels_override.get(aid, {}).get("display_name") or l["display_name"]
 		}
+		# Include icon config if present
+		if l.get("icon_url"):
+			entry["icon_url"] = l["icon_url"]
+		if l.get("icon_size"):
+			entry["icon_size"] = l["icon_size"]
+		if l.get("icon_anchor"):
+			entry["icon_anchor"] = l["icon_anchor"]
+		resolved_labels[aid] = entry
 
 	return {
 		"categories": resolved_cats,

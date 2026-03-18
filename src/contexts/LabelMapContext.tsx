@@ -9,6 +9,9 @@ interface ResolvedItem {
   default_name: string;
   display_name: string;
   original_display_name: string;
+  icon_url?: string;
+  icon_size?: [number, number];
+  icon_anchor?: [number, number];
 }
 
 export interface ResolvedMap {
@@ -22,6 +25,7 @@ export interface LabelMapContextType {
   error: Error | null;
   updateCategoryLabel: (categoryId: string, displayName: string) => Promise<void>;
   updateAssetLabel: (assetIds: string[], displayName: string) => Promise<void>;
+  updateAssetIcon: (assetIds: string[], iconConfig: { icon_url?: string; icon_size?: [number, number]; icon_anchor?: [number, number]; display_name?: string; reset?: boolean }) => Promise<void>;
   refreshData: () => Promise<void>;
 }
 
@@ -95,6 +99,33 @@ export function LabelMapProvider({ children }: { children: ReactNode }) {
     });
   };
 
+  const updateAssetIcon = async (assetIds: string[], iconConfig: { icon_url?: string; icon_size?: [number, number]; icon_anchor?: [number, number]; display_name?: string; reset?: boolean }) => {
+    await api.user.updateAssetIconConfig(assetIds, iconConfig);
+
+    // Update local state
+    setData((prev) => {
+      if (!prev) return prev;
+      const updatedLabels = { ...prev.labels };
+      for (const aid of assetIds) {
+        if (updatedLabels[aid]) {
+          if (iconConfig.reset) {
+            const { icon_url: _a, icon_size: _b, icon_anchor: _c, ...rest } = updatedLabels[aid];
+            updatedLabels[aid] = { ...rest, display_name: rest.original_display_name };
+          } else {
+            updatedLabels[aid] = {
+              ...updatedLabels[aid],
+              ...(iconConfig.icon_url !== undefined && { icon_url: iconConfig.icon_url }),
+              ...(iconConfig.icon_size !== undefined && { icon_size: iconConfig.icon_size }),
+              ...(iconConfig.icon_anchor !== undefined && { icon_anchor: iconConfig.icon_anchor }),
+              ...(iconConfig.display_name !== undefined && { display_name: iconConfig.display_name }),
+            };
+          }
+        }
+      }
+      return { ...prev, labels: updatedLabels };
+    });
+  };
+
   const refreshData = async () => {
     await fetchData();
   };
@@ -107,6 +138,7 @@ export function LabelMapProvider({ children }: { children: ReactNode }) {
         error,
         updateCategoryLabel,
         updateAssetLabel,
+        updateAssetIcon,
         refreshData,
       }}
     >

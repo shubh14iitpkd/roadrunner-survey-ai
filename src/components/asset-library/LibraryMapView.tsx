@@ -1,5 +1,6 @@
 import { useEffect, useRef, useMemo, useCallback } from "react";
 import { isAssetIconExist, getAssetIconFromId } from "@/components/settings/iconConfig";
+import { useLabelMap } from "@/contexts/LabelMapContext";
 import {
   MapContainer,
   TileLayer,
@@ -292,6 +293,7 @@ export default function LibraryMapView({
   selectedId,
   onSelect,
 }: LibraryMapViewProps) {
+  const { data: labelMapData } = useLabelMap();
   const center = useMemo<[number, number]>(() => {
     if (assets.length === 0) return [25.2, 55.27]; // Dubai fallback
     return [assets[0].lat, assets[0].lng];
@@ -356,10 +358,10 @@ export default function LibraryMapView({
       {/* ── Regular marker assets ────────────────────────── */}
       {markerAssets.map((asset) => {
         const isSelected = asset.assetDisplayId === selectedId;
-        const useIcon = wantsIcons && isAssetIconExist(asset.assetId);
+        const useIcon = wantsIcons && isAssetIconExist(asset.assetId, labelMapData);
 
         if (useIcon) {
-          const baseIcon = getAssetIconFromId(asset.assetId);
+          const baseIcon = getAssetIconFromId(asset.assetId, labelMapData);
           const icon = isSelected ? getSelectedIcon(baseIcon) : baseIcon;
           return (
             <Marker
