@@ -947,7 +947,7 @@ export default function RoadRegister() {
 
       <div className="px-6 space-y-6">
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <RoadKPICard label="Total Roads" value={String(totalRoads)} icon={<Map className="h-4 w-4" />} accent="primary" />
+          <RoadKPICard label="Total Routes" value={String(totalRoads)} icon={<Map className="h-4 w-4" />} accent="primary" />
           <RoadKPICard
             label="Total Length"
             value={totalLength.toLocaleString("en-IN", {
@@ -958,7 +958,7 @@ export default function RoadRegister() {
             icon={<Route className="h-4 w-4" />}
             accent="secondary"
           />    
-          <RoadKPICard label="Surveyed Roads" value={String(surveyedCount)} icon={<CircleCheck className="h-4 w-4" />} accent="destructive" />
+          <RoadKPICard label="Total Surveyed Routes" value={String(surveyedCount)} icon={<CircleCheck className="h-4 w-4" />} accent="destructive" />
         </div>
 
         {/* <Card className="p-8 shadow-elevated border-0 gradient-card">

@@ -166,11 +166,11 @@ def top_asset_types():
 	match_query: dict = {}
 	if category_id:
 		match_query["category_id"] = category_id
-	if condition:
-		if condition == "damaged":
-			match_query["latest_condition"] = {"$ne": "good"}
-		else:
-			match_query["latest_condition"] = condition
+	# if condition:
+	# 	if condition == "damaged":
+	# 		match_query["latest_condition"] = {"$ne": "good"}
+	# 	else:
+	# 		match_query["latest_condition"] = condition
 
 	# Group by group_id (fall back to asset_id when group_id is absent)
 	group_key = {"$ifNull": ["$group_id", "$asset_id"]}
@@ -199,7 +199,7 @@ def top_asset_types():
 				"$sum": {"$cond": [{"$ne": ["$latest_condition", "good"]}, 1, 0]}
 			},
 		}},
-		{"$sort": {"count": -1}},
+		{"$sort": {"damaged_count": -1, "count": -1}},
 		{"$skip": skip},
 		{"$limit": limit},
 	])

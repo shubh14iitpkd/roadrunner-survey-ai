@@ -28,7 +28,7 @@ const navigation = [
   { name: "Defect Library", href: "/defect-library", icon: AlertTriangle, adminOnly: false },
   { name: "RoadGPT", href: "/roadgpt", icon: MessageSquare, adminOnly: false },
   { name: "Management", href: null, icon: null, isHeading: true },
-  { name: "Road Register", href: "/roads", icon: Map },
+  { name: "Route Register", href: "/roads", icon: Map },
   { name: "Survey Upload", href: "/upload", icon: Upload, adminOnly: true },
   { name: "Video Library", href: "/videos", icon: FileVideo },
   { name: "Settings", href: "/settings", icon: Settings },

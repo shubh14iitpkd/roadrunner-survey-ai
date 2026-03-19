@@ -95,12 +95,9 @@ export default function Dashboard() {
   // Show selected slice when not hovering
   const effectiveDonutIndex = activeDonutIndex !== undefined ? activeDonutIndex : selectedDonutIndex;
 
-  const [assetTypePage, setAssetTypePage] = useState(1);
-  const [assetTypePageSize] = useState(10);
-
-  // Asset type table data from API
-  const [assetTypeTableData, setAssetTypeTableData] = useState<any>({ items: [], total: 0, page: 1, pages: 0 });
-  const [tableLoading, setTableLoading] = useState(false);
+  const [defectPage, setDefectPage] = useState(1);
+  const [defectPageSize] = useState(10);
+  const [defectTableMeta, setDefectTableMeta] = useState({ total: 0, pages: 0 });
 
   // Anomaly data from API
   const [defectByAsset, setDefectByAsset] = useState<any[]>([]);
@@ -130,24 +127,8 @@ export default function Dashboard() {
     return item.display_name || item.type;
   }, [labelMapData]);
 
-  // Resolved asset type rows from API data
-  const assetTypeRows = useMemo(() => {
-    console.log("assetTypeTableData", assetTypeTableData);
-    return assetTypeTableData.items.map((item: any) => ({
-      asset_id: item.asset_id,
-      type: getAssetDisplayName(item),
-      category: getCategoryDisplayName(item),
-      category_id: item.category_id,
-      damaged_count: item.damaged_count,
-      count: item.count,
-    }));
-  }, [assetTypeTableData, getAssetDisplayName, getCategoryDisplayName]);
-
-  const assetTypeTotalPages = assetTypeTableData.pages || 1;
-  const pagedAssetTypes = assetTypeRows;
-
-  // Reset page when category changes
-  useEffect(() => { setAssetTypePage(1); }, [selectedCategoryId]);
+  // Reset defect page when category changes
+  useEffect(() => { setDefectPage(1); }, [selectedCategoryId]);
 
   // Load main dashboard data
   useEffect(() => {
@@ -181,26 +162,11 @@ export default function Dashboard() {
     })();
   }, [timePeriod, labelMapData, getCategoryDisplayName]);
 
-  // Load Asset Types Table Data (paginated from API, filtered by category)
+  // Load Defects by Asset Type data (paginated, sorted by damaged count)
   useEffect(() => {
     (async () => {
       try {
-        setTableLoading(true);
-        const resp = await api.dashboard.topAssetTypes(assetTypePage, assetTypePageSize, selectedCategoryId || undefined);
-        if (resp) setAssetTypeTableData(resp);
-      } catch (err) {
-        console.error("Failed to load asset types table:", err);
-      } finally {
-        setTableLoading(false);
-      }
-    })();
-  }, [assetTypePage, assetTypePageSize, selectedCategoryId]);
-
-  // Load Anomaly by Asset Type data (top damaged asset types)
-  useEffect(() => {
-    (async () => {
-      try {
-        const resp = await api.dashboard.topAssetTypes(1, 10, selectedCategoryId || undefined, "damaged");
+        const resp = await api.dashboard.topAssetTypes(defectPage, defectPageSize, selectedCategoryId || undefined, "damaged");
         if (resp?.items) {
           setDefectByAsset(
             resp.items.map((item: any) => ({
@@ -209,15 +175,17 @@ export default function Dashboard() {
               type_id: item.asset_id,
               category: getCategoryDisplayName(item),
               category_id: item.category_id,
-              defects: item.count,
+              defects: item.damaged_count,
+              total: item.count,
             }))
           );
+          setDefectTableMeta({ total: resp.total || 0, pages: resp.pages || 1 });
         }
       } catch (err) {
         console.error("Failed to load anomaly data:", err);
       }
     })();
-  }, [labelMapData, selectedCategoryId, getCategoryDisplayName, getAssetDisplayName]);
+  }, [labelMapData, selectedCategoryId, defectPage, defectPageSize, getCategoryDisplayName, getAssetDisplayName]);
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-accent/10 to-background">
       {/* Header */}
@@ -277,9 +245,9 @@ export default function Dashboard() {
           />
         </div> */}
         {/* Charts Row */}
-        <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           {/* Donut */}
-          <Card className="lg:col-span-2 p-0 border border-border bg-card overflow-hidden flex flex-col">
+          <Card className="lg:col-span-1 p-0 border border-border bg-card overflow-hidden flex flex-col">
             <div className="px-5 pt-4 pb-1">
               <p className="text-sm font-semibold text-muted-foreground uppercase tracking-[0.15em]">Asset Distribution</p>
               <p className="text-sm font-semibold text-foreground mt-0.5">By Category</p>
@@ -380,81 +348,6 @@ export default function Dashboard() {
             </div>
           </Card>
 
-          {/* Top Asset Types — filtered by selected category */}
-          <Card className="lg:col-span-3 p-0 border border-border bg-card overflow-hidden flex flex-col">
-            <div className="px-5 pt-5 pb-3 flex items-center justify-between">
-              <div>
-                <p className="text-xs font-medium text-muted-foreground uppercase tracking-widest">Asset Types</p>
-                <div className="flex items-center gap-2 mt-0.5">
-                  <p className="text-sm font-semibold text-foreground">
-                    {selectedCategory ? selectedCategory : "All Categories"}
-                  </p>
-                  {selectedCategory && (
-                    <Button variant="ghost" size="sm" className="h-5 px-1.5 text-sm text-muted-foreground" onClick={() => { setSelectedCategory(null); setSelectedCategoryId(null); }}>
-                      <X className="h-3 w-3 mr-0.5" /> Clear
-                    </Button>
-                  )}
-                </div>
-              </div>
-              <span className="text-xs text-muted-foreground tabular-nums">
-                {assetTypePage}/{assetTypeTotalPages || 1}
-              </span>
-            </div>
-            <div className="gradient-table-line" />
-            {/* Fixed height table container */}
-            <div className="flex-1 overflow-auto" style={{ height: assetTypePageSize * 36 + 36 }}>
-              <Table>
-                <TableHeader className="top-0 z-10 bg-card">
-                  <TableRow className="border-b border-border hover:bg-transparent">
-                    <TableHead className="text-sm font-semibold uppercase tracking-wider text-muted-foreground w-10">#</TableHead>
-                    <TableHead className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Type</TableHead>
-                    <TableHead className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Category</TableHead>
-                    <TableHead className="text-sm font-semibold uppercase tracking-wider text-muted-foreground text-right">Total</TableHead>
-                    <TableHead className="text-sm font-semibold uppercase tracking-wider text-muted-foreground text-right">Defects</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {pagedAssetTypes.map((row: any, idx: number) => (
-                    <TableRow key={row.asset_id || idx} className="hover:bg-muted/40 border-b border-border/50" style={{ height: 36 }}>
-                      <TableCell className="text-xs text-muted-foreground tabular-nums py-2">
-                        {(assetTypePage - 1) * assetTypePageSize + idx + 1}
-                      </TableCell>
-                      <TableCell className="text-xs font-medium py-2">{row.type}</TableCell>
-                      <TableCell className="py-2">
-                        <CategoryBadge category={row.category} categoryId={row.category_id}/>
-                      </TableCell>
-                      <TableCell className="text-right font-semibold text-xs tabular-nums py-2">{row.count}</TableCell>
-                      <TableCell className="text-right font-semibold text-xs tabular-nums py-2">
-                        <span className="inline-flex items-center justify-center rounded-md bg-destructive/10 text-destructive px-2 py-0.5 text-xs font-bold tabular-nums min-w-[2rem]">
-                          {row.damaged_count}
-                        </span>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                  {/* Fill empty rows to keep consistent height
-                  {pagedAssetTypes.length < assetTypePageSize && Array.from({ length: assetTypePageSize - pagedAssetTypes.length }).map((_, i) => (
-                    <TableRow key={`empty-${i}`} className="border-b border-border/50" style={{ height: 36 }}>
-                      <TableCell colSpan={4}>&nbsp;</TableCell>
-                    </TableRow>
-                  ))} */}
-                </TableBody>
-              </Table>
-            </div>
-            <div className="flex items-center justify-between px-4 py-2 border-t border-border">
-              <span className="text-sm text-muted-foreground tabular-nums">
-                {(assetTypePage - 1) * assetTypePageSize + 1}–{Math.min(assetTypePage * assetTypePageSize, assetTypeTableData.total)} of {assetTypeTableData.total}
-              </span>
-              <div className="flex items-center gap-1">
-                <span className="text-sm text-muted-foreground tabular-nums mr-1">{assetTypePage}/{assetTypeTotalPages || 1}</span>
-                <Button variant="ghost" size="icon" className="h-7 w-7" disabled={assetTypePage <= 1} onClick={() => setAssetTypePage(p => p - 1)}>
-                  <ChevronLeft className="h-3.5 w-3.5" />
-                </Button>
-                <Button variant="ghost" size="icon" className="h-7 w-7" disabled={assetTypePage >= assetTypeTotalPages} onClick={() => setAssetTypePage(p => p + 1)}>
-                  <ChevronRight className="h-3.5 w-3.5" />
-                </Button>
-              </div>
-            </div>
-          </Card>
         </div>
 
         {/* <div className="grid grid-cols-1 lg:grid-cols-4 gap-4"> */}
@@ -497,10 +390,11 @@ export default function Dashboard() {
                     contentStyle={{ background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: 8, fontSize: 11, color: 'hsl(var(--foreground))' }}
                     labelStyle={{ color: 'hsl(var(--foreground))', fontWeight: 600 }}
                     itemStyle={{ fontWeight: 500 }}
+                    cursor={{ fill: "hsl(var(--muted) / 0.5)" }}
                   />
                   <Legend wrapperStyle={{ fontSize: 11 }} />
                   <Bar dataKey="good_count" name="Good" fill="#16a34a" radius={[3, 3, 0, 0]} />
-                  <Bar dataKey="damaged_count" name="Poor" fill="#ef4444" radius={[3, 3, 0, 0]} />
+                  <Bar dataKey="damaged_count" name="Damaged" fill="#ef4444" radius={[3, 3, 0, 0]} />
                 </RechartsBarChart>
               </ResponsiveContainer>
             </div>
@@ -535,7 +429,8 @@ export default function Dashboard() {
                 <TableRow className="border-b hover:bg-transparent">
                   <TableHead className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Asset Type</TableHead>
                   <TableHead className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Category</TableHead>
-                  <TableHead className="text-sm font-semibold uppercase tracking-wider text-muted-foreground text-right">Count</TableHead>
+                  <TableHead className="text-sm font-semibold uppercase tracking-wider text-muted-foreground text-right">Total</TableHead>
+                  <TableHead className="text-sm font-semibold uppercase tracking-wider text-muted-foreground text-right">Defects</TableHead>
                   <TableHead className="text-sm font-semibold uppercase tracking-wider text-muted-foreground text-right w-48">Actions</TableHead>
                 </TableRow>
               </TableHeader>
@@ -546,6 +441,7 @@ export default function Dashboard() {
                     <TableCell className="py-2.5">
                       <CategoryBadge category={row.category} categoryId={row.category_id} />
                     </TableCell>
+                    <TableCell className="text-right font-semibold text-xs tabular-nums py-2.5">{row.total}</TableCell>
                     <TableCell className="text-right py-2.5">
                       <span className="inline-flex items-center justify-center rounded-md bg-destructive/10 text-destructive px-2 py-0.5 text-xs font-bold tabular-nums min-w-[2rem]">
                         {row.defects}
@@ -585,6 +481,22 @@ export default function Dashboard() {
                 )}
               </TableBody>
             </Table>
+          </div>
+          <div className="flex items-center justify-between px-4 py-2 border-t border-border">
+            <span className="text-sm text-muted-foreground tabular-nums">
+              {defectTableMeta.total > 0
+                ? `${(defectPage - 1) * defectPageSize + 1}–${Math.min(defectPage * defectPageSize, defectTableMeta.total)} of ${defectTableMeta.total}`
+                : "No results"}
+            </span>
+            <div className="flex items-center gap-1">
+              <span className="text-sm text-muted-foreground tabular-nums mr-1">{defectPage}/{defectTableMeta.pages || 1}</span>
+              <Button variant="ghost" size="icon" className="h-7 w-7" disabled={defectPage <= 1} onClick={() => setDefectPage(p => p - 1)}>
+                <ChevronLeft className="h-3.5 w-3.5" />
+              </Button>
+              <Button variant="ghost" size="icon" className="h-7 w-7" disabled={defectPage >= (defectTableMeta.pages || 1)} onClick={() => setDefectPage(p => p + 1)}>
+                <ChevronRight className="h-3.5 w-3.5" />
+              </Button>
+            </div>
           </div>
         </Card>
 
