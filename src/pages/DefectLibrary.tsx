@@ -51,11 +51,12 @@ const BASE_DEFECT_COLUMNS: ColumnDef[] = [
   )},
 ];
 
-/** Builds column definitions including the interactive "Mark as Good" column. */
+/** Builds column definitions including the interactive "Mark as Good" / unmark column. */
 function buildDefectColumns(
   goodSet: Set<string>,
   markingGood: Set<string>,
   onMarkGood: (a: AssetRecord) => void,
+  onUnmarkGood: (a: AssetRecord) => void,
 ): ColumnDef[] {
   return [
     ...BASE_DEFECT_COLUMNS,
@@ -71,14 +72,16 @@ function buildDefectColumns(
           <button
             onClick={(e) => {
               e.stopPropagation();
-              if (!isMarked && !isSaving) onMarkGood(a);
+              if (isSaving) return;
+              if (isMarked) onUnmarkGood(a);
+              else onMarkGood(a);
             }}
-            disabled={isMarked || isSaving}
-            title={isMarked ? "Marked as good" : "Mark this asset as good"}
+            disabled={isSaving}
+            title={isMarked ? "Revert to damaged" : "Mark this asset as good"}
             className={cn(
               "inline-flex items-center justify-center w-6 h-6 rounded-full transition-all",
               isMarked
-                ? "text-emerald-600 bg-emerald-500/10 cursor-default"
+                ? "text-emerald-600 bg-emerald-500/10 hover:text-destructive hover:bg-destructive/10 cursor-pointer"
                 : isSaving
                 ? "text-muted-foreground cursor-not-allowed"
                 : "text-muted-foreground/40 hover:text-emerald-600 hover:bg-emerald-500/10 cursor-pointer"
@@ -348,6 +351,25 @@ export default function DefectLibrary() {
     }
   }, [user]);
 
+  const handleUnmarkGood = useCallback(async (asset: AssetRecord) => {
+    const assetKey = asset.assetDisplayId ?? asset.defectId;
+    const mongoId = asset.id;
+    if (!mongoId) {
+      toast.error("Cannot update asset: missing ID");
+      return;
+    }
+    setMarkingGood((prev) => new Set(prev).add(assetKey));
+    try {
+      await api.assets.unmarkGood(mongoId);
+      setGoodSet((prev) => { const s = new Set(prev); s.delete(assetKey); return s; });
+      toast.success(`Asset ${asset.assetDisplayId} reverted to damaged`);
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to revert asset");
+    } finally {
+      setMarkingGood((prev) => { const s = new Set(prev); s.delete(assetKey); return s; });
+    }
+  }, []);
+
   const [exporting, setExporting] = useState(false);
   const handleExportExcel = async () => {
     setExporting(true);
@@ -364,7 +386,7 @@ export default function DefectLibrary() {
       exportToExcel({
         filename: `Defects Library Report.xlsx`,
         sheetName: "Defects",
-        title: "RoadSight AI — Defect Library Report",
+        title: "RoadSight AI - Defect Library Report",
         subtitle: `Generated: ${new Date().toLocaleDateString()} | ${filteredDefects.length} defects`,
         headers,
         rows,
@@ -670,7 +692,7 @@ export default function DefectLibrary() {
         onRetry={loadData}
         idField="assetDisplayId"
         onClearFilters={clearFilters}
-        columns={buildDefectColumns(goodSet, markingGood, handleMarkGood)}
+        columns={buildDefectColumns(goodSet, markingGood, handleMarkGood, handleUnmarkGood)}
       />
     </div>
   );

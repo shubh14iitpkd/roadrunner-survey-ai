@@ -546,6 +546,58 @@ def mark_asset_good(asset_id: str):
 	return jsonify({"ok": True})
 
 
+@assets_bp.patch("/<asset_id>/unmark-good", endpoint="assets_unmark_good")
+@role_required(["admin", "surveyor"])
+def unmark_asset_good(asset_id: str):
+	"""
+	Revert a master asset's condition from good back to damaged.
+	Updates both the master_assets record and the underlying asset observation.
+	---
+	tags:
+	  - Assets
+	security:
+	  - Bearer: []
+	parameters:
+	  - name: asset_id
+	    in: path
+	    type: string
+	    required: true
+	    description: The MongoDB _id of the master asset
+	responses:
+	  200:
+	    description: Asset unmarked (reverted to damaged)
+	  404:
+	    description: Asset not found
+	"""
+	db = get_db()
+	now = get_now_iso()
+
+	res = db.master_assets.find_one_and_update(
+		{"_id": ObjectId(asset_id)},
+		{
+			"$set": {
+				"latest_condition": "damaged",
+				"updated_at": now,
+			},
+			"$unset": {"modified_by": ""},
+		},
+	)
+	if not res:
+		return jsonify({"error": "not found"}), 404
+
+	# Also revert the latest asset observation
+	survey_history = res.get("survey_history", [])
+	if survey_history:
+		latest_obs_id = survey_history[-1].get("asset_observation_id")
+		if latest_obs_id:
+			db.assets.update_one(
+				{"_id": latest_obs_id},
+				{"$set": {"condition": "damaged"}, "$unset": {"modified_by": ""}},
+			)
+
+	return jsonify({"ok": True})
+
+
 @assets_bp.put("/icon-config", endpoint="update_icon_config")
 @role_required(["admin"])
 def update_icon_config():

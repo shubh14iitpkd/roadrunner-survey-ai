@@ -335,7 +335,7 @@ export default function AssetDetailSidebar({
               ] as [string, string | undefined][]).map(([label, val]) => (
                 <div key={label} className="min-w-0">
                   <p className="text-[8px] text-muted-foreground uppercase">{label}</p>
-                  <p className="text-[10px] font-medium text-foreground leading-none truncate">{val}</p>
+                  <p className="text-[10px] font-medium text-foreground leading-none capitalize truncate">{val}</p>
                 </div>
               ))}
             </div>

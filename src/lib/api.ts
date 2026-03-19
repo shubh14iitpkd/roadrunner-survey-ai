@@ -204,6 +204,8 @@ export const api = {
 		update: (asset_id: string, payload: any) => apiFetch(`/api/assets/${asset_id}`, { method: "PUT", body: JSON.stringify(payload) }),
 		markAsGood: (asset_id: string, modifier: { name: string; user_id: string }) =>
 			apiFetch(`/api/assets/${asset_id}/mark-good`, { method: "PATCH", body: JSON.stringify(modifier) }),
+		unmarkGood: (asset_id: string) =>
+			apiFetch(`/api/assets/${asset_id}/unmark-good`, { method: "PATCH" }),
 		getAvailableIcons: () => apiFetch("/api/assets/available-icons"),
 	},
 	categories: {

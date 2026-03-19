@@ -68,8 +68,6 @@ def _get_clip() -> tuple[CLIPModel, CLIPProcessor, str]:
     return _clip_model, _clip_processor, _clip_device
 
 
-# ─── EMBEDDING HELPERS ───────────────────────────────────────────────────────
-
 def _get_embedding(model: CLIPModel, processor: CLIPProcessor,
                    device: str, pil_image: Image.Image) -> np.ndarray:
     """Return an L2-normalised 512-d CLIP embedding as a numpy array."""
@@ -107,8 +105,6 @@ def _cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
     """Cosine similarity between two L2-normalised vectors."""
     return float(np.dot(a, b))
 
-
-# ─── PER-ASSET EMBEDDING GENERATION ─────────────────────────────────────────
 
 def _generate_embedding_for_asset(asset_doc: dict,
                                   video_base_path: Path) -> Optional[np.ndarray]:
@@ -261,8 +257,6 @@ def _create_master_asset(db, asset_doc: dict, embedding: np.ndarray,
     result = db.master_assets.insert_one(doc)
     return result.inserted_id
 
-
-# ─── MAIN ENTRY POINT ────────────────────────────────────────────────────────
 
 def link_assets_for_video(
     db,
