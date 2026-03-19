@@ -435,7 +435,7 @@ export default function Dashboard() {
               </div>
             </div>
             {/* Legend */}
-            <div className="px-5 pb-2 flex-1 flex flex-col justify-end gap-4">
+            <div className="px-5 pb-12 flex-1 flex flex-col justify-end gap-4">
               {conditionSummaryData.map((d) => {
                 const total = conditionSummaryData.reduce((s, c) => s + c.count, 0);
                 const pct = total > 0 ? Math.round((d.count / total) * 100) : 0;
@@ -456,7 +456,7 @@ export default function Dashboard() {
                 );
               })}
             </div>
-            <div className="px-5 pb-3">
+            {/* <div className="px-5 pb-3">
               <Button
                 variant="outline"
                 size="sm"
@@ -467,7 +467,7 @@ export default function Dashboard() {
                 View All on Map
                 <ArrowUpRight className="h-3 w-3" />
               </Button>
-            </div>
+            </div> */}
           </Card>
         </div>
 
@@ -659,7 +659,8 @@ export default function Dashboard() {
               <TableHeader className="top-0 z-10 bg-card">
                 <TableRow className="border-b border-border hover:bg-transparent">
                   <TableHead className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Road</TableHead>
-                  <TableHead className="text-sm font-semibold uppercase tracking-wider text-muted-foreground text-right">Count</TableHead>
+                  <TableHead className="text-sm font-semibold uppercase tracking-wider text-muted-foreground text-right">Total</TableHead>
+                  <TableHead className="text-sm font-semibold uppercase tracking-wider text-muted-foreground text-right">Defects</TableHead>
                   <TableHead className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Last Survey</TableHead>
                   <TableHead className="text-sm font-semibold uppercase tracking-wider text-muted-foreground text-right w-48">Actions</TableHead>
                 </TableRow>
@@ -668,6 +669,7 @@ export default function Dashboard() {
                 {topDefectRoads.map((row, idx) => (
                   <TableRow key={`${row.road}-${idx}`} className="hover:bg-muted/40 border-b border-border/50" style={{ height: 36 }}>
                     <TableCell className="text-xs font-medium py-2.5">{row.road}</TableCell>
+                    <TableCell className="text-right font-semibold text-xs tabular-nums py-2.5">{row.total_count ?? "—"}</TableCell>
                     <TableCell className="text-right py-2.5">
                       <span className="inline-flex items-center justify-center rounded-md bg-destructive/10 text-destructive px-2 py-0.5 text-xs font-bold tabular-nums min-w-[2rem]">
                         {row.count}

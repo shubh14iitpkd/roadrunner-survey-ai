@@ -274,10 +274,12 @@ def top_anomaly_roads():
 			{"survey_date": 1},
 		)
 		survey_date = latest_survey.get("survey_date") if latest_survey else None
+		total_count = db.master_assets.count_documents({"route_id": route_id})
 		items.append({
 			"road": road.get("road_name") if road else f"Route {route_id}",
 			"route_id": route_id,
 			"count": d.get("count", 0),
+			"total_count": total_count,
 			"lastSurvey": survey_date,
 		})
 
