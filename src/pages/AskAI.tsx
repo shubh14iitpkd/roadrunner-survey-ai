@@ -14,19 +14,24 @@ import { MapBlock } from "@/components/MapBlock";
 import { ChatHistorySidebar } from "@/components/ChatHistorySidebar";
 import { useChatContext } from "@/contexts/ChatContext";
 import { useState } from "react";
+import { useTheme } from "next-themes";
 
 // ── Thinking indicator ────────────────────────────────────────────────────────
 
+const logos = {
+  light: "/RoadGPT - colored.png",
+  dark: "/RoadGPT - clear.png"
+}
+
 const THINKING_STEPS = [
-  { icon: Brain,     label: "Understanding your question...",  duration: 1800 },
-  { icon: Database,  label: "Querying road network data...",    duration: 2500 },
-  { icon: BarChart2, label: "Analysing results...",             duration: 2000 },
-  { icon: Sparkles,  label: "Generating response...",           duration: Infinity },
+  { icon: Brain, label: "Understanding your question...", duration: 1800 },
+  { icon: Database, label: "Querying road network data...", duration: 2500 },
+  { icon: BarChart2, label: "Analysing results...", duration: 2000 },
+  { icon: Sparkles, label: "Generating response...", duration: Infinity },
 ];
 
 function useThinkingStep(busy: boolean) {
   const [stepIdx, setStepIdx] = useState(0);
-
   useEffect(() => {
     if (!busy) { setStepIdx(0); return; }
     let current = 0;
@@ -64,7 +69,7 @@ function ThinkingIndicator({ busy }: { busy: boolean }) {
             {step.label}
           </span>
           <span className="flex gap-1 ml-1">
-            {[0,1,2].map(i => (
+            {[0, 1, 2].map(i => (
               <span
                 key={i}
                 className="block w-1.5 h-1.5 rounded-full bg-primary/60"
@@ -150,6 +155,9 @@ export default function AskAI() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  const { theme } = useTheme();
+
+
   const samplePrompts = selectedRouteId ? [
     "What is the condition of assets on this route?",
     "How many surveys have been done?",
@@ -167,11 +175,8 @@ export default function AskAI() {
         {/* Header with Selector */}
         <div className="p-6 border-b border-border space-y-4">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-primary to-primary/60 flex items-center justify-center">
-              <Sparkles className="h-5 w-5 text-white" />
-            </div>
-            <div className="flex-1">
-              <h1 className="text-2xl font-bold">RoadGPT</h1>
+            <div className="flex-1 select-none">
+              <img src={logos[theme || "light"] || logos.light} alt="RoadGPT" className="h-6" />
               <p className="text-sm text-muted-foreground">Query road network data with natural language</p>
             </div>
             <ChatHistorySidebar
@@ -219,12 +224,12 @@ export default function AskAI() {
               </Badge>
               {selectedRoute.estimated_distance_km && (
                 <Badge variant="secondary" className="gap-1">
-                    {selectedRoute.estimated_distance_km} km
+                  {selectedRoute.estimated_distance_km} km
                 </Badge>
               )}
               <div className="unselect-route">
                 <Button variant="destructive" size="sm" className="rounded-full" onClick={() => handleRouteSelect("")}>
-                  <X/>
+                  <X />
                 </Button>
               </div>
             </div>

@@ -20,7 +20,7 @@ export interface RouteInfo {
 export const WELCOME_MESSAGE: Message = {
   role: "assistant",
   content:
-    "Hello! I'm RoadSight AI Assistant. I can answer questions about survey history, asset totals, and conditions across the route.",
+    "Hello! I'm RoadGPT. I can answer questions about survey history, asset totals, and conditions across the route.",
 };
 
 async function sendMessageToBackend(
