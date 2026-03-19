@@ -5,7 +5,8 @@ import { cn } from "@/lib/utils";
 import {
   TrendingUp, AlertTriangle, Package, Calendar,
   MapPin, Eye, ChevronLeft, ChevronRight, Map, ArrowUpRight, Activity, X, Download,
-  BarChart, Loader2
+  BarChart, Loader2,
+  PieChartIcon
 } from "lucide-react";
 import {
   PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Sector,
@@ -27,6 +28,11 @@ import {
   exportDefectByRoadReport,
   exportRoadWiseAssetTypeReport,
 } from "@/lib/reportGenerator";
+
+const CONDITION_COLORS = {
+  Good: "#16a34a",
+  Damaged: "#ef4444",
+};
 
 const CATEGORY_COLORS = [
   "hsl(217, 91%, 60%)",   // DIRECTIONAL SIGNAGE - blue
@@ -75,6 +81,7 @@ export default function Dashboard() {
   const navigate = useNavigate();
   const { data: labelMapData } = useLabelMap();
   const [activeDonutIndex, setActiveDonutIndex] = useState<number | undefined>(undefined);
+  const [activeConditionIndex, setActiveConditionIndex] = useState<number | undefined>(undefined);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
   const onDonutEnter = useCallback((_: any, index: number) => setActiveDonutIndex(index), []);
@@ -84,6 +91,11 @@ export default function Dashboard() {
   });
   const [categoryChartData, setCategoryChartData] = useState<any[]>([]);
   const [topDefectRoads, setTopDefectRoads] = useState<any[]>([]);
+
+  const conditionSummaryData = useMemo(() => [
+    { condition: "Good", count: categoryChartData.reduce((s, d) => s + (d.good_count || 0), 0) },
+    { condition: "Damaged", count: categoryChartData.reduce((s, d) => s + (d.damaged_count || 0), 0) },
+  ].filter(d => d.count > 0), [categoryChartData]);
 
   // Compute the selected category's donut index
   const selectedDonutIndex = useMemo(() => {
@@ -245,13 +257,19 @@ export default function Dashboard() {
           />
         </div> */}
         {/* Charts Row */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {/* Donut */}
           <Card className="lg:col-span-1 p-0 border border-border bg-card overflow-hidden flex flex-col">
-            <div className="px-5 pt-4 pb-1">
-              <p className="text-sm font-semibold text-muted-foreground uppercase tracking-[0.15em]">Asset Distribution</p>
-              <p className="text-sm font-semibold text-foreground mt-0.5">By Category</p>
+            <div className="px-5 pt-5 pb-3 flex items-center gap-3">
+              <div className="p-2 rounded-lg bg-primary/10 dark:bg-muted-secondary/10">
+                <PieChartIcon className="h-4 w-4 text-primary dark:text-muted-secondary" />
+              </div>
+              <div>
+                <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-[0.15em]">Asset Distribution</p>
+                <p className="text-sm font-semibold text-foreground mt-0.5">By Category</p>
+              </div>
             </div>
+            <div className="gradient-table-line" />
             <div className="flex items-center justify-center px-5" style={{ height: 300 }}>
               <div className="relative" style={{ width: 300, height: 300 }}>
                 <ResponsiveContainer width="100%" height="100%">
@@ -347,7 +365,110 @@ export default function Dashboard() {
               </Button>
             </div>
           </Card>
-
+          
+          {/* Donut — Asset Distribution by Condition */}
+          <Card className="p-0 border border-border bg-card overflow-hidden flex flex-col">
+            <div className="px-5 pt-5 pb-3 flex items-center gap-3">
+              <div className="p-2 rounded-lg bg-amber-500/10">
+                <Activity className="h-4 w-4 text-amber-500" />
+              </div>
+              <div>
+                <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-[0.15em]">Asset Distribution</p>
+                <p className="text-sm font-semibold text-foreground mt-0.5">By Condition</p>
+              </div>
+            </div>
+            <div className="gradient-table-line" />
+            <div className="flex items-center justify-center px-5" style={{ height: 300 }}>
+              <div className="relative" style={{ width: 220, height: 300 }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      activeIndex={activeConditionIndex}
+                      activeShape={(props: any) => {
+                        const { cx, cy, innerRadius, outerRadius, startAngle, endAngle, fill, payload, value, percent } = props;
+                        return (
+                          <g>
+                            <Sector cx={cx} cy={cy} innerRadius={innerRadius - 3} outerRadius={outerRadius + 4} startAngle={startAngle} endAngle={endAngle} fill={fill} opacity={0.9} />
+                            <Sector cx={cx} cy={cy} innerRadius={outerRadius + 6} outerRadius={outerRadius + 9} startAngle={startAngle} endAngle={endAngle} fill={fill} opacity={0.4} />
+                            <text x={cx} y={cy - 10} textAnchor="middle" fill="currentColor" className="text-foreground" fontSize={22} fontWeight={700}>
+                              {value}
+                            </text>
+                            <text x={cx} y={cy + 8} textAnchor="middle" fill="currentColor" className="text-muted-foreground" fontSize={10}>
+                              {payload.condition}
+                            </text>
+                            <text x={cx} y={cy + 22} textAnchor="middle" fill="currentColor" className="text-muted-foreground" fontSize={10}>
+                              {(percent * 100).toFixed(0)}%
+                            </text>
+                          </g>
+                        );
+                      }}
+                      data={conditionSummaryData}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={65}
+                      outerRadius={95}
+                      dataKey="count"
+                      nameKey="condition"
+                      paddingAngle={2}
+                      stroke="hsl(var(--card))"
+                      strokeWidth={2}
+                      onMouseEnter={(_, index) => setActiveConditionIndex(index)}
+                      onMouseLeave={() => setActiveConditionIndex(undefined)}
+                      style={{ cursor: 'pointer' }}
+                    >
+                      {conditionSummaryData.map((entry) => (
+                        <Cell key={entry.condition} name={"ASds"} fill={CONDITION_COLORS[entry.condition] || "#fff"} />
+                      ))}
+                    </Pie>
+                    {activeConditionIndex === undefined && (
+                      <text x="50%" y="46%" textAnchor="middle" fill="currentColor" className="text-foreground" fontSize={22} fontWeight={700}>
+                        {conditionSummaryData.reduce((sum, d) => sum + d.count, 0)}
+                      </text>
+                    )}
+                    {activeConditionIndex === undefined && (
+                      <text x="50%" y="56%" textAnchor="middle" fill="currentColor" className="text-muted-foreground" fontSize={10}>
+                        Total Assets
+                      </text>
+                    )}
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+            {/* Legend */}
+            <div className="px-5 pb-2 flex-1 flex flex-col justify-end gap-4">
+              {conditionSummaryData.map((d) => {
+                const total = conditionSummaryData.reduce((s, c) => s + c.count, 0);
+                const pct = total > 0 ? Math.round((d.count / total) * 100) : 0;
+                const condColors: Record<string, string> = { Good: "#16a34a", Damaged: "#ef4444" };
+                return (
+                  <div
+                    key={d.condition}
+                    className="flex items-center gap-2 text-xs px-2 py-1.5 rounded-md hover:bg-muted/40 transition-colors"
+                  >
+                    <span
+                      className="w-2.5 h-2.5 rounded-full shrink-0"
+                      style={{ backgroundColor: condColors[d.condition] || "#888" }}
+                    />
+                    <span className="text-foreground font-medium text-xs capitalize">{d.condition}</span>
+                    <span className="text-muted-foreground text-[11px] ml-1">{pct}%</span>
+                    <span className="font-bold text-foreground ml-auto tabular-nums text-[11px]">{d.count}</span>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="px-5 pb-3">
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-full h-7 text-[11px] gap-1.5"
+                onClick={() => navigate('/gis')}
+              >
+                <MapPin className="h-3 w-3" />
+                View All on Map
+                <ArrowUpRight className="h-3 w-3" />
+              </Button>
+            </div>
+          </Card>
         </div>
 
         {/* <div className="grid grid-cols-1 lg:grid-cols-4 gap-4"> */}
