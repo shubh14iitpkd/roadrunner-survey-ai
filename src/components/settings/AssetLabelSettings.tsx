@@ -255,7 +255,7 @@ export default function AssetLabelSettings() {
       <div className="space-y-4">
         <div className="flex items-center justify-between gap-4">
           <div className="flex items-center gap-2">
-            <h3 className="text-base font-semibold tracking-tight">Assets</h3>
+            <h3 className="text-base font-semibold tracking-tight">Asset Types</h3>
             <Badge variant="secondary" className="font-normal">
               {filteredGroups.length}
             </Badge>
@@ -263,7 +263,7 @@ export default function AssetLabelSettings() {
           <div className="relative">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input 
-              placeholder="Search assets..." 
+              placeholder="Search asset types..." 
               className="h-9 pl-9 w-[200px] lg:w-[300px] text-sm bg-muted/30"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
@@ -271,7 +271,7 @@ export default function AssetLabelSettings() {
           </div>
         </div>
 
-        <ScrollArea className="h-[400px] border rounded-lg bg-muted/10 p-1">
+        <ScrollArea className="h-[400px] rounded-lg p-1 !overscroll-none">
           <div className="p-2 space-y-1">
             {filteredGroups.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-12 text-center text-muted-foreground">
@@ -279,16 +279,16 @@ export default function AssetLabelSettings() {
                 <p className="text-sm">No assets found</p>
               </div>
             ) : (
-              <Accordion type="single" collapsible className="space-y-1">
+              <Accordion type="single" collapsible className="space-y-1 !overscroll-none">
               {filteredGroups.map((group) => {
                 const key = group.groupKey;
                 const isEditing = editingId === `label-${key}`;
-
+                // Real label Item
                 return (
-                  <AccordionItem 
+                  <AccordionItem
                     key={key} 
                     value={key} 
-                    className={`border rounded-md px-3 bg-card transition-colors hover:bg-accent/5 ${isEditing ? 'border-primary/50 ring-1 ring-primary/20 bg-accent/10' : ''}`}
+                    className={`border overscroll-none dark:hover:border-muted-secondary rounded-md px-3 bg-card transition-colors hover:bg-accent/5 ${isEditing ? 'border-primary/50 ring-1 ring-primary/20 bg-accent/10' : ''}`}
                   >
                     <div className="flex items-center dark:hover:border-muted-secondary justify-between py-2.5">
                       {isEditing ? (
@@ -324,7 +324,8 @@ export default function AssetLabelSettings() {
                         </div>
                       ) : (
                         <>
-                          <div className="flex items-center gap-2 flex-1 min-w-0 pr-4">
+                        {/* Label Item */}
+                          <div className="flex items-center gap-2 dark:hover:border-muted-secondary flex-1 min-w-0 pr-4">
                             {/* Icon preview */}
                             {group.iconUrl ? (
                               <img src={`${API_BASE}${group.iconUrl}`} alt="" className="w-5 h-5 object-contain shrink-0" />
@@ -382,6 +383,8 @@ export default function AssetLabelSettings() {
                   </AccordionItem>
                 );
               })}
+              <div className="pointer-events-none sticky bottom-0 h-6 w-full 
+                    bg-gradient-to-b from-transparent to-black/20" />
             </Accordion>
             )}
           </div>

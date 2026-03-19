@@ -97,13 +97,13 @@ export async function exportDefectByRoadReport(filterRoad?: string, labelMap?: R
     : all;
 
   const headers = [
-    "Defect ID", "Asset ID", "Asset Type", "Asset Category",
+    "Defect ID", "Asset ID", "Road Name", "Asset Type", "Asset Category",
     "Latitude", "Longitude", "Side", "Zone",
     "Last Survey Date", "Issue Type",
   ];
 
   const data = filtered.map(r => [
-    r.anomalyId, r.displayId, r.assetType, r.assetCategory,
+    r.anomalyId, r.displayId, r.roadName, r.assetType, r.assetCategory,
     r.lat, r.lon, capitalize(r.side), capitalize(r.zone),
     r.lastSurveyDate, capitalize(r.issueType),
   ]);

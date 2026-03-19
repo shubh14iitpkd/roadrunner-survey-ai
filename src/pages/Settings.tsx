@@ -525,8 +525,8 @@ export default function Settings() {
                         </div>
                       );
                     })}
-                      <div className="pointer-events-none sticky bottom-0 h-6 w-full 
-                  bg-gradient-to-b from-transparent to-black/20" />
+                  <div className="pointer-events-none sticky bottom-0 h-6 w-full 
+                    bg-gradient-to-b from-transparent to-black/20" />
                   </div>
                 )}
               </AccordionContent>
@@ -541,7 +541,7 @@ export default function Settings() {
                   <div className="text-left">
                     <h2 className="font-semibold text-lg">Asset Labels</h2>
                     <p className="text-sm text-muted-foreground font-normal">
-                      Customize display names for assets and categories
+                      Customize display names for asset types and categories.
                     </p>
                   </div>
                 </div>
