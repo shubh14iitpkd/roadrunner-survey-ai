@@ -107,27 +107,22 @@ def _cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
 
 
 def _generate_embedding_for_asset(asset_doc: dict,
-                                  video_base_path: Path) -> Optional[np.ndarray]:
+                                  video_path: Path) -> Optional[np.ndarray]:
     """
     Open the asset's video, extract the frame, crop the bbox, return embedding.
     Returns None on any failure so the caller can skip gracefully.
     """
-    video_key = asset_doc.get("video_key") or asset_doc.get("video_id")
     frame_number = asset_doc.get("frame_number")
     box = asset_doc.get("box")
 
-    if not video_key or frame_number is None or not box:
-        log.warning("[LINKER] Asset %s missing video_key/frame_number/box — skipping",
+    if frame_number is None or not box:
+        log.warning("[LINKER] Asset %s missing frame_number/box — skipping",
                     asset_doc.get("_id"))
         return None
 
-    video_path = video_base_path / f"{video_key}{VIDEO_EXTENSION}"
     if not video_path.exists():
-        # Also try finding within uploads root directly (video_key might be the video_id)
-        video_path = video_base_path.parent / f"{video_key}{VIDEO_EXTENSION}"
-        if not video_path.exists():
-            log.warning("[LINKER] Video not found for key %s", video_key)
-            return None
+        log.warning("[LINKER] Video not found at %s", video_path)
+        return None
 
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
@@ -265,7 +260,7 @@ def link_assets_for_video(
     survey_display_id: str,
     route_id: int,
     survey_date,
-    video_base_path: Path,
+    video_path: Path,
     distance_threshold: float = DEFAULT_DISTANCE_THRESHOLD,
 ) -> dict:
     """
@@ -315,7 +310,7 @@ def link_assets_for_video(
         if emb is not None:
             emb_np = np.array(emb, dtype=np.float32)
         else:
-            emb_np = _generate_embedding_for_asset(asset_doc, video_base_path)
+            emb_np = _generate_embedding_for_asset(asset_doc, video_path)
             if emb_np is None:
                 skipped += 1
                 continue

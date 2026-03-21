@@ -340,6 +340,7 @@ class LocalVideoProcessor:
         detections_list = []
         frame_metadata = []
         assets_detected = []
+        seen_track_ids = set()
         summary = { "good": 0, "damaged": 0, "total_assets": 0 }
 
         try:
@@ -443,15 +444,9 @@ class LocalVideoProcessor:
                                 track_id = track.track_id
                                 class_name = track.get_det_class()
                                 ltwh_box = track.to_ltwh(orig=True)
-                                if db is not None:
-                                    exists = db.assets.find_one(
-                                        {
-                                            "track_id": track_id,
-                                            "video_id": video_id,
-                                        }
-                                    )
-                                    if exists:
-                                        continue
+                                if track_id in seen_track_ids:
+                                    continue
+                                seen_track_ids.add(track_id)
                                 # returns the confidence of the latest YOLO detection for this track
                                 confidence = track.get_det_conf()
                                 if confidence is None:

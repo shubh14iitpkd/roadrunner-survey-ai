@@ -896,7 +896,6 @@ def process_video_with_ai(video_id: str):
                         survey_display_id_str = survey_doc.get("survey_display_id") if survey_doc else None
                         survey_date_val = survey_doc.get("survey_date") if survey_doc else None
 
-                        video_library_path = upload_root / "video_library"
                         linker_summary = link_assets_for_video(
                             db=mongo_db,
                             video_id=video_id,
@@ -904,7 +903,7 @@ def process_video_with_ai(video_id: str):
                             survey_display_id=survey_display_id_str,
                             route_id=route_id,
                             survey_date=survey_date_val,
-                            video_base_path=video_library_path,
+                            video_path=video_path,
                         )
                         print(f"[PROCESS] Demo asset linking complete for {video_id}: {linker_summary}")
                     except Exception as link_err:
@@ -994,25 +993,12 @@ def process_video_with_ai(video_id: str):
                 print(f"[PROCESS] Video exists: {video_path.exists()}")
 
                 # Create output directories
-                output_dirs = {
-                    "original_videos": upload_root / "original_videos",
-                    "annotated_videos": upload_root / "annotated_videos",
-                    # "frames": upload_root / "frames",
-                    # "metadata": upload_root / "metadata",
-                }
-                for dir_path in output_dirs.values():
-                    dir_path.mkdir(parents=True, exist_ok=True)
+                (upload_root / "annotated_videos").mkdir(parents=True, exist_ok=True)
 
-                # Move original video to original_videos folder if not already there
-                original_video_path = output_dirs["original_videos"] / f"{video_id}.mp4"
-                if not original_video_path.exists():
-                    if not video_path.exists():
-                        raise FileNotFoundError(
-                            f"Source video not found at: {video_path}"
-                        )
-                    import shutil
-
-                    shutil.copy2(str(video_path), str(original_video_path))
+                if not video_path.exists():
+                    raise FileNotFoundError(
+                        f"Source video not found at: {video_path}"
+                    )
 
                 print(f"[PROCESS] Starting SageMaker processing for video {video_id}")
 
@@ -1036,7 +1022,7 @@ def process_video_with_ai(video_id: str):
                 # Process video
                 gpx_path = upload_root / gpx_file_url.lstrip("/uploads/") if gpx_file_url else None
                 result = processor.process_video(
-                    video_path=original_video_path,
+                    video_path=video_path,
                     output_dir=upload_root,  # Pass upload_root directly
                     video_id=video_id,
                     route_id=route_id,  # Pass route_id for organizing frames by road
@@ -1110,7 +1096,6 @@ def process_video_with_ai(video_id: str):
                     survey_display_id_str = survey_doc.get("survey_display_id") if survey_doc else None
                     survey_date_val = survey_doc.get("survey_date") if survey_doc else None
 
-                    video_library_path = upload_root / "video_library"
                     linker_summary = link_assets_for_video(
                         db=mongo_db,
                         video_id=video_id,
@@ -1118,7 +1103,7 @@ def process_video_with_ai(video_id: str):
                         survey_display_id=survey_display_id_str,
                         route_id=route_id,
                         survey_date=survey_date_val,
-                        video_base_path=video_library_path,
+                        video_path=video_path,
                     )
                     print(f"[PROCESS] Asset linking complete for video {video_id}: {linker_summary}")
                 except Exception as link_err:
@@ -1722,7 +1707,6 @@ def upload_library_video():
             gpx_file_url = f"/uploads/{rel_gpx}"
         except ValueError:
             gpx_file_url = f"/uploads/{gpx_path.name}"
-
     # 5. Look up survey_display_id from the survey
     survey_display_id = None
     survey_sid = survey_id["$oid"] if isinstance(survey_id, dict) else survey_id
@@ -1760,7 +1744,8 @@ def upload_library_video():
         asset['survey_display_id'] = survey_display_id
         assets_to_insert.append(asset)    
     
-    db.assets.insert_many(assets_to_insert)
+    if assets_to_insert:
+        db.assets.insert_many(assets_to_insert)
 
     if video_id:
         res = db.videos.find_one_and_update(
