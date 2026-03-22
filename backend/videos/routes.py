@@ -777,6 +777,19 @@ def process_video_with_ai(video_id: str):
 
         app = current_app._get_current_object()
 
+        # Setup paths with absolute path
+        upload_root = Path(
+            os.getenv("UPLOAD_DIR")
+            or str(Path(__file__).resolve().parents[1] / "uploads")
+        )
+        upload_root = upload_root.resolve()  # Ensure absolute path
+
+        # Handle storage_url which might be relative or absolute
+        storage_filename = storage_url.lstrip("/uploads/").lstrip("/")
+        video_path = upload_root / storage_filename
+
+        print(f"[PROCESS] Upload root: {upload_root}")
+
         def process_demo_in_background():
             with app.app_context():
                 try:
@@ -939,25 +952,6 @@ def process_video_with_ai(video_id: str):
             202,
         )
 
-    # Initialize processor and check health FIRST (Synchronous check)
-    # from services.sagemaker_processor import SageMakerVideoProcessor
-
-    # processor = SageMakerVideoProcessor()
-    # is_healthy, error_msg = processor.check_endpoint_health()
-
-    # processor = MultiEndpointSageMaker()
-    # processor.check_endpoints_health()
-
-    # if not is_healthy:
-    #     return (
-    #         jsonify(
-    #             {
-    #                 "error": f"SageMaker Error: {error_msg}. Processing aborted to prevent local overload."
-    #             }
-    #         ),
-    #         400,
-    #     )
-
     # Update status to processing
     db.videos.update_one(
         {"_id": ObjectId(video_id)},
@@ -975,18 +969,6 @@ def process_video_with_ai(video_id: str):
             try:
                 import json
 
-                # Setup paths with absolute path
-                upload_root = Path(
-                    os.getenv("UPLOAD_DIR")
-                    or str(Path(__file__).resolve().parents[1] / "uploads")
-                )
-                upload_root = upload_root.resolve()  # Ensure absolute path
-
-                # Handle storage_url which might be relative or absolute
-                storage_filename = storage_url.lstrip("/uploads/").lstrip("/")
-                video_path = upload_root / storage_filename
-
-                print(f"[PROCESS] Upload root: {upload_root}")
                 print(f"[PROCESS] Storage URL: {storage_url}")
                 print(f"[PROCESS] Video filename: {storage_filename}")
                 print(f"[PROCESS] Video path: {video_path}")
@@ -1330,10 +1312,9 @@ def get_video_frame_annotated(video_id: str):
 
 
 @videos_bp.get("/<video_id>/frames")
-def get_video_annotated_frames(video_id: str):
+def get_video_frames(video_id: str, detections_only=False):
     """
     Fetch all frames for a video (metadata only, no image data).
-    Supports demo videos by matching storage_url basename with frame 'key'.
 
     Query parameters:
     - has_detections: If true, only return frames with detections
@@ -1355,32 +1336,23 @@ def get_video_annotated_frames(video_id: str):
 
     # First try to find frames by key (for demo videos)
     frames = []
-    is_demo = False
 
-    if storage_basename:
-        key_query = {"key": storage_basename}
-        if has_detections:
-            key_query["detections_count"] = {"$gt": 0}
-
-        frames = list(db.frames.find(key_query).sort("frame_number", 1))
-        if frames:
-            is_demo = True
-            print(f"[DEMO] Found {len(frames)} frames by key '{storage_basename}'")
-
+    projections = {}
+    if detections_only:
+        projections = {"detections": 1}
     # Fall back to video_id-based lookup
     if not frames:
         query = {"video_id": video_id}
         if has_detections:
             query["detections_count"] = {"$gt": 0}
 
-        frames = list(db.frames.find(query).sort("frame_number", 1))
+        frames = list(db.frames.find(query, projections).sort("frame_number", 1))
 
     # Use bson.json_util for proper serialization
     return Response(
         json_util.dumps(
             {
                 "video_id": video_id,
-                "is_demo": is_demo,
                 "items": frames,
                 "total": len(frames),
             }
@@ -1735,7 +1707,9 @@ def upload_library_video():
     
     # link the survey id with demo assets
     assets_lib = db.video_lib_assets.find({"video_key" : key })
+    frames = db.frames_lib.find({ "video_key": key })
     assets_to_insert = []
+    frames_to_insert = []
     for asset in assets_lib:
         asset.pop('_id', None) 
         asset['video_id'] = video_id
@@ -1744,8 +1718,19 @@ def upload_library_video():
         asset['survey_display_id'] = survey_display_id
         assets_to_insert.append(asset)    
     
+    for frame in frames:
+        frame.pop('_id', None)
+        frame['video_id'] = video_id
+        frame['survey_id'] = ObjectId(sid)
+        frame['route_id'] = int(route_id)
+        # frame['survey_display_id'] = survey_display_id
+        frames_to_insert.append(frame)
+        
     if assets_to_insert:
         db.assets.insert_many(assets_to_insert)
+    
+    if frames_to_insert:
+        db.frames.insert_many(frames_to_insert)
 
     if video_id:
         res = db.videos.find_one_and_update(

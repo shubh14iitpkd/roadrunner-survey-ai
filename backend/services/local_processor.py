@@ -44,7 +44,7 @@ class LocalVideoProcessor:
         self.model = self._load_model()
 
         # Frame extraction interval (process every Nth frame)
-        self.frame_interval = int(self.config.get("frame_interval", "3"))
+        self.frame_interval = int(self.config.get("frame_interval", "1"))
 
         # Max concurrent workers for processing
         self.max_concurrency = int(self.config.get("max_concurrency", "5"))
