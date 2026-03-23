@@ -8,6 +8,8 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Link, useNavigate } from "react-router-dom";
+import AnnotatedVideoPlayer from "@/components/AnnotatedVideoPlayer";
+import VideoPlayer from "@/components/VideoPlayer";
 import GpxMiniMap from "@/components/GpxMiniMap";
 import { toast } from "sonner";
 import {
@@ -37,10 +39,13 @@ import { useAuth } from "@/contexts/AuthContext";
 import VideoLibraryUpload from "@/components/VideoLibraryUpload";
 import { set } from "date-fns";
 import { LibraryVideoItem } from "@/contexts/UploadContext";
+import { platform } from "os";
+
 
 
 export default function SurveyUpload() {
   const navigate = useNavigate();
+
   const { videos, isUploading, uploadFiles, uploadFromLibrary, uploadGpxForVideo, processWithAI, resetVideoStatus, loading } = useUpload();
   const [roads, setRoads] = useState<any[]>([]);
   const [selectedRoute, setSelectedRoute] = useState<string>("");
@@ -71,12 +76,12 @@ export default function SurveyUpload() {
   // Function to open video player with category data
   const openVideoPlayer = async (video: VideoFile) => {
     setSelectedVideo(video);
-    setPlayerOriginalSrc(video.backendId ? `${API_BASE}/api/videos/${video.backendId}/stream` : "");
+    setPlayerOriginalSrc(video.url);
     setPlayerAnnotatedSrc("");
     setPlayerCategoryVideos({});
     setActiveCategory("");
     setShowVideoPlayer(true);
-
+    console.log(video)
     // Fetch video data to get category_videos if completed
     if (video.backendId && video.status === "completed") {
       try {
@@ -104,17 +109,6 @@ export default function SurveyUpload() {
         console.error("Failed to fetch video category data:", err);
       }
     }
-  };
-
-  const CATEGORY_LABELS: Record<string, string> = {
-    "corridor_fence": "Corridor Fence",
-    "corridor_pavement": "Pavement",
-    "corridor_structure": "Structures",
-    "directional_signage": "Signage",
-    "its": "ITS",
-    "roadway_lighting": "Lighting",
-    "oia": "OIA",
-    "default": "Default"
   };
 
   // Load roads from API
@@ -332,7 +326,7 @@ export default function SurveyUpload() {
                     Upload video and GPX files for road survey processing. You can add multiple videos - they will upload in parallel.
                   </DialogDescription>
                 </DialogHeader>
-                
+
                 {/* Upload Queue Status */}
                 {uploadingItems.length > 0 && (
                   <div className="p-3 rounded-lg bg-primary/5 border border-primary/20">
@@ -520,8 +514,8 @@ export default function SurveyUpload() {
                       </div>
                     </div>
                     <div>
-                      <VideoLibraryUpload 
-                        selectedRoute={selectedRoute} 
+                      <VideoLibraryUpload
+                        selectedRoute={selectedRoute}
                         surveyorName={surveyorName}
                         surveyDate={surveyDate}
                         handleFileSelect={handleLibraryFileSelect}
@@ -530,7 +524,7 @@ export default function SurveyUpload() {
                     </div>
                   </TabsContent>
                 </Tabs>
-                
+
                 {/* Footer with close button */}
                 <div className="flex justify-end pt-4 border-t">
                   <Button variant="outline" onClick={() => setIsUploadDialogOpen(false)}>
@@ -692,10 +686,10 @@ export default function SurveyUpload() {
                           {/* GPS Mini Map */}
                           <div className="p-3 flex-1 flex justify-start">
                             {video.gpxFile ? (
-                                <Badge variant="secondary" className="gap-1.5 text-xs font-medium bg-green-50 dark:bg-green-950/30 text-green-700 dark:text-green-400 border-green-200 dark:border-green-800">
-                                  <MapPin className="h-3 w-3" />
-                                  Yes
-                                </Badge>
+                              <Badge variant="secondary" className="gap-1.5 text-xs font-medium bg-green-50 dark:bg-green-950/30 text-green-700 dark:text-green-400 border-green-200 dark:border-green-800">
+                                <MapPin className="h-3 w-3" />
+                                Yes
+                              </Badge>
                             ) : (
                               <Badge variant="secondary" className="gap-1.5 text-xs font-medium bg-red-50 dark:bg-red-950/30 text-red-700 dark:text-red-400 border-red-200 dark:border-red-800">
                                 No
@@ -736,18 +730,18 @@ export default function SurveyUpload() {
 
                           {/* Actions column */}
                           <div className="p-3 flex-[2.5] flex items-center justify-center gap-1.5 flex-wrap">
-                              {video.status === "uploaded" && (
-                                <Button
-                                  size="sm"
-                                  onClick={() => processWithAI(video.id)}
-                                  className="h-7 text-xs bg-gradient-to-r from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700 text-white"
-                                >
-                                  <Play className="h-3 w-3 mr-1" />
-                                  Process
-                                </Button>
-                              )}
+                            {video.status === "uploaded" && (
+                              <Button
+                                size="sm"
+                                onClick={() => processWithAI(video.id)}
+                                className="h-7 text-xs bg-gradient-to-r from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700 text-white"
+                              >
+                                <Play className="h-3 w-3 mr-1" />
+                                Process
+                              </Button>
+                            )}
 
-                              {/* {video.status === "processing" && (
+                            {/* {video.status === "processing" && (
                                 <Button
                                   size="sm"
                                   variant="ghost"
@@ -761,76 +755,76 @@ export default function SurveyUpload() {
                                 </Button>
                               )} */}
 
-                              {video.status === "error" && (
+                            {video.status === "error" && (
+                              <Button
+                                size="sm"
+                                onClick={() => processWithAI(video.id)}
+                                className="h-7 text-xs bg-orange-500 hover:bg-orange-600 text-white"
+                              >
+                                <Play className="h-3 w-3 mr-1" />
+                                Retry
+                              </Button>
+                            )}
+
+                            {video.status === "completed" && (
+                              <>
+                                {user.role == "Admin" && (<Button
+                                  size="sm"
+                                  variant="outline"
+                                  asChild
+                                  className="h-7 text-xs border-green-300 text-green-700 hover:bg-green-50"
+                                >
+                                  <Link to={`/asset-library?route_id=${video.routeId}`}>
+                                    <Database className="h-3 w-3 mr-1" />
+                                    Library
+                                  </Link>
+                                </Button>)}
+                                {user.role == "Admin" && <Button
+                                  size="sm"
+                                  variant="destructive"
+                                  asChild
+                                  className="h-7 text-xs border border-destructive bg-destructive/10 text-destructive hover:bg-destructive/20"
+                                >
+                                  <Link to={`/defect-library?route_id=${video.routeId}`}>
+                                    <AlertTriangle className="h-3 w-3 mr-1" />
+                                    Defects
+                                  </Link>
+                                </Button>}
                                 <Button
                                   size="sm"
-                                  onClick={() => processWithAI(video.id)}
-                                  className="h-7 text-xs bg-orange-500 hover:bg-orange-600 text-white"
+                                  variant="ghost"
+                                  onClick={() => openVideoPlayer(video)}
+                                  className="h-7 w-7 p-0 text-purple-600 hover:bg-purple-50"
                                 >
-                                  <Play className="h-3 w-3 mr-1" />
-                                  Retry
+                                  <Video className="h-3 w-3" />
                                 </Button>
-                              )}
+                              </>
+                            )}
 
-                              {video.status === "completed" && (
-                                <>
-                                  {user.role == "Admin" && (<Button
-                                    size="sm"
-                                    variant="outline"
-                                    asChild
-                                    className="h-7 text-xs border-green-300 text-green-700 hover:bg-green-50"
-                                  >
-                                    <Link to={`/asset-library?route_id=${video.routeId}`}>
-                                      <Database className="h-3 w-3 mr-1" />
-                                      Library
-                                    </Link>
-                                  </Button>)}
-                                  {user.role=="Admin" && <Button
-                                    size="sm"
-                                    variant="destructive"
-                                    asChild
-                                    className="h-7 text-xs border border-destructive bg-destructive/10 text-destructive hover:bg-destructive/20"
-                                  >
-                                    <Link to={`/defect-library?route_id=${video.routeId}`}>
-                                      <AlertTriangle className="h-3 w-3 mr-1" />
-                                      Defects
-                                    </Link>
-                                  </Button>}
-                                  <Button
-                                    size="sm"
-                                    variant="ghost"
-                                    onClick={() => openVideoPlayer(video)}
-                                    className="h-7 w-7 p-0 text-purple-600 hover:bg-purple-50"
-                                  >
-                                    <Video className="h-3 w-3" />
-                                  </Button>
-                                </>
-                              )}
+                            {video.status === "queue" && (
+                              <span className="text-xs text-muted-foreground">Waiting...</span>
+                            )}
 
-                              {video.status === "queue" && (
-                                <span className="text-xs text-muted-foreground">Waiting...</span>
-                              )}
-
-                              {/* Delete button */}
-                              {user.role=="Admin" && <Button
-                                size="sm"
-                                variant="ghost"
-                                onClick={() => {
-                                  const surveyIdStr = typeof video.surveyId === 'object' && video.surveyId !== null
-                                    ? ((video.surveyId as any).$oid || String(video.surveyId))
-                                    : (video.surveyId || '');
-                                  setVideoToDelete({
-                                    id: video.id,
-                                    surveyId: surveyIdStr,
-                                    name: video.name
-                                  });
-                                  setDeleteDialogOpen(true);
-                                }}
-                                className="h-7 w-7 p-0 text-red-400 hover:text-red-600 hover:bg-red-50"
-                                disabled={video.status === "uploading" || video.status === "processing" || isDeleting || !video.surveyId}
-                              >
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </Button>}
+                            {/* Delete button */}
+                            {user.role == "Admin" && <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => {
+                                const surveyIdStr = typeof video.surveyId === 'object' && video.surveyId !== null
+                                  ? ((video.surveyId as any).$oid || String(video.surveyId))
+                                  : (video.surveyId || '');
+                                setVideoToDelete({
+                                  id: video.id,
+                                  surveyId: surveyIdStr,
+                                  name: video.name
+                                });
+                                setDeleteDialogOpen(true);
+                              }}
+                              className="h-7 w-7 p-0 text-red-400 hover:text-red-600 hover:bg-red-50"
+                              disabled={video.status === "uploading" || video.status === "processing" || isDeleting || !video.surveyId}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>}
                           </div>
                         </div>
                       );
@@ -882,108 +876,36 @@ export default function SurveyUpload() {
 
       {/* Video Player Dialog - Side by Side View with Category Switching */}
       <Dialog open={showVideoPlayer} onOpenChange={setShowVideoPlayer}>
-        <DialogContent className="max-w-[95vw] h-[90vh] p-0">
+        <DialogContent className="max-w-[90vw] h-[90vh] p-0">
           <DialogHeader className="p-6 pb-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <DialogTitle className="text-xl font-bold">
-                  {selectedVideo?.name || "Video Player"}
-                </DialogTitle>
-                {selectedVideo && (
-                  <p className="text-sm text-muted-foreground mt-1">
-                    Route #{selectedVideo.routeId} • {roads.find(r => r.route_id === selectedVideo.routeId)?.road_name || `Road ${selectedVideo.routeId}`}
-                  </p>
-                )}
-              </div>
-              {/* <Button variant="ghost" size="icon" onClick={() => setShowVideoPlayer(false)}>
-                <X className="h-5 w-5" />
-              </Button> */}
-            </div>
+            <DialogTitle className="text-2xl font-bold">Video Viewer</DialogTitle>
           </DialogHeader>
-
-          {/* Side-by-side Video Display */}
-          <div className={playerAnnotatedSrc || Object.keys(playerCategoryVideos).length > 0 ? "grid grid-cols-1 gap-4 p-6 pt-0 h-[calc(90vh-120px)]" : "p-6 pt-0 h-[calc(90vh-120px)]"}>
-            {/* Right: AI Annotated Video */}
-            {(playerAnnotatedSrc || Object.keys(playerCategoryVideos).length > 0) && (
-              <div className="space-y-3 flex flex-col h-full">
-                <Card className="p-4 gradient-card border-0">
-                  {/* <div className="flex items-center justify-between">
-                    <h3 className="font-semibold text-lg">AI Annotated Video</h3>
-                    <Badge className="bg-gradient-to-r from-blue-500 to-purple-500">AI Processed</Badge>
-                  </div> */}
-                  <p className="text-sm text-muted-foreground mt-1">Object detection with bounding boxes</p>
-
-                  {/* Category Buttons */}
-                  {Object.keys(playerCategoryVideos).length > 0 && (
-                    <div className="flex flex-wrap gap-2 mt-3 min-h-[32px]">
-                      {Object.keys(playerCategoryVideos).sort().map(cat => (
-                        <Button
-                          key={cat}
-                          size="sm"
-                          variant={activeCategory === cat ? "default" : "outline"}
-                          className={`text-xs h-7 ${activeCategory === cat ? "bg-blue-600 text-white" : ""}`}
-                          onClick={() => {
-                            const videoEl = document.getElementById('survey-annotated-video-player') as HTMLVideoElement;
-                            const currentTime = videoEl ? videoEl.currentTime : 0;
-                            const isPlaying = videoEl ? !videoEl.paused : false;
-
-                            setActiveCategory(cat);
-                            setPlayerAnnotatedSrc(playerCategoryVideos[cat]);
-
-                            // Restore state after render
-                            requestAnimationFrame(() => {
-                              const newVideoEl = document.getElementById('survey-annotated-video-player') as HTMLVideoElement;
-                              if (newVideoEl) {
-                                newVideoEl.onloadedmetadata = () => {
-                                  newVideoEl.currentTime = currentTime;
-                                  if (isPlaying) newVideoEl.play().catch(() => { });
-                                };
-                              }
-                            });
-                          }}
-                        >
-                          {CATEGORY_LABELS[cat] || cat}
-                        </Button>
-                      ))}
-                    </div>
-                  )}
-                </Card>
-
-                <Card className="flex-1 overflow-hidden gradient-card border-0 flex items-center justify-center min-h-0">
-                  <div className="relative w-full h-full">
-                    <video
-                      id="survey-annotated-video-player"
-                      key={playerAnnotatedSrc}
-                      src={playerAnnotatedSrc}
-                      controls
-                      className="absolute inset-0 w-full h-full object-contain rounded-lg"
-                      onError={(e) => {
-                        console.error('[SurveyUpload] Error loading annotated video:', playerAnnotatedSrc);
-                      }}
-                    />
-                  </div>
-                </Card>
-              </div>
+          <div className="grid grid-cols-2 gap-4 p-6 pt-0 h-[calc(90vh-100px)]">
+            {/* Left: Original Video */}
+            {playerOriginalSrc && (
+              <VideoPlayer
+                videoSrc={playerOriginalSrc}
+                title="Original Survey Video"
+                badge="Raw Footage"
+                description="Unprocessed video from survey"
+              />
             )}
 
-            {/* Fallback if no annotated video and original not already shown*/}
-            {!playerAnnotatedSrc && Object.keys(playerCategoryVideos).length === 0 && playerOriginalSrc && (
-              <div className="text-center p-8 flex flex-col items-center justify-center">
-                <p className="text-muted-foreground">No AI processed video available yet</p>
-                <p className="text-sm text-muted-foreground mt-1">Process this video with AI to see annotated results</p>
+            {/* Right: AI Annotated Video (Canvas Overlay) */}
+            {playerOriginalSrc && (
+              <AnnotatedVideoPlayer
+                videoSrc={playerOriginalSrc}
+                videoId={selectedVideo?.id}
+              />
+            )}
+
+            {/* Fallback if no videos available */}
+            {!playerOriginalSrc && (
+              <div className="text-center p-8 col-span-2">
+                <p className="text-muted-foreground">No video available</p>
               </div>
             )}
           </div>
-
-          {/* Video Info Footer */}
-          {selectedVideo && (
-            <div className="px-6 pb-4 pt-2 border-t flex flex-wrap gap-4 text-sm text-muted-foreground">
-              <span><strong>Surveyor:</strong> {selectedVideo.surveyorName}</span>
-              <span><strong>Date:</strong> {selectedVideo.surveyDate}</span>
-              <span><strong>Size:</strong> {(selectedVideo.size / 1024 / 1024).toFixed(1)} MB</span>
-              <span><strong>Status:</strong> {selectedVideo.status}</span>
-            </div>
-          )}
         </DialogContent>
       </Dialog>
     </div>

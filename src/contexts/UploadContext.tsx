@@ -17,6 +17,7 @@ export interface VideoFile {
     status: VideoStatus;
     progress: number;
     eta?: string;
+    url?: string;
     routeId: number;
     surveyDate: string;
     surveyorName: string;
@@ -109,6 +110,15 @@ export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     const [isUploading, setIsUploading] = useState(false);
     const [loading, setLoading] = useState(true);
 
+    // Helper function to build full URL
+    const buildUrl = (path: string | undefined) => {
+        if (!path) return undefined;
+        // If path already starts with http:// or https://, return as-is
+        if (path.startsWith('http://') || path.startsWith('https://')) return path;
+        // Otherwise prepend API_BASE
+        return `${API_BASE}${path}`;
+    };
+
     // Ref to keep track of active uploads to prevent duplicates if effect re-runs
     const activeUploads = useRef<Set<string>>(new Set());
 
@@ -155,6 +165,7 @@ export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                         duration: v.duration_seconds || 0,
                         status: (v.status || 'queue') as VideoStatus,
                         progress: v.progress || 0,
+                        url: buildUrl(v.storage_url),
                         eta: v.eta,
                         routeId: v.route_id,
                         surveyDate: survey?.survey_date || '',

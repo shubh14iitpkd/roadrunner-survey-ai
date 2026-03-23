@@ -342,7 +342,7 @@ export default function AnnotatedVideoPlayer({
           <Badge className="bg-gradient-to-r from-blue-500 to-purple-500">AI Processed</Badge>
         </div>
         <p className="text-sm text-muted-foreground mt-1">
-          Real-time detection overlay on video
+          Object detection with bounding boxes
         </p>
       </div>
 

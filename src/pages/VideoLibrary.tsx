@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import AnnotatedVideoPlayer from "@/components/AnnotatedVideoPlayer";
+import VideoPlayer from "@/components/VideoPlayer";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -572,35 +573,12 @@ export default function VideoLibrary() {
           <div className="grid grid-cols-2 gap-4 p-6 pt-0 h-[calc(90vh-100px)]">
             {/* Left: Original Video */}
             {playerSrc && (
-              <div className="space-y-3 flex flex-col h-full">
-                <Card className="p-4 gradient-card border-0">
-                  <div className="flex items-center justify-between">
-                    <h3 className="font-semibold text-lg">Original Survey Video</h3>
-                    <Badge variant="outline">Raw Footage</Badge>
-                  </div>
-                  <p className="text-sm text-muted-foreground mt-1">Unprocessed video from survey</p>
-                </Card>
-
-                <Card className="flex-1 overflow-hidden gradient-card border-0 flex items-center justify-center min-h-0">
-                  <div className="relative w-full h-full">
-                    <video
-                      key={playerSrc}
-                      src={playerSrc}
-                      controls
-                      className="absolute inset-0 w-full h-full object-contain rounded-lg"
-                    />
-                  </div>
-                </Card>
-
-                {/* <div className="flex gap-2">
-                  <Button size="sm" variant="outline" className="flex-1 gap-2" asChild>
-                    <a href={playerSrc} download>
-                      <Download className="h-4 w-4" />
-                      Download Original
-                    </a>
-                  </Button>
-                </div> */}
-              </div>
+              <VideoPlayer
+                videoSrc={playerSrc}
+                title="Original Survey Video"
+                badge="Raw Footage"
+                description="Unprocessed video from survey"
+              />
             )}
 
             {/* Right: AI Annotated Video (Canvas Overlay) */}
