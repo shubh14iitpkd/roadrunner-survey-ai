@@ -1333,13 +1333,14 @@ def get_video_frames(video_id: str, detections_only=False):
     )
 
     has_detections = request.args.get("has_detections", "").lower() == "true"
+    detections_only = request.args.get("detections_only", "").lower() == "true"
 
     # First try to find frames by key (for demo videos)
     frames = []
 
     projections = {}
     if detections_only:
-        projections = {"detections": 1}
+        projections = {"detections": 1, "frame_number": 1}
     # Fall back to video_id-based lookup
     if not frames:
         query = {"video_id": video_id}

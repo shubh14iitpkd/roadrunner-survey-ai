@@ -113,6 +113,9 @@ export const api = {
 			const q = qs.toString();
 			return apiFetch(`/api/videos/${video_id}/frames${q ? `?${q}` : ""}`);
 		},
+		getFramesDetectionsOnly: (video_id: string) => {
+			return apiFetch(`/api/videos/${video_id}/frames?detections_only=true`);
+		},
 		upload: async (file: File, videoId: string, surveyId: string, routeId: number, title: string, onProgress?: (progress: number) => void) => {
 			const formData = new FormData();
 			formData.append("file", file);
