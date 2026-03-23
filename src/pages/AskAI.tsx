@@ -155,9 +155,11 @@ export default function AskAI() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  const { theme } = useTheme();
+  const { resolvedTheme } = useTheme();
 
-
+  // useEffect(() => {
+  //   console.log(theme);
+  // }, [theme]);
   const samplePrompts = selectedRouteId ? [
     "What is the condition of assets on this route?",
     "How many surveys have been done?",
@@ -176,7 +178,7 @@ export default function AskAI() {
         <div className="p-6 border-b border-border space-y-4">
           <div className="flex items-center gap-3">
             <div className="flex-1 select-none">
-              <img src={logos[theme || "light"] || logos.light} alt="RoadGPT" className="h-6" />
+              <img src={logos[resolvedTheme] || logos.light} alt="RoadGPT" className="h-6" />
               <p className="text-sm text-muted-foreground">Query road network data with natural language</p>
             </div>
             <ChatHistorySidebar
