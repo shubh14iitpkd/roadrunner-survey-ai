@@ -230,7 +230,7 @@ def list_users():
 
 @user_bp.put("/<user_id>/approve")
 @jwt_required()
-@role_required(["admin"])
+@role_required(["super_admin","admin"])
 def approve_user(user_id: str):
     """
     Approve a user account (admin only)
@@ -310,10 +310,10 @@ def update_role(user_id: str):
 
 @user_bp.delete("/<user_id>")
 @jwt_required()
-@role_required(["admin"])
+@role_required(["super_admin","admin"])
 def revoke_user(user_id: str):
     """
-    Revoke (delete) a non-admin user account (admin only)
+    Revoke (delete) a user account (admin only)
     ---
     tags:
       - User

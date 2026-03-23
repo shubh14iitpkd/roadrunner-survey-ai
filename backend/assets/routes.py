@@ -247,7 +247,7 @@ def get_asset(asset_id: str):
 	return mongo_response({"item": it})
 
 @assets_bp.post("/master", endpoint="assets_master_lib")
-@role_required(["super_admin","admin", "surveyor"])
+@role_required(["super_admin","admin", "surveyor", "viewer"])
 def get_master_assets():
 	"""
 	List master assets with filters for master library.
@@ -599,7 +599,7 @@ def unmark_asset_good(asset_id: str):
 
 
 @assets_bp.put("/icon-config", endpoint="update_icon_config")
-@role_required(["admin"])
+@role_required(["super_admin","admin"])
 def update_icon_config():
 	"""
 	Update icon configuration for asset types (admin only).
@@ -690,7 +690,7 @@ def update_icon_config():
 
 
 @assets_bp.put("/move-category", endpoint="move_asset_category")
-@role_required(["admin"])
+@role_required(["super_admin","admin"])
 def move_asset_category():
 	"""
 	Move asset types to a different category.
@@ -760,7 +760,7 @@ def move_asset_category():
 
 
 @assets_bp.get("/available-icons", endpoint="available_icons")
-@role_required(["admin", "surveyor", "viewer"])
+@role_required(["super_admin","admin", "surveyor", "viewer"])
 def list_available_icons():
 	"""
 	List available icon files from UPLOAD_DIR/asset-map-icons/.
@@ -788,7 +788,7 @@ def list_available_icons():
 
 
 @assets_bp.post("/upload-icon", endpoint="upload_icon")
-@role_required(["admin"])
+@role_required(["super_admin","admin"])
 def upload_icon():
 	"""
 	Upload a custom icon file for asset types (admin only).

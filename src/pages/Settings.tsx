@@ -82,12 +82,6 @@ export default function Settings() {
     });
   };
 
-  const handleSave = () => {
-    toast({
-      title: "Settings saved",
-      description: "Your settings have been updated successfully.",
-    });
-  };
 
   // --- User Management (admin only) ---
   interface ManagedUser {
@@ -112,7 +106,6 @@ export default function Settings() {
     if (!["Admin", "Super Admin"].includes(user?.role)) return;
     setLoadingUsers(true);
     try {
-      console.log(user, "user")
       const resp = await api.user.list();
       // Sort: pending first, then by name
       const sorted = (resp.users as ManagedUser[]).sort((a, b) => {
@@ -398,7 +391,7 @@ export default function Settings() {
                     </div>
                     <Switch checked={darkMode} onCheckedChange={handleToggleDarkMode} />
                   </div>
-                  {user.role === "Admin" && <div className="flex items-center justify-between">
+                  {user?.role !== "Viewer" && <div className="flex items-center justify-between">
                     <div className="space-y-0.5">
                       <Label>Show Map Icons</Label>
                       <p className="text-sm text-muted-foreground">
@@ -412,7 +405,7 @@ export default function Settings() {
             </Card>
           </AccordionItem>
 
-          {user.role === "Admin" && <AccordionItem value="user-management" className="border-0">
+          {["Admin", "Super Admin"].includes(user?.role) && <AccordionItem value="user-management" className="border-0">
             <Card className="card-shadow">
               <AccordionTrigger className="px-6 py-4 hover:no-underline">
                 <div className="flex items-center gap-3">
@@ -473,7 +466,7 @@ export default function Settings() {
                           </div>
 
                           <div className="flex items-center gap-2 shrink-0">
-                            {!isCurrentUser && u.is_approved && u.role !== "Admin" ? (
+                            {!isCurrentUser && u.is_approved && (user?.role === "Super Admin" ? u.role !== "Super Admin" : u.role !== "Admin") ? (
                               <Select
                                 value={u.role}
                                 onValueChange={(value) => handleRoleChange(u._id, value)}
@@ -485,6 +478,7 @@ export default function Settings() {
                                 <SelectContent>
                                   <SelectItem value="Admin">Admin</SelectItem>
                                   <SelectItem value="Road Surveyor">Road Surveyor</SelectItem>
+                                  <SelectItem value="Viewer">Viewer</SelectItem>
                                 </SelectContent>
                               </Select>
                             ) : (
@@ -507,7 +501,7 @@ export default function Settings() {
                               </Button>
                             )}
 
-                            {!isCurrentUser && u.role !== "Admin" && (
+                            {!isCurrentUser && (user?.role === "Super Admin" || u.role !== "Admin") && (
                               <Button
                                 size="sm"
                                 variant="outline"
@@ -519,7 +513,7 @@ export default function Settings() {
                                 disabled={!!actionLoading[u._id]}
                               >
                                 <XCircle className="h-3.5 w-3.5 mr-1" />
-                                Revoke
+                                {u.is_approved ? "Revoke" : "Reject"}
                               </Button>
                             )}
                           </div>
@@ -563,7 +557,9 @@ export default function Settings() {
             <AlertDialogTitle>Promote to Admin?</AlertDialogTitle>
             <AlertDialogDescription>
               You are about to promote <span className="font-semibold text-foreground">{promoteDialog.name}</span> to Admin.
-              This action is irreversible! Admin accounts cannot be demoted back to surveyor or revoked.
+              {user?.role === "Super Admin"
+                ? " As a Super Admin, you can demote or revoke this account later."
+                : " This action is irreversible! Admin accounts cannot be demoted back to surveyor or revoked."}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

@@ -949,7 +949,7 @@ export default function RoadRegister() {
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <RoadKPICard label="Total Routes" value={String(totalRoads)} icon={<Map className="h-4 w-4" />} accent="primary" />
           <RoadKPICard
-            label="Total Length"
+            label="Total Route Length"
             value={totalLength.toLocaleString("en-IN", {
               minimumFractionDigits: 2,
               maximumFractionDigits: 2
