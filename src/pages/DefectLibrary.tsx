@@ -115,6 +115,9 @@ export default function DefectLibrary() {
   const [zoneFilter, setZoneFilter] = useState<"all" | "shoulder" | "median" | "pavement" | "overhead">("all");
   const [surveyYear, setSurveyYear] = useState<string>("2025");
 
+  const [sortKey, setSortKey] = useState<string | null>(null);
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+
   const [selectedDefect, setSelectedDefect] = useState<AssetRecord | null>(null);
   const [selectedSurveyIdx, setSelectedSurveyIdx] = useState(0);
 
@@ -301,23 +304,40 @@ export default function DefectLibrary() {
       return true;
     });
 
-    return fil.sort((a, b) =>
-      a.defectId.localeCompare(b.defectId)
-    )
+    return fil;
   }, [defects, categoryFilter, selectedAssetTypes, directionFilter, zoneFilter, selectedRouteId, searchQuery]);
+
+  // ── Sorting filtered defects ──
+  const sortedAndFilteredDefects = useMemo(() => {
+    if (!sortKey) return filteredDefects;
+    const col = BASE_DEFECT_COLUMNS.find((c) => c.key === sortKey);
+    if (!col?.getValue) return filteredDefects;
+    const getter = col.getValue;
+    return [...filteredDefects].sort((a, b) => {
+      const va = getter(a);
+      const vb = getter(b);
+      let cmp: number;
+      if (typeof va === "number" && typeof vb === "number") {
+        cmp = va - vb;
+      } else {
+        cmp = String(va).localeCompare(String(vb), undefined, { numeric: true, sensitivity: "base" });
+      }
+      return sortDir === "asc" ? cmp : -cmp;
+    });
+  }, [filteredDefects, sortKey, sortDir]);
 
   // ── Navigation ──
   const navigateDefects = useCallback((direction: 'prev' | 'next') => {
     if (!selectedDefect) return;
-    const idx = filteredDefects.findIndex(a => a.defectId === selectedDefect.defectId);
+    const idx = sortedAndFilteredDefects.findIndex(a => a.defectId === selectedDefect.defectId);
     if (idx === -1) return;
     const nextIdx = direction === 'prev' ? idx - 1 : idx + 1;
-    if (nextIdx >= 0 && nextIdx < filteredDefects.length) {
-      setSelectedDefect(filteredDefects[nextIdx]);
+    if (nextIdx >= 0 && nextIdx < sortedAndFilteredDefects.length) {
+      setSelectedDefect(sortedAndFilteredDefects[nextIdx]);
       setSelectedSurveyIdx(0);
       setMarkerPopup(null);
     }
-  }, [selectedDefect, filteredDefects]);
+  }, [selectedDefect, sortedAndFilteredDefects]);
 
 
 
@@ -521,7 +541,7 @@ export default function DefectLibrary() {
           frameWidth={frameWidth}
           frameHeight={frameHeight}
           imageLoading={imageLoading}
-          filteredAssets={filteredDefects}
+          filteredAssets={sortedAndFilteredDefects}
           onCloseAsset={() => setSelectedDefect(null)}
           getAssetDisplayName={getAssetDisplayName}
           onNavigate={navigateDefects}
@@ -682,7 +702,7 @@ export default function DefectLibrary() {
 
       {/* Bottom Table */}
       <AssetTable
-        items={filteredDefects}
+        items={sortedAndFilteredDefects}
         loading={loading}
         loadError={loadError}
         searchQuery={searchQuery}
@@ -693,6 +713,16 @@ export default function DefectLibrary() {
         idField="assetDisplayId"
         onClearFilters={clearFilters}
         columns={buildDefectColumns(goodSet, markingGood, handleMarkGood, handleUnmarkGood)}
+        sortKey={sortKey}
+        sortDir={sortDir}
+        onSort={(colKey: string) => {
+          if (sortKey === colKey) {
+            setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+          } else {
+            setSortKey(colKey);
+            setSortDir("asc");
+          }
+        }}
       />
     </div>
   );

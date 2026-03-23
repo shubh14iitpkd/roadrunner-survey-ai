@@ -70,6 +70,9 @@ export default function AssetLibrary() {
   const [conditionFilter, setConditionFilter] = useState<"all" | "good"| "damaged">("all");
   const [zoneFilter, setZoneFilter] = useState<"all" | "shoulder" | "median" | "pavement" | "overhead">("all");
 
+  const [sortKey, setSortKey] = useState<string | null>(null);
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+
   const [selectedAsset, setSelectedAsset] = useState<AssetRecord | null>(null);
   const [selectedSurveyIdx, setSelectedSurveyIdx] = useState(0);
 
@@ -249,17 +252,36 @@ export default function AssetLibrary() {
     });
   }, [assets, conditionFilter, categoryFilter, selectedAssetTypes, directionFilter, zoneFilter, selectedRouteId, searchQuery]);
 
+  // ── Sorting filtered assets ──
+  const sortedAndFilteredAssets = useMemo(() => {
+    if (!sortKey) return filteredAssets;
+    const col = ASSET_COLUMNS.find((c) => c.key === sortKey);
+    if (!col?.getValue) return filteredAssets;
+    const getter = col.getValue;
+    return [...filteredAssets].sort((a, b) => {
+      const va = getter(a);
+      const vb = getter(b);
+      let cmp: number;
+      if (typeof va === "number" && typeof vb === "number") {
+        cmp = va - vb;
+      } else {
+        cmp = String(va).localeCompare(String(vb), undefined, { numeric: true, sensitivity: "base" });
+      }
+      return sortDir === "asc" ? cmp : -cmp;
+    });
+  }, [filteredAssets, sortKey, sortDir]);
+
   const navigateAsset = useCallback((direction: 'prev' | 'next') => {
     if (!selectedAsset) return;
-    const idx = filteredAssets.findIndex(a => a.defectId === selectedAsset.defectId);
+    const idx = sortedAndFilteredAssets.findIndex(a => a.defectId === selectedAsset.defectId);
     if (idx === -1) return;
     const nextIdx = direction === 'prev' ? idx - 1 : idx + 1;
-    if (nextIdx >= 0 && nextIdx < filteredAssets.length) {
-      setSelectedAsset(filteredAssets[nextIdx]);
+    if (nextIdx >= 0 && nextIdx < sortedAndFilteredAssets.length) {
+      setSelectedAsset(sortedAndFilteredAssets[nextIdx]);
       setSelectedSurveyIdx(0);
       setMarkerPopup(null);
     }
-  }, [selectedAsset, filteredAssets]);
+  }, [selectedAsset, sortedAndFilteredAssets]);
 
   const handleRowClick = useCallback((asset: AssetRecord) => {
     setSelectedAsset(asset);
@@ -407,7 +429,7 @@ export default function AssetLibrary() {
           frameWidth={frameWidth}
           frameHeight={frameHeight}
           imageLoading={imageLoading}
-          filteredAssets={filteredAssets}
+          filteredAssets={sortedAndFilteredAssets}
           onCloseAsset={() => setSelectedAsset(null)}
           getAssetDisplayName={getAssetDisplayName}
           onNavigate={navigateAsset}
@@ -567,7 +589,7 @@ export default function AssetLibrary() {
 
       {/* Bottom Table */}
       <AssetTable
-        items={filteredAssets}
+        items={sortedAndFilteredAssets}
         loading={loading}
         loadError={loadError}
         searchQuery={searchQuery}
@@ -578,6 +600,16 @@ export default function AssetLibrary() {
         idField="assetDisplayId"
         onClearFilters={clearFilters}
         columns={ASSET_COLUMNS}
+        sortKey={sortKey}
+        sortDir={sortDir}
+        onSort={(colKey: string) => {
+          if (sortKey === colKey) {
+            setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+          } else {
+            setSortKey(colKey);
+            setSortDir("asc");
+          }
+        }}
       />
     </div>
   );
