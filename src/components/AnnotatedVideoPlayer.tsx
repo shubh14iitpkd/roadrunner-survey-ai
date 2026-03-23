@@ -220,10 +220,17 @@ export default function AnnotatedVideoPlayer({
       ctx.font = "bold 11px Inter, Arial, sans-serif";
       const tm = ctx.measureText(label);
       const labelH = 18;
-      ctx.fillStyle = color;
-      ctx.fillRect(x, y - labelH, tm.width + 10, labelH);
-      ctx.fillStyle = "#ffffff";
-      ctx.fillText(label, x + 5, y - 5);
+      if ((y-labelH)>offsetY && x+tm.width+10 < renderW) {
+          ctx.fillStyle = color;
+          ctx.fillRect(x, y - labelH, tm.width + 10, labelH);
+          ctx.fillStyle = "#ffffff";
+          ctx.fillText(label, x + 5, y - 5);
+      } else {
+          ctx.fillStyle = color;
+          ctx.fillRect(x, y, tm.width + 10, labelH);
+          ctx.fillStyle = "#ffffff";
+          ctx.fillText(label, x + 5, y + labelH - 5);
+      }
     }
   }, [frameMap, origDims, activeCategory, getDetectionDisplayName]);
 
@@ -293,7 +300,7 @@ export default function AnnotatedVideoPlayer({
     return `${m}:${s.toString().padStart(2, "0")}`;
   };
 
-  /* ── 7. Re-sync canvas on resize & fullscreen change ── */
+  /* --- 7. Re-sync canvas on resize & fullscreen change --- */
   useEffect(() => {
     const onResize = () => draw();
     window.addEventListener("resize", onResize);
@@ -332,7 +339,7 @@ export default function AnnotatedVideoPlayer({
       <div className="p-4 gradient-card border-0 rounded-lg">
         <div className="flex items-center justify-between">
           <h3 className="font-semibold text-lg">AI Annotated View</h3>
-          <Badge className="bg-gradient-to-r from-blue-500 to-purple-500">Live Canvas</Badge>
+          <Badge className="bg-gradient-to-r from-blue-500 to-purple-500">AI Processed</Badge>
         </div>
         <p className="text-sm text-muted-foreground mt-1">
           Real-time detection overlay on video
@@ -350,11 +357,11 @@ export default function AnnotatedVideoPlayer({
 
         {/* Category filter buttons — floating overlay */}
         {detectedCategories.length > 0 && (
-          <div className="absolute top-2 left-2 right-2 z-10 flex flex-wrap gap-1.5">
+          <div className="absolute top-0 left-0 right-2 z-10 flex flex-wrap gap-1.5">
             <Button
-              size="sm"
+              size="default"
               variant={activeCategory === "all" ? "default" : "outline"}
-              className={`text-xs h-6 px-2 shadow-md ${activeCategory === "all" ? "bg-blue-600 text-white" : "bg-background/80 backdrop-blur-sm"}`}
+              className={`text-xs h-6 px-2 ${activeCategory === "all" ? "bg-accent text-primary hover:bg-accent hover:text-primary" : "bg-background/80"}`}
               onClick={() => setActiveCategory("all")}
             >
               All
@@ -362,9 +369,9 @@ export default function AnnotatedVideoPlayer({
             {detectedCategories.map((catId) => (
               <Button
                 key={catId}
-                size="sm"
+                size="default"
                 variant={activeCategory === catId ? "default" : "outline"}
-                className={`text-xs h-6 px-2 shadow-md ${activeCategory === catId ? "bg-blue-600 text-white" : "bg-background/80 backdrop-blur-sm"}`}
+                className={`text-xs h-6 px-2 hover ${activeCategory === catId ? "bg-accent text-primary hover:bg-accent hover:text-primary" : "bg-background/80"}`}
                 onClick={() => setActiveCategory(catId)}
               >
                 {getCategoryDisplayName(catId)}
@@ -389,35 +396,49 @@ export default function AnnotatedVideoPlayer({
               ref={canvasRef}
               className="absolute inset-0 w-full h-full pointer-events-none"
             />
-          </div>
+              {/* Custom controls bar */}
+              <div className="absolute left-0 right-0 bottom-0 flex items-center gap-2 px-3 py-2 bg-black/50 text-white text-xs select-none">
+                <button onClick={togglePlay} className="p-1 hover:text-blue-400 transition-colors focus:outline-none focus:ring-none focus:border-none">
+                  {isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+                </button>
 
-          {/* Custom controls bar */}
-          <div className="flex items-center gap-2 px-3 py-2 bg-black/80 text-white text-xs select-none">
-            <button onClick={togglePlay} className="p-1 hover:text-blue-400 transition-colors">
-              {isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
-            </button>
+                <span className="tabular-nums w-[38px] text-center">{formatTime(currentTime)}</span>
 
-            <span className="tabular-nums w-[38px] text-center">{formatTime(currentTime)}</span>
+                <input
+                  type="range"
+                  min={0}
+                  max={duration || 1}
+                  step={0.01}
+                  value={currentTime}
+                  onChange={handleSeek}
+                  style = {{
+                    background: `linear-gradient(to right, #3b82f6 ${
+                      (currentTime / duration) * 100
+                    }%, #9ca3af ${(currentTime / duration) * 100}%)`,
+                  }}
+                  className="flex-1 h-1 cursor-pointer appearance-none bg-transparent
+                            [&::-webkit-slider-runnable-track]:h-1
+                            [&::-webkit-slider-thumb]:appearance-none
+                            [&::-webkit-slider-thumb]:h-3
+                            [&::-webkit-slider-thumb]:w-3
+                            [&::-moz-range-thumb]:h-3
+                            [&::-moz-range-thumb]:w-3
+                            [&::-moz-range-thumb]:rounded-full
+                            [&::-webkit-slider-thumb]:rounded-full
+                            [&::-webkit-slider-thumb]:bg-blue-500
+                            [&::-webkit-slider-thumb]:-mt-1"
+                />
 
-            <input
-              type="range"
-              min={0}
-              max={duration || 1}
-              step={0.01}
-              value={currentTime}
-              onChange={handleSeek}
-              className="flex-1 h-1 accent-blue-500 cursor-pointer"
-            />
+                <span className="tabular-nums w-[38px] text-center">{formatTime(duration)}</span>
 
-            <span className="tabular-nums w-[38px] text-center">{formatTime(duration)}</span>
-
-            <button
-              onClick={toggleFullscreen}
-              className="p-1 hover:text-blue-400 transition-colors"
-              title={isFullscreen ? "Exit fullscreen" : "Fullscreen"}
-            >
-              {isFullscreen ? <Minimize className="h-4 w-4" /> : <Maximize className="h-4 w-4" />}
-            </button>
+                <button
+                  onClick={toggleFullscreen}
+                  className="p-1 hover:text-blue-400 transition-colors focus:outline-none focus:ring-none focus:border-none"
+                  title={isFullscreen ? "Exit fullscreen" : "Fullscreen"}
+                >
+                  {isFullscreen ? <Minimize className="h-4 w-4" /> : <Maximize className="h-4 w-4" />}
+                </button>
+              </div>
           </div>
         </div>
       </div>
