@@ -9,7 +9,8 @@ import {
 } from "@/components/ui/select";
 import { api } from "@/lib/api";
 import { exportToExcel } from "@/lib/excelExport";
-import { Download, AlertTriangle, CheckCircle2, Loader2 } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Download, AlertTriangle, CheckCircle2, Loader2, Pencil } from "lucide-react";
 import {
   Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
@@ -35,6 +36,13 @@ const DUMMY_ISSUES: Record<string, string[]> = {
   "BEAUTIFICATION": ["Tree dead/dying", "Planter damaged", "Fence broken"],
 };
 
+// function capitalizeFirstWord(str) {
+//   if (!str) return "";
+//   const [first, ...rest] = str.split(" ");
+//   if (rest.length === 0) return capitalize(first);
+//   return first.charAt(0).toUpperCase() + first.slice(1) + " " + rest.join(" ");
+// }
+
 // ── Table columns for Defect Library ──────────────────────
 const BASE_DEFECT_COLUMNS: ColumnDef[] = [
   { key: "defectId", header: "Defect ID", className: "font-mono text-[11px] font-semibold py-1.5 px-1.5 whitespace-nowrap text-center", render: (a) => a.defectId, getValue: (a) => a.defectId },
@@ -46,20 +54,38 @@ const BASE_DEFECT_COLUMNS: ColumnDef[] = [
   { key: "side", header: "Road Side", className: "text-[11px] py-1.5 px-1.5 text-center", render: (a) => a.side, getValue: (a) => a.side },
   { key: "zone", header: "Zone", className: "text-[11px] py-1.5 px-1.5 text-center capitalize", render: (a) => a.zone, getValue: (a) => a.zone },
   { key: "survey", header: "Survey", className: "text-[11px] py-1.5 px-1.5 whitespace-nowrap text-center", render: (a) => a.lastSurveyDate, getValue: (a) => a.lastSurveyDate },
-  { key: "issue", header: "Issue", className: "py-1.5 px-1.5 capitalize min-w-[100px] text-center", getValue: (a) => a.issue, render: (a) => (
+  { key: "issue", header: "Issue", className: "py-1.5 px-1.5 min-w-[100px] text-center", getValue: (a) => a.issue, render: (a) => (
     <span className="inline-flex items-center rounded-md bg-destructive/10 text-destructive px-1.5 py-0.5 text-[9px] font-semibold leading-tight line-clamp-2">{a.issue}</span>
   )},
 ];
 
-/** Builds column definitions including the interactive "Mark as Good" / unmark column. */
+/** Builds column definitions including the interactive "Mark as Good" / unmark column and edit issue. */
 function buildDefectColumns(
   goodSet: Set<string>,
   markingGood: Set<string>,
   onMarkGood: (a: AssetRecord) => void,
   onUnmarkGood: (a: AssetRecord) => void,
+  onEditIssue: (a: AssetRecord) => void,
 ): ColumnDef[] {
   return [
     ...BASE_DEFECT_COLUMNS,
+    {
+      key: "editIssue",
+      header: "",
+      className: "py-1.5 px-1 text-center w-8",
+      render: (a) => (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onEditIssue(a);
+          }}
+          title="Edit issue"
+          className="inline-flex items-center justify-center w-6 h-6 rounded-full text-muted-foreground/40 dark:hover:text-muted-secondary dark:hover:bg-muted-secondary/10 hover:text-primary hover:bg-primary/10 transition-all cursor-pointer"
+        >
+          <Pencil className="h-3 w-3" />
+        </button>
+      ),
+    },
     {
       key: "markGood",
       header: "Mark Good",
@@ -136,6 +162,11 @@ export default function DefectLibrary() {
   const [goodSet, setGoodSet] = useState<Set<string>>(new Set());
   const [markingGood, setMarkingGood] = useState<Set<string>>(new Set());
 
+  // ── Edit Issue state ──
+  const [editIssueAsset, setEditIssueAsset] = useState<AssetRecord | null>(null);
+  const [editIssueValue, setEditIssueValue] = useState("");
+  const [editIssueSaving, setEditIssueSaving] = useState(false);
+
   // ── Cached frame image via hook ──
   const { imageUrl, frameWidth, frameHeight, loading: imageLoading } = useFrameImage({
     videoId: selectedDefect?.videoId,
@@ -158,11 +189,6 @@ export default function DefectLibrary() {
     return asset.display_name || asset.asset_type || asset.type || 'Unknown';
   }, [labelMapData]);
 
-  const getDummyIssue = useCallback((categoryId: string, index: number) => {
-    const catName = getCategoryDisplayName(categoryId);
-    const issues = DUMMY_ISSUES[catName] || DUMMY_ISSUES[categoryId] || ["Damaged"];
-    return issues[index % issues.length];
-  }, [getCategoryDisplayName]);
 
   // ── Data loading ──
   const loadData = useCallback(async () => {
@@ -250,7 +276,7 @@ export default function DefectLibrary() {
             side: asset.side || 'Unknown',
             zone: asset.zone || 'Unknown',
             lastSurveyDate: lastDate,
-            issue: asset.issue || getDummyIssue(categoryId, idx),
+            issue: asset.issue ? capitalize(asset.issue) : "Damaged",
             severity: asset.severity || (idx % 3 === 0 ? 'High' : idx % 3 === 1 ? 'Medium' : 'Low'),
             videoId: rawVideoId ? String(rawVideoId) : undefined,
             frameNumber: latestEntry?.frame_number,
@@ -272,7 +298,7 @@ export default function DefectLibrary() {
     } finally {
       setLoading(false);
     }
-  }, [getCategoryDisplayName, getAssetDisplayName, getDummyIssue]);
+  }, [getCategoryDisplayName, getAssetDisplayName]);
 
   useEffect(() => { loadData(); }, [loadData]);
 
@@ -348,6 +374,10 @@ export default function DefectLibrary() {
   }, []);
 
   const handleMarkGood = useCallback(async (asset: AssetRecord) => {
+    if (user.role === "Viewer") {
+      toast.error("You do not have permission to mark assets as good.");
+      return;
+    }
     const assetKey = asset.assetDisplayId ?? asset.defectId;
     const mongoId = asset.id;
     if (!mongoId) {
@@ -389,6 +419,37 @@ export default function DefectLibrary() {
       setMarkingGood((prev) => { const s = new Set(prev); s.delete(assetKey); return s; });
     }
   }, []);
+
+  const handleOpenEditIssue = useCallback((asset: AssetRecord) => {
+    if (user.role === "Viewer") {
+      toast.error("You do not have permission to edit asset issues.");
+    } else {
+      setEditIssueAsset(asset);
+      setEditIssueValue(asset.issue || "");
+    }
+  }, []);
+
+  const handleSaveIssue = useCallback(async () => {
+    if (!editIssueAsset?.id) return;
+    const trimmed = editIssueValue.trim();
+    if (!trimmed) { toast.error("Issue cannot be empty"); return; }
+    setEditIssueSaving(true);
+    try {
+      await api.assets.updateIssue(editIssueAsset.id, trimmed);
+      setDefects((prev) =>
+        prev.map((d) => d.id === editIssueAsset.id ? { ...d, issue: trimmed } : d)
+      );
+      if (selectedDefect?.id === editIssueAsset.id) {
+        setSelectedDefect((prev) => prev ? { ...prev, issue: trimmed } : prev);
+      }
+      toast.success("Issue updated");
+      setEditIssueAsset(null);
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to update issue");
+    } finally {
+      setEditIssueSaving(false);
+    }
+  }, [editIssueAsset, editIssueValue, selectedDefect]);
 
   const [exporting, setExporting] = useState(false);
   const handleExportExcel = async () => {
@@ -672,7 +733,7 @@ export default function DefectLibrary() {
                                     </div>
                                     <div>
                                       <p className="text-muted-foreground text-[9px] uppercase tracking-wider">Issue</p>
-                                      <p className={cn("font-semibold capitalize", isDamaged ? "text-destructive" : "text-emerald-600")}>{isDamaged ? (entry.condition || '—') : "Good"}</p>
+                                      <p className={cn("font-semibold", isDamaged ? "text-destructive" : "text-emerald-600")}>{isDamaged ? (entry.condition || '—') : "Good"}</p>
                                     </div>
                                     <div>
                                       <p className="text-muted-foreground text-[9px] uppercase tracking-wider">Asset Type</p>
@@ -700,6 +761,37 @@ export default function DefectLibrary() {
         </DialogContent>
       </Dialog>
 
+      {/* Edit Issue Dialog */}
+      <Dialog open={!!editIssueAsset} onOpenChange={(open) => !open && setEditIssueAsset(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Edit Issue</DialogTitle>
+            <DialogDescription>
+              {editIssueAsset?.assetDisplayId} | {editIssueAsset?.assetType}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col gap-3 pt-1">
+            <Input
+              value={editIssueValue}
+              onChange={(e) => setEditIssueValue(e.target.value)}
+              placeholder="Describe the issue…"
+              className="text-sm"
+              onKeyDown={(e) => e.key === "Enter" && handleSaveIssue()}
+              autoFocus
+            />
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" size="sm" onClick={() => setEditIssueAsset(null)}>
+                Cancel
+              </Button>
+              <Button size="sm" onClick={handleSaveIssue} disabled={editIssueSaving}>
+                {editIssueSaving && <Loader2 className="h-3 w-3 animate-spin mr-1" />}
+                Save
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       {/* Bottom Table */}
       <AssetTable
         items={sortedAndFilteredDefects}
@@ -712,7 +804,7 @@ export default function DefectLibrary() {
         onRetry={loadData}
         idField="assetDisplayId"
         onClearFilters={clearFilters}
-        columns={buildDefectColumns(goodSet, markingGood, handleMarkGood, handleUnmarkGood)}
+        columns={buildDefectColumns(goodSet, markingGood, handleMarkGood, handleUnmarkGood, handleOpenEditIssue)}
         sortKey={sortKey}
         sortDir={sortDir}
         onSort={(colKey: string) => {

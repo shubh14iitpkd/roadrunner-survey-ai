@@ -310,7 +310,7 @@ export default function AssetDetailSidebar({
               </div>
             )}
             <span className={cn(selectedAsset.condition == "good" ? "bg-green-500/90" : "capitalize bg-destructive/90 text-destructive-foreground", "absolute top-1.5 left-1.5 inline-flex items-center rounded px-1 py-0.5 text-[9px] font-semibold z-10")}>
-              {selectedAsset.condition == "good" ? "Good" : selectedAsset.issue}
+              {selectedAsset.condition == "good" ? "Good" : selectedAsset.condition}
             </span>
             <button
               className="absolute top-1.5 right-1.5 bg-black/50 hover:bg-black/70 text-white rounded-full p-0.5 transition-colors z-10"

@@ -546,6 +546,65 @@ def mark_asset_good(asset_id: str):
 	return jsonify({"ok": True})
 
 
+@assets_bp.patch("/<asset_id>/issue", endpoint="assets_update_issue")
+@role_required(["super_admin", "admin", "surveyor"])
+def update_asset_issue(asset_id: str):
+	"""
+	Update the issue description on a master asset.
+	---
+	tags:
+	  - Assets
+	security:
+	  - Bearer: []
+	parameters:
+	  - name: asset_id
+	    in: path
+	    type: string
+	    required: true
+	    description: The MongoDB _id of the master asset
+	  - name: body
+	    in: body
+	    required: true
+	    schema:
+	      type: object
+	      required:
+	        - issue
+	      properties:
+	        issue:
+	          type: string
+	          description: The new issue description
+	responses:
+	  200:
+	    description: Issue updated successfully
+	  400:
+	    description: Missing issue field
+	  404:
+	    description: Asset not found
+	"""
+	body = request.get_json(silent=True) or {}
+	issue = (body.get("issue") or "").strip()
+	if not issue:
+		return jsonify({"error": "issue is required"}), 400
+
+	db = get_db()
+	now = get_now_iso()
+
+	res = db.master_assets.find_one_and_update(
+		{"_id": ObjectId(asset_id)},
+		{"$set": {"issue": issue, "updated_at": now}},
+	)
+	if not res:
+		# Fallback: try as a raw asset _id
+		res = db.assets.find_one_and_update(
+			{"_id": ObjectId(asset_id)},
+			{"$set": {"issue": issue}},
+		)
+		if not res:
+			return jsonify({"error": "not found"}), 404
+
+	return jsonify({"ok": True})
+
+
 @assets_bp.patch("/<asset_id>/unmark-good", endpoint="assets_unmark_good")
 @role_required(["super_admin","admin", "surveyor"])
 def unmark_asset_good(asset_id: str):
