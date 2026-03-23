@@ -15,7 +15,7 @@ from utils.response import mongo_response
 assets_bp = Blueprint("assets", __name__)
 
 @assets_bp.get("/", endpoint="assets_list_paginated")
-@role_required(["admin", "surveyor", "viewer"])
+@role_required(["super_admin","admin", "surveyor", "viewer"])
 def list_assets_paginated():
 	"""
 	List assets with filters and pagination
@@ -123,7 +123,7 @@ def list_assets_paginated():
 	return mongo_response({"items": items, "total_count": total_asstes, "total_pages": total_pages, "page": page, "limit": limit})
 
 @assets_bp.get("/all", endpoint="assets_list")
-@role_required(["admin", "surveyor", "viewer"])
+@role_required(["super_admin","admin", "surveyor", "viewer"])
 def list_assets():
 	"""
 	List all assets with filters
@@ -219,7 +219,7 @@ def list_assets():
 
 
 @assets_bp.get("/<asset_id>", endpoint="assets_get_id")
-@role_required(["admin", "surveyor", "viewer"])
+@role_required(["super_admin", "admin", "surveyor", "viewer"])
 def get_asset(asset_id: str):
 	"""
 	Get asset details
@@ -247,7 +247,7 @@ def get_asset(asset_id: str):
 	return mongo_response({"item": it})
 
 @assets_bp.post("/master", endpoint="assets_master_lib")
-@role_required(["admin", "surveyor"])
+@role_required(["super_admin","admin", "surveyor"])
 def get_master_assets():
 	"""
 	List master assets with filters for master library.
@@ -356,7 +356,7 @@ def get_master_assets():
 
 
 @assets_bp.post("/bulk", endpoint="assets_bulk")
-@role_required(["admin", "surveyor"])
+@role_required(["super_admin","admin", "surveyor"])
 def bulk_insert():
 	"""
 	Bulk insert or update assets
@@ -422,7 +422,7 @@ def bulk_insert():
 
 
 @assets_bp.put("/<asset_id>", endpoint="assets_update_id")
-@role_required(["admin", "surveyor"])
+@role_required(["super_admin","admin", "surveyor"])
 def update_asset(asset_id: str):
 	"""
 	Update an asset
@@ -457,7 +457,7 @@ def update_asset(asset_id: str):
 
 
 @assets_bp.patch("/<asset_id>/mark-good", endpoint="assets_mark_good")
-@role_required(["admin", "surveyor"])
+@role_required(["super_admin","admin", "surveyor"])
 def mark_asset_good(asset_id: str):
 	"""
 	Mark a master asset's condition as good.
@@ -547,7 +547,7 @@ def mark_asset_good(asset_id: str):
 
 
 @assets_bp.patch("/<asset_id>/unmark-good", endpoint="assets_unmark_good")
-@role_required(["admin", "surveyor"])
+@role_required(["super_admin","admin", "surveyor"])
 def unmark_asset_good(asset_id: str):
 	"""
 	Revert a master asset's condition from good back to damaged.

@@ -7,7 +7,7 @@ export interface User {
   first_name: string;
   last_name: string;
   organisation: string;
-  role: "Road Surveyor" | "Asset Manager" | "Admin" | "Viewer";
+  role: "Road Surveyor" | "Asset Manager" | "Admin" | "Viewer" | "Super Admin";
   verified: boolean;
 }
 

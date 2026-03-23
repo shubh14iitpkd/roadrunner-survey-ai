@@ -195,7 +195,7 @@ def update_password(user_id: str):
 
 @user_bp.get("/")
 @jwt_required()
-@role_required(["admin"])
+@role_required(["super_admin", "admin"])
 def list_users():
     """
     List all users (admin only)
@@ -208,8 +208,9 @@ def list_users():
       200:
         description: List of all users
     """
+    print("Listing 211")
     db = get_db()
-    users = list(db.users.find({}, {
+    users = list(db.users.find({"role": {"$ne": "super_admin"}}, {
         "password_hash": 0,
     }))
     result = []
@@ -261,7 +262,7 @@ def approve_user(user_id: str):
 
 @user_bp.put("/<user_id>/role")
 @jwt_required()
-@role_required(["admin"])
+@role_required(["super_admin","admin"])
 def update_role(user_id: str):
     """
     Update a user's role (admin only)
@@ -326,19 +327,13 @@ def revoke_user(user_id: str):
     responses:
       200:
         description: User revoked
-      403:
-        description: Cannot revoke admin accounts
       404:
         description: User not found
     """
     db = get_db()
-    user = db.users.find_one({"_id": ObjectId(user_id)})
+    user = db.users.find_one({"_id": ObjectId(user_id), "role": {"$ne": "super_admin"}})
     if not user:
         return jsonify({"error": "user not found"}), 404
-
-    canonical_role = normalize_to_canonical(user.get("role"))
-    if canonical_role == "admin":
-        return jsonify({"error": "cannot revoke admin accounts"}), 403
 
     db.users.delete_one({"_id": ObjectId(user_id)})
     return jsonify({"ok": True, "message": "user revoked"})

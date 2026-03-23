@@ -109,9 +109,10 @@ export default function Settings() {
   const [userSearch, setUserSearch] = useState("");
 
   const fetchUsers = useCallback(async () => {
-    if (user?.role !== "Admin") return;
+    if (!["Admin", "Super Admin"].includes(user?.role)) return;
     setLoadingUsers(true);
     try {
+      console.log(user, "user")
       const resp = await api.user.list();
       // Sort: pending first, then by name
       const sorted = (resp.users as ManagedUser[]).sort((a, b) => {
@@ -533,7 +534,7 @@ export default function Settings() {
             </Card>
           </AccordionItem>}
 
-          {user.role === "Admin" && <AccordionItem value="asset-labels" className="border-0">
+          {["Admin", "Super Admin"].includes(user?.role) && <AccordionItem value="asset-labels" className="border-0">
             <Card className="card-shadow">
               <AccordionTrigger className="px-6 py-4 hover:no-underline">
                 <div className="flex items-center gap-3">

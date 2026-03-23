@@ -13,7 +13,7 @@ from utils.is_demo_video import is_demo, get_video_key
 surveys_bp = Blueprint("surveys", __name__)
 
 @surveys_bp.get("/")
-@role_required(["admin", "surveyor", "viewer"])
+@role_required(["super_admin", "admin", "surveyor", "viewer"])
 def list_surveys():
     """
     List surveys
@@ -66,7 +66,7 @@ def list_surveys():
     return mongo_response({"items": items, "count": len(items)})
 
 @surveys_bp.get("/<survey_id>")
-@role_required(["admin", "surveyor", "viewer"])
+@role_required(["super_admin","admin", "surveyor", "viewer"])
 def get_survey(survey_id: str):
     """
     Get survey details
@@ -94,7 +94,7 @@ def get_survey(survey_id: str):
     return mongo_response({"item": s})
 
 @surveys_bp.post("/")
-@role_required(["admin", "surveyor"])
+@role_required(["super_admin","admin", "surveyor"])
 def create_survey():
     """
     Create a new survey
@@ -179,7 +179,7 @@ def create_survey():
     return mongo_response({"item": doc}, 201)
 
 @surveys_bp.put("/<survey_id>")
-@role_required(["admin", "surveyor"])
+@role_required(["super_admin", "admin", "surveyor"])
 def update_survey(survey_id: str):
     """
     Update a survey
@@ -216,7 +216,7 @@ def update_survey(survey_id: str):
     return mongo_response({"ok": True})
 
 @surveys_bp.post("/<survey_id>/attach-gpx")
-@role_required(["admin", "surveyor"])
+@role_required(["super_admin","admin", "surveyor"])
 def attach_gpx(survey_id: str):
     """
     Attach GPX file to a survey
@@ -264,7 +264,7 @@ def attach_gpx(survey_id: str):
     return mongo_response({"ok": True})
 
 @surveys_bp.get("/route/<int:route_id>/history")
-@role_required(["admin", "surveyor", "viewer"])
+@role_required(["super_admin", "admin", "surveyor", "viewer"])
 def get_survey_history(route_id: int):
     """
     Get all survey versions for a specific route
@@ -298,7 +298,7 @@ def get_survey_history(route_id: int):
     return mongo_response({"items": surveys, "count": len(surveys), "route_id": route_id})
 
 @surveys_bp.delete("/<survey_id>")
-@role_required(["admin", "surveyor"])
+@role_required(["super_admin", "admin", "surveyor"])
 def delete_survey(survey_id: str):
     """
     Delete a survey and all associated videos/frames

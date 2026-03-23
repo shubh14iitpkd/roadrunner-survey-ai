@@ -33,7 +33,7 @@ aws_session = boto3.Session(region_name=config.AWS_REGION)
 
 
 @videos_bp.get("/")
-@role_required(["admin", "surveyor", "viewer"])
+@role_required(["super_admin","admin", "surveyor", "viewer"])
 def list_videos():
     """
     List all videos
@@ -91,7 +91,7 @@ def list_videos():
 
 
 @videos_bp.get("/<video_id>")
-@role_required(["admin", "surveyor", "viewer"])
+@role_required(["super_admin", "admin", "surveyor", "viewer"])
 def get_video(video_id: str):
     """
     Get a specific video by ID
@@ -129,7 +129,7 @@ def get_video(video_id: str):
 
 
 @videos_bp.post("/")
-@role_required(["admin", "surveyor"])
+@role_required(["super_admin","admin", "surveyor"])
 def create_video():
     """
     Create a new video entry
@@ -248,7 +248,7 @@ def create_video():
 
 
 @videos_bp.put("/<video_id>/status")
-@role_required(["admin", "surveyor"])
+@role_required(["super_admin","admin", "surveyor"])
 def update_status(video_id: str):
     """
     Update video status
@@ -529,7 +529,7 @@ def upload_direct():
 
 @videos_bp.post("/presign")
 @swag_from(None)
-@role_required(["admin", "surveyor"])
+@role_required(["super_admin","admin", "surveyor"])
 def presign():
 
     """
@@ -555,7 +555,7 @@ def presign():
 
 
 @videos_bp.post("/gpx-upload")
-@role_required(["admin", "surveyor"])
+@role_required(["super_admin","admin", "surveyor"])
 def upload_gpx():
     """
     Upload GPX file for a video
@@ -622,7 +622,7 @@ def upload_gpx():
 
 
 @videos_bp.post("/thumbnail-upload")
-@role_required(["admin", "surveyor"])
+@role_required(["super_admin","admin", "surveyor"])
 def upload_thumbnail():
     """
     Upload thumbnail for a video
@@ -689,7 +689,7 @@ def upload_thumbnail():
 
 
 @videos_bp.post("/<video_id>/process")
-@role_required(["admin", "surveyor"])
+@role_required(["super_admin","admin", "surveyor"])
 def process_video_with_ai(video_id: str):
     """
     Process video with AI
@@ -1482,7 +1482,7 @@ def get_video_frame(video_id: str):
 
 
 @videos_bp.get("/<video_id>/metadata")
-@role_required(["admin", "surveyor", "viewer"])
+@role_required(["super_admin", "admin", "surveyor", "viewer"])
 def get_video_metadata(video_id: str):
     """
     Fetch detected assets for a specific video from the assets collection.
@@ -1604,7 +1604,7 @@ def list_from_library():
 
 
 @videos_bp.post("/library")
-@role_required(["admin", "surveyor"])
+@role_required(["super_admin","admin", "surveyor", "viewer"])
 def upload_library_video():
     # 1. Get details from JSON body
     data = request.json

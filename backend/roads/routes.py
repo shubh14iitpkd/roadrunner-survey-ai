@@ -10,7 +10,7 @@ roads_bp = Blueprint("roads", __name__)
 
 
 @roads_bp.get("/")
-@role_required(["admin", "surveyor", "viewer"])
+@role_required(["super_admin", "admin", "surveyor", "viewer"])
 def list_roads():
 	"""
 	List all roads
@@ -78,7 +78,7 @@ def list_roads():
 
 
 @roads_bp.get("/<int:route_id>")
-@role_required(["admin", "surveyor", "viewer"])
+@role_required(["super_admin","admin", "surveyor", "viewer"])
 def get_road(route_id: int):
 	"""
 	Get details of a specific road
@@ -107,7 +107,7 @@ def get_road(route_id: int):
 
 
 @roads_bp.post("/")
-@role_required(["admin", "surveyor"])
+@role_required(["super_admin","admin", "surveyor"])
 def create_road():
 	"""
 	Create a new road
@@ -192,7 +192,7 @@ def create_road():
 
 
 @roads_bp.put("/<int:route_id>")
-@role_required(["admin", "surveyor"])
+@role_required(["super_admin","admin", "surveyor"])
 def update_road(route_id: int):
 	"""
 	Update a road
@@ -227,7 +227,7 @@ def update_road(route_id: int):
 
 
 @roads_bp.delete("/<int:route_id>")
-@role_required(["admin"])
+@role_required(["super_admin","admin"])
 def delete_road(route_id: int):
 	"""
 	Delete a road

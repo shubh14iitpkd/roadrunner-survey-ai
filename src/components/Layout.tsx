@@ -23,15 +23,15 @@ import { useAuth } from "@/contexts/AuthContext";
 import logo from "@/assets/roadsight-logo.jpg";
 
 const navigation = [
-  { name: "Dashboard", href: "/", icon: LayoutDashboard, adminOnly: false },
-  { name: "Asset Library", href: "/asset-library", icon: Database, adminOnly: false },
-  { name: "Defect Library", href: "/defect-library", icon: AlertTriangle, adminOnly: false },
-  { name: "RoadGPT", href: "/roadgpt", icon: MessageSquare, adminOnly: false },
+  { name: "Dashboard", href: "/", icon: LayoutDashboard, roles: ["Admin", "Super Admin", "Viewer", "Road Surveyor"] },
+  { name: "Asset Library", href: "/asset-library", icon: Database, roles: ["Admin", "Super Admin", "Viewer", "Road Surveyor"] },
+  { name: "Defect Library", href: "/defect-library", icon: AlertTriangle, roles: ["Admin", "Super Admin", "Viewer", "Road Surveyor"] },
+  { name: "RoadGPT", href: "/roadgpt", icon: MessageSquare, roles: ["Admin", "Super Admin", "Viewer", "Road Surveyor"] },
   { name: "Management", href: null, icon: null, isHeading: true },
-  { name: "Route Register", href: "/roads", icon: Map },
-  { name: "Survey Upload", href: "/upload", icon: Upload, adminOnly: true },
-  { name: "Video Library", href: "/videos", icon: FileVideo },
-  { name: "Settings", href: "/settings", icon: Settings },
+  { name: "Route Register", href: "/roads", icon: Map, roles: ["Admin", "Super Admin", "Road Surveyor"] },
+  { name: "Survey Upload", href: "/upload", icon: Upload, roles: ["Admin", "Super Admin"] },
+  { name: "Video Library", href: "/videos", icon: FileVideo, roles: ["Admin", "Super Admin",  "Road Surveyor"] },
+  { name: "Settings", href: "/settings", icon: Settings, roles: ["Admin", "Super Admin", "Viewer", "Road Surveyor"] },
 ];
 
 export default function Layout({ children }: { children: React.ReactNode }) {
@@ -42,7 +42,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const { user, logout } = useAuth();
 
   const isAdmin = user?.role === "Admin";
-  const visibleNavigation = navigation.filter((item) => !item.adminOnly || isAdmin);
+  const visibleNavigation = navigation.filter((item) => !item.roles || item.roles.includes(user?.role));
 
   return (
     <TooltipProvider delayDuration={0}>

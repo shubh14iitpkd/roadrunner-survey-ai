@@ -9,7 +9,6 @@ from .roles import normalize_to_canonical
 
 def role_required(allowed_roles: Iterable[str]) -> Callable:
 	allowed = {normalize_to_canonical(r) for r in allowed_roles}
-
 	def decorator(fn: Callable) -> Callable:
 		@wraps(fn)
 		def wrapper(*args, **kwargs):
@@ -17,7 +16,6 @@ def role_required(allowed_roles: Iterable[str]) -> Callable:
 			if request.method == 'OPTIONS':
 				return ('', 204)
 
-			# For all other requests, require JWT
 			verify_jwt_in_request()
 
 			claims = get_jwt() or {}

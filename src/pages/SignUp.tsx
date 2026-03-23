@@ -20,7 +20,7 @@ export default function SignUp() {
     email: "",
     organisation: "",
     password: "",
-    role: "" as "Road Surveyor" | "Asset Manager" | "Admin" | "",
+    role: "" as "Road Surveyor" | "Viewer" | "Admin" | "Super Admin" |"",
   });
   const [loading, setLoading] = useState(false);
   const [pendingApproval, setPendingApproval] = useState(false);
@@ -147,6 +147,7 @@ export default function SignUp() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="Road Surveyor">Road Surveyor</SelectItem>
+                <SelectItem value="Viewer">Viewer</SelectItem>
               </SelectContent>
             </Select>
           </div>
