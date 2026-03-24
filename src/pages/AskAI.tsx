@@ -20,7 +20,8 @@ import { useTheme } from "next-themes";
 
 const logos = {
   light: "/RoadGPT - colored.png",
-  dark: "/RoadGPT - clear.png"
+  // dark: "/RoadGPT - clear.png"
+  dark: "/RoadGPT - colored.png"
 }
 
 const THINKING_STEPS = [

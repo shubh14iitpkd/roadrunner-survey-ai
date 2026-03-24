@@ -38,7 +38,7 @@ class VideoAnnotator:
         """
         if model_path is None:
             services_dir = Path(__file__).resolve().parent.parent / "services"
-            model_path = str(services_dir / "multistage.pt")
+            model_path = str(services_dir / "yolo26s.pt")
 
         if not os.path.exists(model_path):
             raise FileNotFoundError(f"Model file not found: {model_path}")
