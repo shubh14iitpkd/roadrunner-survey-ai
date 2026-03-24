@@ -6,7 +6,8 @@ import {
   TrendingUp, AlertTriangle, Package, Calendar,
   MapPin, Eye, ChevronLeft, ChevronRight, Map, ArrowUpRight, Activity, X, Download,
   BarChart, Loader2,
-  PieChartIcon
+  PieChartIcon,
+  Database
 } from "lucide-react";
 import {
   PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Sector,
@@ -265,7 +266,7 @@ export default function Dashboard() {
                 <PieChartIcon className="h-4 w-4 text-primary dark:text-muted-secondary" />
               </div>
               <div>
-                <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-[0.15em]">Asset Distribution</p>
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-[0.15em]">Asset Distribution</p>
                 <p className="text-sm font-semibold text-foreground mt-0.5">By Category</p>
               </div>
             </div>
@@ -373,7 +374,7 @@ export default function Dashboard() {
                 <Activity className="h-4 w-4 text-amber-500" />
               </div>
               <div>
-                <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-[0.15em]">Asset Distribution</p>
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-[0.15em]">Asset Distribution</p>
                 <p className="text-sm font-semibold text-foreground mt-0.5">By Condition</p>
               </div>
             </div>
@@ -480,7 +481,7 @@ export default function Dashboard() {
                 <Activity className="h-4 w-4 text-amber-500" />
               </div>
               <div>
-                <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-[0.15em]">Condition Breakdown</p>
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-[0.15em]">Condition Breakdown</p>
                 <p className="text-sm font-semibold text-foreground mt-0.5">By Category</p>
               </div>
             </div>
@@ -525,12 +526,12 @@ export default function Dashboard() {
         {/* Defects by Asset Type */}
         <Card className="p-0 border border-border bg-card overflow-hidden">
           <div className="px-5 pt-5 pb-3 flex items-center gap-3">
-            <div className="p-2 rounded-lg bg-destructive/10">
-              <AlertTriangle className="h-4 w-4 text-destructive" />
+            <div className="p-2 rounded-lg bg-primary/10 dark:bg-muted-secondary/10">
+              <Database className="h-4 w-4 text-primary dark:text-muted-secondary" />
             </div>
             <div className="flex-1">
-              <p className="text-xs font-medium text-muted-foreground uppercase tracking-widest">Defects</p>
-              <p className="text-sm font-semibold text-foreground mt-0.5">By Asset Type</p>
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-widest">Asset Types</p>
+              <p className="text-sm font-semibold text-foreground mt-0.5">{selectedCategory? selectedCategory: "All Categories"}</p>
             </div>
             <Button
               variant="outline"
