@@ -11,6 +11,7 @@ from flask_jwt_extended import (
 from db import get_db
 from utils.security import hash_password, verify_password
 from utils.roles import normalize_to_canonical, to_display_role
+from services.email_templates import get_mailer, signup_request_email
 
 
 auth_bp = Blueprint("auth", __name__)
@@ -86,6 +87,12 @@ def signup():
 		"is_approved": False,
 	}
 	db.users.insert_one(user_doc)
+
+	try:
+		subject, plain, html = signup_request_email(first_name, email_raw)
+		get_mailer().send_email(email_raw, subject, plain, html)
+	except Exception as mail_err:
+		print(f"[MAIL] signup_request failed: {mail_err}")
 
 	return (
 		jsonify(

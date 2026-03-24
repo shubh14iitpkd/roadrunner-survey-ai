@@ -5,6 +5,12 @@ from flask_jwt_extended import jwt_required, get_jwt_identity
 from utils.security import hash_password, verify_password
 from utils.rbac import role_required
 from utils.roles import normalize_to_canonical, to_display_role
+from services.email_templates import (
+    get_mailer,
+    account_approved_email,
+    account_revoked_email,
+    role_changed_email,
+)
 
 user_bp = Blueprint("user", __name__)
 
@@ -251,12 +257,23 @@ def approve_user(user_id: str):
         description: User not found
     """
     db = get_db()
-    result = db.users.update_one(
-        {"_id": ObjectId(user_id)},
-        {"$set": {"is_approved": True}}
-    )
-    if result.matched_count == 0:
+    user = db.users.find_one({"_id": ObjectId(user_id)})
+    if not user:
         return jsonify({"error": "user not found"}), 404
+
+    db.users.update_one({"_id": ObjectId(user_id)}, {"$set": {"is_approved": True}})
+
+    try:
+        role = to_display_role(normalize_to_canonical(user.get("role")))
+        subject, plain, html = account_approved_email(
+            user.get("first_name") or user.get("name", ""),
+            user.get("email", ""),
+            role,
+        )
+        get_mailer().send_email(user["email"], subject, plain, html)
+    except Exception as mail_err:
+        print(f"[MAIL] account_approved failed: {mail_err}")
+
     return jsonify({"ok": True, "message": "user approved"})
 
 
@@ -299,12 +316,24 @@ def update_role(user_id: str):
 
     canonical = normalize_to_canonical(role_input)
     db = get_db()
-    result = db.users.update_one(
-        {"_id": ObjectId(user_id)},
-        {"$set": {"role": canonical}}
-    )
-    if result.matched_count == 0:
+    user = db.users.find_one({"_id": ObjectId(user_id)})
+    if not user:
         return jsonify({"error": "user not found"}), 404
+
+    old_canonical = normalize_to_canonical(user.get("role"))
+    db.users.update_one({"_id": ObjectId(user_id)}, {"$set": {"role": canonical}})
+
+    try:
+        subject, plain, html = role_changed_email(
+            user.get("first_name") or user.get("name", ""),
+            user.get("email", ""),
+            to_display_role(old_canonical),
+            to_display_role(canonical),
+        )
+        get_mailer().send_email(user["email"], subject, plain, html)
+    except Exception as mail_err:
+        print(f"[MAIL] role_changed failed: {mail_err}")
+
     return jsonify({"ok": True, "message": "role updated", "role": to_display_role(canonical)})
 
 
@@ -336,6 +365,16 @@ def revoke_user(user_id: str):
         return jsonify({"error": "user not found"}), 404
 
     db.users.delete_one({"_id": ObjectId(user_id)})
+
+    try:
+        subject, plain, html = account_revoked_email(
+            user.get("first_name") or user.get("name", ""),
+            user.get("email", ""),
+        )
+        get_mailer().send_email(user["email"], subject, plain, html)
+    except Exception as mail_err:
+        print(f"[MAIL] account_revoked failed: {mail_err}")
+
     return jsonify({"ok": True, "message": "user revoked"})
 
 
