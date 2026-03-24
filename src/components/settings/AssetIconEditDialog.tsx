@@ -111,7 +111,7 @@ export default function AssetIconEditDialog({
     try {
       const resp = await api.user.uploadAssetIcon(file);
       if (resp?.icon_url) {
-        setSelectedIconUrl(resp.icon_url);
+        setSelectedIconUrl(resp.icon_url.startsWith("http") ? resp.icon_url : `${API_BASE}${resp.icon_url}`);
         // Add to available icons list if not already present
         setAvailableIcons((prev) => {
           if (prev.some((i) => i.filename === resp.filename)) return prev;
@@ -133,7 +133,10 @@ export default function AssetIconEditDialog({
     try {
       const config: any = {};
       if (selectedIconUrl !== currentIconUrl) {
-        config.icon_url = selectedIconUrl || null;
+        const iconUrlToSave = selectedIconUrl?.startsWith(API_BASE)
+          ? selectedIconUrl.slice(API_BASE.length)
+          : selectedIconUrl;
+        config.icon_url = iconUrlToSave || null;
         config.icon_size = selectedIconUrl ? iconSize : null;
         config.icon_anchor = selectedIconUrl ? iconAnchor : null;
       }
@@ -268,7 +271,7 @@ export default function AssetIconEditDialog({
           </div>
 
           {/* Pick from Existing Icons */}
-          <div className="space-y-2">
+          {/* <div className="space-y-2">
             <Label className="text-xs font-medium">Or Choose Existing</Label>
             {loadingIcons ? (
               <div className="flex items-center gap-2 p-4">
@@ -302,10 +305,10 @@ export default function AssetIconEditDialog({
                 })}
               </div>
             )}
-          </div>
+          </div> */}
 
           {/* Icon Size (only when icon is selected) */}
-          {false && (
+          {selectedIconUrl && (
             <div className="space-y-2">
               <Label className="text-xs font-medium">Icon Size (px)</Label>
               <div className="flex items-center gap-2">
@@ -348,7 +351,7 @@ export default function AssetIconEditDialog({
             <Button
               variant="ghost"
               size="sm"
-              className="mr-auto text-xs gap-1 text-muted-foreground hover:text-destructive"
+              className="mr-auto text-xs gap-1 text-muted-foreground hover:text-destructive hover:bg-destructive/10 hover:border-destructive"
               onClick={handleReset}
               disabled={saving}
             >
