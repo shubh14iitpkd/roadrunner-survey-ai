@@ -236,21 +236,24 @@ export default function AnnotatedVideoPlayer({
 
   /* ── 5. rAF loop ───────────────────────────────────────── */
   useEffect(() => {
-    let running = true;
+    // Always draw once so paused/seeked frames are visible
+    draw();
 
+    if (!isPlaying) return;
+
+    let running = true;
     const tick = () => {
       if (!running) return;
       draw();
       rafRef.current = requestAnimationFrame(tick);
     };
-
     rafRef.current = requestAnimationFrame(tick);
 
     return () => {
       running = false;
       cancelAnimationFrame(rafRef.current);
     };
-  }, [draw]);
+  }, [draw, isPlaying]);
 
   /* ── 6. Capture original dimensions on metadata load ─── */
   const handleLoadedMetadata = useCallback(() => {

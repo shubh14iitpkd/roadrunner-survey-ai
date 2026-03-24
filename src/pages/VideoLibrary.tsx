@@ -478,7 +478,7 @@ export default function VideoLibrary() {
       </div>
 
       {/* Side-by-Side Comparison Dialog */}
-      <Dialog open={showCompareView} onOpenChange={setShowCompareView}>
+      <Dialog open={showCompareView} onOpenChange={(open) => { if (!open) handleCloseComparison(); }}>
         <DialogContent className="max-w-[95vw] h-[90vh] p-0">
           <DialogHeader className="p-6 pb-4">
             <div className="flex items-center justify-between">
@@ -530,30 +530,17 @@ export default function VideoLibrary() {
                     </div>
                   </Card>
 
-                  <Card className="flex-1 overflow-hidden gradient-card border-0 flex items-center justify-center min-h-0">
-                    <div className="relative w-full h-full">
-                      {activeSrc ? (
-                        <video
-                          key={activeSrc}
-                          src={activeSrc}
-                          controls
-                          className="absolute inset-0 w-full h-full object-contain rounded-lg"
-                        />
-                      ) : (
-                        <div className="flex items-center justify-center h-full">
-                          <VideoIcon className="h-24 w-24 text-muted-foreground/30" />
-                        </div>
-                      )}
-                    </div>
-                  </Card>
-
-                  <div className="flex gap-2">
-                    <Button size="sm" variant="outline" className="flex-1 gap-2" asChild disabled={!activeSrc}>
-                      <a href={activeSrc} download>
-                        <Download className="h-4 w-4" />
-                        Download
-                      </a>
-                    </Button>
+                  <div className="flex-1 min-h-0">
+                    {activeSrc ? (
+                      <AnnotatedVideoPlayer
+                        videoSrc={activeSrc}
+                        videoId={video.id}
+                      />
+                    ) : (
+                      <Card className="h-full gradient-card border-0 flex items-center justify-center">
+                        <VideoIcon className="h-24 w-24 text-muted-foreground/30" />
+                      </Card>
+                    )}
                   </div>
                 </div>
               );
@@ -563,7 +550,10 @@ export default function VideoLibrary() {
       </Dialog>
 
       {/* Enhanced Video Player Dialog - Side by Side View */}
-      <Dialog open={showPlayer} onOpenChange={setShowPlayer}>
+      <Dialog open={showPlayer} onOpenChange={(open) => {
+        setShowPlayer(open);
+        if (!open) { setPlayerSrc(""); setPlayerVideoId(""); }
+      }}>
         <DialogContent className="max-w-[95vw] h-[90vh] p-0">
           <DialogHeader className="p-6 pb-4">
             <DialogTitle className="text-2xl font-bold">Video Viewer</DialogTitle>

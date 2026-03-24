@@ -29,7 +29,7 @@ const navigation = [
   { name: "RoadGPT", href: "/roadgpt", icon: MessageSquare, roles: ["Admin", "Super Admin", "Viewer", "Road Surveyor"] },
   { name: "Management", href: null, icon: null, isHeading: true },
   { name: "Route Register", href: "/roads", icon: Map, roles: ["Admin", "Super Admin", "Road Surveyor"] },
-  { name: "Survey Upload", href: "/upload", icon: Upload, roles: ["Admin", "Super Admin"] },
+  { name: "Survey Upload", href: "/upload", icon: Upload, roles: ["Super Admin", "Admin"] },
   { name: "Video Library", href: "/videos", icon: FileVideo, roles: ["Admin", "Super Admin",  "Road Surveyor"] },
   { name: "Settings", href: "/settings", icon: Settings, roles: ["Admin", "Super Admin", "Viewer", "Road Surveyor"] },
 ];

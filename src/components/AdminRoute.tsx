@@ -8,7 +8,7 @@ import { useAuth } from "@/contexts/AuthContext";
 export default function AdminRoute({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
 
-  if (user?.role !== "Admin") {
+  if (!user || !["Admin", "Super Admin"].includes(user.role)) {
     return <Navigate to="/roads" replace />;
   }
 
