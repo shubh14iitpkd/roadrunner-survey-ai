@@ -1,4 +1,5 @@
 from flask import Flask, jsonify, send_from_directory
+from flask_compress import Compress
 from flask_cors import CORS
 from flask_jwt_extended import JWTManager, jwt_required, get_jwt_identity
 from flasgger import Swagger
@@ -20,6 +21,8 @@ def create_app() -> Flask:
 	# load_dotenv()
 	app = Flask(__name__)
 	app.config.from_object(Config())
+
+	Compress(app)
 
 	CORS(
 		app,
@@ -122,7 +125,7 @@ def create_app() -> Flask:
 			"swagger": "2.0"
 		})
 		app.register_blueprint(main_docs_ui, name="main_swagger", url_prefix='/api/docs/main')
-		app.register_blueprint(assets_docs_ui, name="assets_swagger", url_prefix='/api/docs/assets')
+		# app.register_blueprint(assets_docs_ui, name="assets_swagger", url_prefix='/api/docs/assets')
 		# To hide security options
 		@app.route('/api/docs/assets.json')
 		def assets_spec_json():
@@ -258,5 +261,5 @@ def create_app() -> Flask:
 app = create_app()
 
 if __name__ == "__main__":
-	app.run(host="0.0.0.0", port=5001, debug=True)
+	app.run(host="0.0.0.0", port=5050, debug=True)
 
