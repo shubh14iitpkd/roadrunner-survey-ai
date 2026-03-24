@@ -1,0 +1,8 @@
+uploads/
+venv/
+.venv/
+*.onnx
+__pycache__/
+*.pyc
+.git/
+*.log
