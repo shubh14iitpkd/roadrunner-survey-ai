@@ -335,6 +335,16 @@ All colors MUST be HSL.
   background: transparent !important;
 }
 
+.ask-ai-markdown-container {
+  overflow: hidden;
+  max-width: 100%;
+}
+
+.ask-ai-markdown-container pre {
+  overflow-x: auto;
+  max-width: 100%;
+}
+
 .ask-ai-markdown-container ul {
   list-style-type: disc;
   margin-left: 20px;
@@ -344,6 +354,47 @@ All colors MUST be HSL.
 .ask-ai-markdown-container li {
   margin-bottom: 5px;
 }
+
+/* Chart visualization cards */
+.viz-chart-card {
+  overflow: hidden;
+  max-width: 100%;
+}
+
+.viz-scroll-container {
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: 4px;
+}
+
+.viz-scroll-container::-webkit-scrollbar {
+  height: 6px;
+}
+
+.viz-scroll-container::-webkit-scrollbar-track {
+  background: hsl(var(--muted));
+  border-radius: 3px;
+}
+
+.viz-scroll-container::-webkit-scrollbar-thumb {
+  background: hsl(var(--muted-foreground) / 0.3);
+  border-radius: 3px;
+}
+
+.viz-scroll-container::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground) / 0.5);
+}
+
+/* SVG axis tick text — CSS fill resolves custom properties correctly */
+.viz-axis-tick text {
+  fill: hsl(var(--muted-foreground));
+}
+
+/* SVG grid lines */
+/* .viz-grid line {
+  stroke: hsl(var(--border));
+} */
 
 /* Leaflet custom tooltip */
 .leaflet-tooltip-custom {
