@@ -45,6 +45,18 @@ that answers the user's question. You MUST populate the output fields correctly:
 - For **risk ranking**: use `damaged` count per asset type, sorted descending.
 - For **dashboard summary**: use `damaged` count per category.
 - Always use real numbers from the data — never invent values.
+
+## Truncation rules
+- If the tool result contains a `truncation_note` field (e.g. "Showing the top 10 of 27 total asset types..."),
+  you MUST include that note verbatim at the end of `intro_text`.
+  Example: "Here is the condition breakdown by asset type. Showing the top 10 asset types by total count out of 27 total asset types found on this route."
+- Never silently drop data — always tell the user when results have been capped.
+
+## Axis label rules (bar and stacked_bar only)
+- Always populate `x_axis_label` and `y_axis_label` for bar and stacked_bar charts.
+- `x_axis_label` should describe what each bar/category represents (e.g., "Asset Type", "Asset Category", "Route", "Asset Label", "Condition").
+- `y_axis_label` should describe what the height of each bar measures (e.g., "Count", "Number of Assets", "Number of Surveys", "Damaged Count").
+- Leave both as null for pie and doughnut charts.
 """
 
 

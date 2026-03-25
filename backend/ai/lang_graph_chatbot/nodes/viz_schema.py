@@ -52,3 +52,11 @@ class VisualizationOutput(BaseModel):
         default=None,
         description="REQUIRED for stacked_bar only. List of series, each with a name and data points. DO NOT use for pie, bar, or doughnut."
     )
+    x_axis_label: Optional[str] = Field(
+        default=None,
+        description="Label for the X-axis describing what the categories represent (e.g., 'Asset Type', 'Category', 'Route', 'Label'). Required for bar and stacked_bar charts."
+    )
+    y_axis_label: Optional[str] = Field(
+        default=None,
+        description="Label for the Y-axis describing what is being measured (e.g., 'Count', 'Number of Assets', 'Frequency', 'Total Surveys'). Required for bar and stacked_bar charts."
+    )

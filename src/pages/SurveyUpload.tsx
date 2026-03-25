@@ -45,7 +45,7 @@ import { platform } from "os";
 
 export default function SurveyUpload() {
   const navigate = useNavigate();
-
+  const actionRoles = ["Admin", "Super Admin"]; 
   const { videos, isUploading, uploadFiles, uploadFromLibrary, uploadGpxForVideo, processWithAI, resetVideoStatus, loading } = useUpload();
   const [roads, setRoads] = useState<any[]>([]);
   const [selectedRoute, setSelectedRoute] = useState<string>("");
@@ -768,7 +768,7 @@ export default function SurveyUpload() {
 
                             {video.status === "completed" && (
                               <>
-                                {user.role == "Admin" && (<Button
+                                {user.role && (<Button
                                   size="sm"
                                   variant="outline"
                                   asChild
@@ -779,7 +779,7 @@ export default function SurveyUpload() {
                                     Library
                                   </Link>
                                 </Button>)}
-                                {user.role == "Admin" && <Button
+                                {actionRoles.includes(user.role) && <Button
                                   size="sm"
                                   variant="destructive"
                                   asChild
@@ -806,7 +806,7 @@ export default function SurveyUpload() {
                             )}
 
                             {/* Delete button */}
-                            {user.role == "Admin" && <Button
+                            {actionRoles.includes(user.role) && <Button
                               size="sm"
                               variant="ghost"
                               onClick={() => {

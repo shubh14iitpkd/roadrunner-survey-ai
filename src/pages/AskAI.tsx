@@ -87,6 +87,18 @@ function ThinkingIndicator({ busy }: { busy: boolean }) {
 // ── Markdown components ───────────────────────────────────────────────────────
 
 const markdownComponents = {
+  // Let visualization / map blocks break out of the <pre> wrapper that
+  // ReactMarkdown adds around fenced code blocks. Without this the chart
+  // inherits `white-space: pre` and overflows the message card.
+  pre({ children }: any) {
+    // If the single child is a VisualizationBlock or MapBlock rendered by the
+    // `code` override below, return it unwrapped so it can size itself.
+    const child = Array.isArray(children) ? children[0] : children;
+    if (child?.type === VisualizationBlock || child?.type === MapBlock) {
+      return <>{children}</>;
+    }
+    return <pre className="overflow-x-auto max-w-full">{children}</pre>;
+  },
   table({ children }: any) {
     return (
       <div className="my-4 w-full overflow-hidden rounded-lg border border-border">
@@ -174,7 +186,7 @@ export default function AskAI() {
 
   return (
     <div className="h-screen flex w-full overflow-hidden">
-      <div className="flex-1 flex flex-col max-w-4xl mx-auto w-full">
+      <div className="flex-1 flex flex-col max-w-6xl mx-auto w-full">
         {/* Header with Selector */}
         <div className="p-6 border-b border-border space-y-4">
           <div className="flex items-center gap-3">
@@ -242,14 +254,18 @@ export default function AskAI() {
         {/* Messages */}
         <ScrollArea className="flex-1 p-6">
           <div className="space-y-4">
-            {messages.map((message, idx) => (
+            {messages.map((message, idx) => {
+              const hasChart = message.role === "assistant" && (
+                message.content.includes("```visualization") || message.content.includes("```map")
+              );
+              return (
               <div key={idx} className={cn("flex gap-3", message.role === "user" ? "justify-end" : "justify-start")}>
                 {message.role === "assistant" && (
                   <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
                     <MessageSquare className="h-4 w-4 text-foreground" />
                   </div>
                 )}
-                <div className="max-w-[80%] space-y-2">
+                <div className={cn("space-y-2", message.role === "user" ? "max-w-[75%]" : hasChart ? "w-full" : "max-w-[82%]")}>
                   <Card className={cn("ask-ai-markdown-container", "p-4", message.role === "user" ? "bg-primary text-primary-foreground" : "bg-card")}>
                     {message.role === "user" ? (
                       <p className="text-sm">{message.content}</p>
@@ -269,7 +285,8 @@ export default function AskAI() {
                   </div>
                 )}
               </div>
-            ))}
+              );
+            })}
             {/* Thinking indicator — shown while busy */}
             {busy && <ThinkingIndicator busy={busy} />}
             <div ref={messagesEndRef} />

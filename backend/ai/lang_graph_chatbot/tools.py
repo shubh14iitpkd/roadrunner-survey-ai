@@ -719,6 +719,79 @@ def get_damage_hotspots(route_id: int, top_n: int = 5) -> str:
 
 
 @tool
+def get_asset_type_conditions_for_chart(route_id: Optional[int] = None, top_n: int = 10, sort_by: str = "total") -> str:
+    """
+    Get condition (good/damaged/total) for every distinct asset type on a route,
+    sorted and capped at top_n for chart visualization.
+    Use INSTEAD of list_detected_assets when the user asks for a chart of
+    asset type conditions, e.g. "bar chart of all asset conditions on route X",
+    "condition of all asset types as a chart".
+
+    Args:
+        route_id: Optional route ID to filter by
+        top_n: Maximum number of asset types to return (default 10). Capped at 15.
+        sort_by: Sort order — "total" (most assets first) or "damaged" (most damaged first)
+
+    Returns:
+        JSON with flat list of asset types with good/damaged/total counts,
+        total_types in the DB, and a truncation message if results were capped.
+    """
+    top_n = min(top_n, 15)  # hard cap to prevent chart overflow
+
+    db = get_db()
+    query: dict = {}
+    if route_id is not None:
+        query["route_id"] = route_id
+
+    pipeline = [
+        {"$match": query},
+        {"$group": {
+            "_id": "$group_id",
+            "count": {"$sum": 1},
+            "good": {"$sum": {"$cond": [{"$eq": ["$latest_condition", "good"]}, 1, 0]}},
+            "damaged": {"$sum": {"$cond": [{"$ne": ["$latest_condition", "good"]}, 1, 0]}},
+        }},
+    ]
+    results = list(db.master_assets.aggregate(pipeline))
+
+    if not results:
+        return json.dumps({"route_id": route_id, "assets": [], "total_types": 0})
+
+    sort_key = "damaged" if sort_by == "damaged" else "total"
+    assets = []
+    for r in results:
+        total = r["count"]
+        assets.append({
+            "name": _label_name(r["_id"]),
+            "good": r["good"],
+            "damaged": r["damaged"],
+            "total": total,
+            "damage_rate_pct": round(r["damaged"] / total * 100, 1) if total else 0,
+        })
+
+    assets.sort(key=lambda x: x[sort_key], reverse=True)
+
+    total_types = len(assets)
+    truncated = total_types > top_n
+    assets = assets[:top_n]
+
+    result: dict = {
+        "route_id": route_id,
+        "assets": assets,
+        "total_types": total_types,
+        "showing": len(assets),
+        "truncated": truncated,
+    }
+    if truncated:
+        result["truncation_note"] = (
+            f"Showing the top {top_n} asset types by {sort_key} count out of "
+            f"{total_types} total asset types found on this route."
+        )
+
+    return json.dumps(result)
+
+
+@tool
 def get_most_damaged_types(route_id: Optional[int] = None, limit: int = 10) -> str:
     """
     Asset types ranked by damage count/rate.
@@ -1457,6 +1530,7 @@ ALL_TOOLS = [
     get_category_condition_breakdown,
     get_asset_type_condition,
     list_detected_assets,
+    get_asset_type_conditions_for_chart,
     get_asset_locations,
     get_damage_hotspots,
     get_most_damaged_types,
