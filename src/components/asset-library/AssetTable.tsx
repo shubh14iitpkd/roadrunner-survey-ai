@@ -71,17 +71,24 @@ export default function AssetTable({
     [items, page, pageSize]
   );
 
-  // Auto-scroll to selected row
+  // Jump to the page containing the selected row when selection changes
   useEffect(() => {
     if (!selectedId) return;
     const idx = items.findIndex((a) => a[idField] === selectedId);
     if (idx === -1) return;
     const targetPage = Math.floor(idx / pageSize) + 1;
-    if (targetPage !== page) setPage(targetPage);
-    setTimeout(() => {
+    setPage(targetPage);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId, items, pageSize, idField]);
+
+  // Scroll selected row into view after page has rendered
+  useEffect(() => {
+    if (!selectedId) return;
+    const timer = setTimeout(() => {
       document.getElementById(`asset-row-${selectedId}`)?.scrollIntoView({ behavior: "smooth", block: "nearest" });
     }, 50);
-  }, [selectedId, items, pageSize, page, idField]);
+    return () => clearTimeout(timer);
+  }, [selectedId, page]);
 
   return (
     <div className="border-t border-border bg-card flex flex-col" style={{ flex: "1 1 45%", minHeight: 0 }}>
