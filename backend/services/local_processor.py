@@ -433,6 +433,7 @@ class LocalVideoProcessor:
                                 class_name = det.get("class_name", "")
                                 label_info = self.label_map.get(class_name, {})
                                 det["asset_id"] = label_info.get("asset_id")
+                                det["category_id"] = label_info.get("category_id")
                                 formatted_detections.append(([box[0], box[1], w, h],det["confidence"],det["class_name"]))
 
                             tracks = self.tracker.update_tracks(formatted_detections, frame=frame)
