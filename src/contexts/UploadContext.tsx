@@ -1,12 +1,8 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from "react";
 import { toast } from "sonner";
 import { api, API_BASE } from "@/lib/api";
-import { isDemoVideo, loadDemoData, convertToAssets, type ProcessedVideoData } from "@/services/demoDataService";
 
 export type VideoStatus = "queue" | "uploading" | "uploaded" | "processing" | "asset_linking" | "completed" | "error" | "failed";
-
-// Store demo data globally so it can be accessed by other components
-export const demoDataCache = new Map<string, ProcessedVideoData>();
 
 export interface VideoFile {
     id: string;
@@ -562,89 +558,21 @@ export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             return;
         }
 
-        // Check if this is a demo video
-        const demoKey = isDemoVideo(video.name);
-
-        if (demoKey) {
-            // Handle demo video with pre-loaded data
-            console.log(`Processing demo video: ${video.name} (key: ${demoKey})`);
-
-            try {
-                setVideos((prev) =>
-                    prev.map((v) =>
-                        v.id === videoId ? { ...v, status: "processing" as VideoStatus, progress: 0 } : v
-                    )
-                );
-
-                // Call backend to start processing (backend also handles demo mode)
-                try {
-                    await api.videos.processWithAI(video.backendId);
-                } catch (err) {
-                    console.warn('Backend process call failed, continuing with frontend demo processing:', err);
-                }
-
-                toast.info(`Loading pre-processed AI data for ${video.name}...`);
-
-                // Simulate processing time for demo effect
-                const progressSteps = [3, 7, 16, 24, 33, 38, 41, 44, 49, 52, 56, 58, 61, 65, 71, 74, 78, 82, 86, 90, 93, 96, 99];
-                for (let i = 0; i < progressSteps.length; i++) {
-                    await new Promise(resolve => setTimeout(resolve, 800));
-                    setVideos((prev) =>
-                        prev.map((v) =>
-                            v.id === videoId ? { ...v, progress: progressSteps[i] } : v
-                        )
-                    );
-                }
-
-                setVideos((prev) =>
-                    prev.map((v) =>
-                        v.id === videoId ? { ...v, status: "completed" as VideoStatus, progress: 100 } : v
-                    )
-                );
-
-                // Also update backend status
-                try {
-                    await api.videos.updateStatus(video.backendId, { status: "completed", progress: 100 });
-                } catch (err) {
-                    console.warn('Could not update backend status:', err);
-                }
-            } catch (error: any) {
-                console.error("Error processing demo video:", error);
-                toast.error(`Failed to process: ${error.message}`);
-
-                setVideos((prev) =>
-                    prev.map((v) =>
-                        v.id === videoId ? { ...v, status: "error" as VideoStatus, progress: 0 } : v
-                    )
-                );
-            }
-            return;
-        }
-
-        // Regular video processing via backend
-        // console.log("Starting AI processing for video:", videoId, video);
         try {
-            setVideos((prev) =>
-                prev.map((v) =>
-                    v.id === videoId ? { ...v, status: "queue" as VideoStatus, progress: 0 } : v
-                )
-            );
-
-            // Call backend to start processing
-            const response = await api.videos.processWithAI(video.backendId);
-
-            if (response.ok) {
-                toast.success(`AI processing started for ${video.name} with SageMaker`);
-            } else {
-                throw new Error(response.message || "Failed to start processing");
-            }
-
-            // Update local state to processing
             setVideos((prev) =>
                 prev.map((v) =>
                     v.id === videoId ? { ...v, status: "processing" as VideoStatus, progress: 0 } : v
                 )
             );
+
+            // Call backend to start processing (handles both demo and real videos)
+            const response = await api.videos.processWithAI(video.backendId);
+
+            if (!response.ok) {
+                throw new Error(response.message || "Failed to start processing");
+            }
+
+            // Polling takes over from here — no frontend simulation needed
         } catch (error: any) {
             console.error("Error starting AI processing:", error);
             toast.error(`Failed to start processing: ${error.message}`);

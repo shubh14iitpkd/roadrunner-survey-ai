@@ -798,7 +798,7 @@ def process_video_with_ai(video_id: str):
 
                     # Simulate progress
                     for i in range(1, 101, 10):
-                        time.sleep(0.5)
+                        time.sleep(2.3)
                         print(f"[PROCESS] Updating progress to {i}%")
                         mongo_db.videos.update_one(
                             {"_id": ObjectId(video_id)},
