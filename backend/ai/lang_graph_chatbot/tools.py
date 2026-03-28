@@ -8,30 +8,12 @@ import os
 from datetime import datetime, timedelta
 from typing import Optional
 from langchain.tools import tool
-from pymongo import MongoClient
 
 from ai.lang_graph_chatbot.get_resolved_map import get_resolved_map
-
-MONGO_URI = os.environ.get("MONGO_URI", "mongodb://localhost:27017")
-DB_NAME = os.environ.get("DB_NAME", "roadrunner")
+from db import get_db
 
 GOOD_CONDITIONS = ["good", "fine", "visible"]
 DAMAGED_CONDITIONS = ["damaged", "bad", "poor", "missing", "broken", "bent", "dirty", "overgrown"]
-
-_client = None
-
-
-def get_db():
-    """Get MongoDB database connection."""
-    global _client
-    if _client is None:
-        _client = MongoClient(
-            MONGO_URI,
-            uuidRepresentation="standard",
-            maxPoolSize=50,
-            serverSelectionTimeoutMS=5000,
-        )
-    return _client[DB_NAME]
 
 
 # ---------- helpers for display names ----------

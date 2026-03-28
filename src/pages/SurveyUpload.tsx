@@ -99,11 +99,6 @@ export default function SurveyUpload() {
             setActiveCategory(firstCat);
             setPlayerAnnotatedSrc(catVideos[firstCat]);
           }
-        } else if (videoData.annotated_video_url) {
-          const url = videoData.annotated_video_url.startsWith('http')
-            ? videoData.annotated_video_url
-            : `${API_BASE}${videoData.annotated_video_url}`;
-          setPlayerAnnotatedSrc(url);
         }
       } catch (err) {
         console.error("Failed to fetch video category data:", err);
