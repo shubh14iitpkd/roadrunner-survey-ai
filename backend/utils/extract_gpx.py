@@ -20,9 +20,14 @@ def extract_gpx(video_path, fmt_file=fmt_file):
     try:
         with open(gpx_path, 'w') as f:
             subprocess.run(command, stdout=f, stderr=subprocess.PIPE, text=True)
+        if gpx_path.stat().st_size == 0:
+            gpx_path.unlink()
+            return None
         return str(gpx_path)
     except Exception as e:
         print(f"Error: {e}")
+        if gpx_path.exists():
+            gpx_path.unlink()
         return None
 
 if __name__ == "__main__":

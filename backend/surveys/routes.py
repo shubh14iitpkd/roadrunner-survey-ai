@@ -372,7 +372,8 @@ def delete_survey(survey_id: str):
         deleted_assets += del_res.deleted_count
 
         # Check if video is from library (preserve library files)
-        is_library_video = "video_library" in storage_url
+
+        is_library_video = "video_library" in storage_url if storage_url else False
 
         if not is_library_video and storage_url:
             # Delete the actual video file

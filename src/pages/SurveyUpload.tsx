@@ -46,7 +46,7 @@ import { platform } from "os";
 export default function SurveyUpload() {
   const navigate = useNavigate();
   const actionRoles = ["Admin", "Super Admin"]; 
-  const { videos, isUploading, uploadFiles, uploadFromLibrary, uploadGpxForVideo, processWithAI, resetVideoStatus, loading } = useUpload();
+  const { videos, isUploading, uploadFiles, uploadFromLibrary, uploadGpxForVideo, processWithAI, cancelUpload, resetVideoStatus, loading } = useUpload();
   const [roads, setRoads] = useState<any[]>([]);
   const [selectedRoute, setSelectedRoute] = useState<string>("");
   // videos state removed (using context)
@@ -61,6 +61,7 @@ export default function SurveyUpload() {
   // It used it in handleGpxFileSelect to update state.
   // We can probably remove it and rely on video.gpxFile string.
   const [selectedGpxFile, setSelectedGpxFile] = useState<File | null>(null);
+  const [selectedVideoFile, setSelectedVideoFile] = useState<File | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [videoToDelete, setVideoToDelete] = useState<{ id: string; surveyId: string; name: string } | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -76,16 +77,22 @@ export default function SurveyUpload() {
   // Function to open video player with category data
   const openVideoPlayer = async (video: VideoFile) => {
     setSelectedVideo(video);
-    setPlayerOriginalSrc(video.url);
+    setPlayerOriginalSrc(video.url || "");
     setPlayerAnnotatedSrc("");
     setPlayerCategoryVideos({});
     setActiveCategory("");
     setShowVideoPlayer(true);
-    console.log(video)
-    // Fetch video data to get category_videos if completed
-    if (video.backendId && video.status === "completed") {
+
+    // Fetch video data from backend to get storage_url (if not in local state) and category_videos
+    if (video.backendId && (video.status === "completed" || !video.url)) {
       try {
         const videoData = await api.videos.get(video.backendId);
+        if (!video.url && videoData.storage_url) {
+          const resolvedUrl = videoData.storage_url.startsWith('http')
+            ? videoData.storage_url
+            : `${API_BASE}${videoData.storage_url}`;
+          setPlayerOriginalSrc(resolvedUrl);
+        }
         if (videoData.category_videos) {
           const catVideos: Record<string, string> = {};
           Object.entries(videoData.category_videos).forEach(([k, val]) => {
@@ -93,7 +100,6 @@ export default function SurveyUpload() {
             catVideos[k] = path.startsWith('http') ? path : `${API_BASE}${path}`;
           });
           setPlayerCategoryVideos(catVideos);
-          // Set first category as active by default
           const firstCat = Object.keys(catVideos).sort()[0];
           if (firstCat) {
             setActiveCategory(firstCat);
@@ -101,7 +107,7 @@ export default function SurveyUpload() {
           }
         }
       } catch (err) {
-        console.error("Failed to fetch video category data:", err);
+        console.error("Failed to fetch video data:", err);
       }
     }
   };
@@ -131,7 +137,15 @@ export default function SurveyUpload() {
   // Track uploads in progress for showing status
   const [uploadingItems, setUploadingItems] = useState<string[]>([]);
 
-  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setSelectedVideoFile(file);
+    e.target.value = '';
+  };
+
+  const handleStartUpload = () => {
+    if (!selectedVideoFile) return;
     if (!selectedRoute) {
       toast.error("Please select a route first");
       return;
@@ -141,28 +155,18 @@ export default function SurveyUpload() {
       return;
     }
 
-    const files = Array.from(e.target.files || []);
-    if (files.length === 0) return;
+    const fileName = selectedVideoFile.name;
+    setUploadingItems(prev => [...prev, fileName]);
 
-    // Add file names to uploading list
-    const fileNames = files.map(f => f.name);
-    setUploadingItems(prev => [...prev, ...fileNames]);
-
-    toast.success(`Started uploading ${files.length} video(s) in background`);
-
-    // Don't close dialog - let user add more if needed
-    // Upload runs in background
-    uploadFiles(files, selectedRoute, surveyDate, surveyorName, selectedGpxFile)
+    uploadFiles([selectedVideoFile], selectedRoute, surveyDate, surveyorName, selectedGpxFile)
       .then(() => {
-        setUploadingItems(prev => prev.filter(name => !fileNames.includes(name)));
-        toast.success(`Completed uploading ${files.length} video(s)`);
+        setUploadingItems(prev => prev.filter(n => n !== fileName));
       })
       .catch(() => {
-        setUploadingItems(prev => prev.filter(name => !fileNames.includes(name)));
+        setUploadingItems(prev => prev.filter(n => n !== fileName));
       });
 
-    // Reset file input
-    e.target.value = '';
+    setSelectedVideoFile(null);
     setSelectedGpxFile(null);
   };
 
@@ -268,7 +272,7 @@ export default function SurveyUpload() {
       asset_linking: "Linking Assets",
       completed: "Report Prepared",
       error: "Processing Failed - Retry",
-      failed: "Processing Failed",
+      failed: "No GPS Data",
     };
     return labels[status] || status;
   };
@@ -428,46 +432,66 @@ export default function SurveyUpload() {
                       </p>
                     </div>
 
-                    <label
-                      htmlFor="video-upload"
-                      className={cn(
-                        "flex flex-col items-center justify-center w-full h-48 border-2 border-dashed rounded-lg cursor-pointer transition-all",
-                        selectedRoute && surveyorName && !isUploading
-                          ? "border-primary bg-primary/5 hover:bg-primary/10 hover:border-primary/60"
-                          : "border-border bg-muted/30 cursor-not-allowed opacity-60"
-                      )}
-                    >
-                      <div className="flex flex-col items-center justify-center pt-5 pb-6">
-                        {isUploading ? (
-                          <>
-                            <Loader2 className="h-12 w-12 mb-3 text-primary animate-spin" />
-                            <p className="mb-2 text-sm font-medium">Uploading files...</p>
+                    {selectedVideoFile ? (
+                      <div className="w-full border-2 border-primary rounded-lg p-4 space-y-3">
+                        <div className="flex items-center gap-3">
+                          <FileVideo className="h-8 w-8 text-primary shrink-0" />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium truncate">{selectedVideoFile.name}</p>
                             <p className="text-xs text-muted-foreground">
-                              Please wait while your files are being uploaded
+                              {(selectedVideoFile.size / (1024 * 1024)).toFixed(1)} MB
                             </p>
-                          </>
-                        ) : (
-                          <>
-                            <Upload className="h-12 w-12 mb-3 text-primary" />
-                            <p className="mb-2 text-sm font-medium">
-                              {selectedRoute && surveyorName ? "Click to select videos" : "Complete the fields above first"}
-                            </p>
-                            <p className="text-xs text-muted-foreground">
-                              MP4, WEBM up to 500MB each • Multiple files supported
-                            </p>
-                          </>
-                        )}
+                          </div>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => setSelectedVideoFile(null)}
+                            className="shrink-0"
+                          >
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </div>
+                        <Button
+                          className="w-full"
+                          onClick={handleStartUpload}
+                          disabled={isUploading}
+                        >
+                          {isUploading ? (
+                            <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Uploading...</>
+                          ) : (
+                            <><Upload className="h-4 w-4 mr-2" />Upload Video</>
+                          )}
+                        </Button>
                       </div>
-                      <input
-                        id="video-upload"
-                        type="file"
-                        accept="video/*"
-                        multiple
-                        className="hidden"
-                        disabled={!selectedRoute || !surveyorName || isUploading}
-                        onChange={handleFileSelect}
-                      />
-                    </label>
+                    ) : (
+                      <label
+                        htmlFor="video-upload"
+                        className={cn(
+                          "flex flex-col items-center justify-center w-full h-48 border-2 border-dashed rounded-lg cursor-pointer transition-all",
+                          selectedRoute && surveyorName && !isUploading
+                            ? "border-primary bg-primary/5 hover:bg-primary/10 hover:border-primary/60"
+                            : "border-border bg-muted/30 cursor-not-allowed opacity-60"
+                        )}
+                      >
+                        <div className="flex flex-col items-center justify-center pt-5 pb-6">
+                          <Upload className="h-12 w-12 mb-3 text-primary" />
+                          <p className="mb-2 text-sm font-medium">
+                            {selectedRoute && surveyorName ? "Click to select a video" : "Complete the fields above first"}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            MP4, WEBM up to 500MB
+                          </p>
+                        </div>
+                        <input
+                          id="video-upload"
+                          type="file"
+                          accept="video/*"
+                          className="hidden"
+                          disabled={!selectedRoute || !surveyorName || isUploading}
+                          onChange={handleFileSelect}
+                        />
+                      </label>
+                    )}
                   </TabsContent>
 
                   <TabsContent value="cloud" className="space-y-4 mt-4">
@@ -707,7 +731,8 @@ export default function SurveyUpload() {
                                     video.status === "uploading" && "bg-purple-100 dark:bg-purple-950/30 text-purple-700 dark:text-purple-400",
                                     video.status === "uploaded" && "bg-amber-100 dark:bg-amber-950/30 text-amber-700 dark:text-amber-400",
                                     video.status === "queue" && "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400",
-                                    video.status === "error" && "bg-red-100 dark:bg-red-950/30 text-red-700 dark:text-red-400"
+                                    video.status === "error" && "bg-red-100 dark:bg-red-950/30 text-red-700 dark:text-red-400",
+                                    video.status === "failed" && "bg-orange-100 dark:bg-orange-950/30 text-orange-700 dark:text-orange-400"
                                   )}
                                 >
                                   {getStatusLabel(video.status)}
@@ -717,7 +742,7 @@ export default function SurveyUpload() {
                               {(video.status === "uploading" || video.status === "processing" || video.status === "asset_linking") && (
                                 <div className="flex items-center gap-2">
                                   <Progress value={video.progress} className="h-1.5 flex-1" />
-                                  <span className="text-[10px] font-medium text-primary whitespace-nowrap">{video.progress}%</span>
+                                  <span className="text-[10px] font-medium text-primary dark:text-muted-secondary whitespace-nowrap">{video.progress}%</span>
                                 </div>
                               )}
                             </div>
@@ -725,6 +750,16 @@ export default function SurveyUpload() {
 
                           {/* Actions column */}
                           <div className="p-3 flex-[2.5] flex items-center justify-center gap-1.5 flex-wrap">
+                            {video.status === "uploading" && (
+                              <Button
+                                size="sm"
+                                variant="destructive"
+                                onClick={() => cancelUpload(video.id)}
+                                className="h-7 text-xs border border-destructive bg-destructive/10 text-destructive hover:bg-destructive/20"
+                              >
+                                Cancel
+                              </Button>
+                            )}
                             {video.status === "uploaded" && (
                               <Button
                                 size="sm"
@@ -890,7 +925,7 @@ export default function SurveyUpload() {
             {playerOriginalSrc && (
               <AnnotatedVideoPlayer
                 videoSrc={playerOriginalSrc}
-                videoId={selectedVideo?.id}
+                videoId={selectedVideo?.backendId}
               />
             )}
 
