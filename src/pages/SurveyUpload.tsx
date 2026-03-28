@@ -33,7 +33,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api, API_BASE } from "@/lib/api";
-import { useUpload, VideoStatus, VideoFile, demoDataCache } from "@/contexts/UploadContext";
+import { useUpload, VideoStatus, VideoFile } from "@/contexts/UploadContext";
 import { useAuth } from "@/contexts/AuthContext";
 
 import VideoLibraryUpload from "@/components/VideoLibraryUpload";
