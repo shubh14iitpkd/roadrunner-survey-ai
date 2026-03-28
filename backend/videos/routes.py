@@ -1,4 +1,3 @@
-# from services.MultiEndpointSageMaker import MultiEndpointSageMaker
 from services.local_processor import LocalVideoProcessor
 import pymongo
 import os
@@ -25,8 +24,6 @@ from utils.is_demo_video import DEMO_VIDEOS
 
 videos_bp = Blueprint("videos", __name__)
 from config import Config
-
-# from services.sagemaker_processor import SageMakerVideoProcessor
 
 config = Config()
 aws_session = boto3.Session(region_name=config.AWS_REGION)
@@ -982,10 +979,10 @@ def process_video_with_ai(video_id: str):
                         f"Source video not found at: {video_path}"
                     )
 
-                print(f"[PROCESS] Starting SageMaker processing for video {video_id}")
+                print(f"[PROCESS] Starting Local processing for video {video_id}")
 
-                # Initialize SageMaker processor
-                processor = LocalVideoProcessor() # SageMakerVideoProcessor()  # MultiEndpointSageMaker()
+                # Initialize local processor
+                processor = LocalVideoProcessor()
 
                 # Get MongoDB client directly (not using get_db() to avoid Flask context issues in callback)
                 from pymongo import MongoClient
@@ -1144,7 +1141,7 @@ def process_video_with_ai(video_id: str):
         jsonify(
             {
                 "ok": True,
-                "message": "Video processing started with SageMaker",
+                "message": "Video processing started",
                 "video_id": video_id,
                 "status": "processing",
             }
@@ -1230,7 +1227,6 @@ def get_video_frame_annotated(video_id: str):
             new_height = int(frame_height * (resize_width / frame_width))
             frame = cv2.resize(frame, (resize_width, new_height))
 
-        # sgm = SageMakerVideoProcessor()
         # Check if this is a demo video by matching storage_url basename with frame 'key'
         storage_basename = (
             os.path.splitext(os.path.basename(video_url))[0] if video_url else None
