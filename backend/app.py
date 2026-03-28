@@ -48,7 +48,7 @@ def create_app() -> Flask:
 	from dashboard.routes import dashboard_bp
 	from categories.routes import categories_bp, master_bp
 	from ai.routes import ai_bp
-	from tiles.routes import tiles_bp
+	# from tiles.routes import tiles_bp
 	from frames.routes import frames_bp
 	from user.routes import user_bp
 	from model_test.routes import model_test_bp
@@ -66,7 +66,7 @@ def create_app() -> Flask:
 	app.register_blueprint(categories_bp, url_prefix="/api/categories")
 	app.register_blueprint(master_bp, url_prefix="/api/master")
 	app.register_blueprint(ai_bp, url_prefix="/api/ai")
-	app.register_blueprint(tiles_bp, url_prefix="/api/tiles")
+	# app.register_blueprint(tiles_bp, url_prefix="/api/tiles")
 	app.register_blueprint(frames_bp, url_prefix="/api/frames")
 	app.register_blueprint(user_bp, url_prefix="/api/users")
 	app.register_blueprint(model_test_bp, url_prefix="/api/model-test")

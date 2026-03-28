@@ -42,6 +42,7 @@ interface UploadContextType {
     removeVideo: (videoId: string) => void;
     uploadGpxForVideo: (file: File, videoId: string) => Promise<void>;
     processWithAI: (videoId: string) => Promise<void>;
+    cancelUpload: (videoId: string) => Promise<void>;
     resetVideoStatus: (videoId: string) => void;
     loading: boolean;
 }
@@ -117,6 +118,8 @@ export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
     // Ref to keep track of active uploads to prevent duplicates if effect re-runs
     const activeUploads = useRef<Set<string>>(new Set());
+    // Ref to store active XHR instances keyed by video id, so they can be aborted
+    const xhrRefs = useRef<Map<string, XMLHttpRequest>>(new Map());
 
     // Load initial videos from API
     useEffect(() => {
@@ -246,41 +249,57 @@ export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             await api.videos.updateStatus(backendId, { status: "uploading", progress: 0 });
 
             // Upload video with progress tracking
-            await new Promise<void>((resolve, reject) => {
-                const xhr = new XMLHttpRequest();
-                const form = new FormData();
-                form.append("file", file);
-                form.append("video_id", backendId);
-
-                xhr.upload.addEventListener("progress", (e) => {
-                    if (e.lengthComputable) {
-                        const percentComplete = Math.round((e.loaded / e.total) * 100);
-                        setVideos(prev => prev.map(v => v.id === id ? { ...v, progress: percentComplete } : v));
+            const xhr = new XMLHttpRequest();
+            xhrRefs.current.set(id, xhr);
+            try {
+                await new Promise<void>((resolve, reject) => {
+                    const form = new FormData();
+                    form.append("file", file);
+                    form.append("video_id", backendId);
+                    if (selectedGpxFile) {
+                        form.append("gpx_file", selectedGpxFile);
                     }
-                });
 
-                xhr.addEventListener("load", () => {
-                    if (xhr.status >= 200 && xhr.status < 300) {
-                        const responseData = JSON.parse(xhr.responseText);
-                        setVideos(prev => prev.map(v => v.id === id ? { ...v, gpxFile: responseData.gpx_created } : v));
-                        resolve();
-                    } else {
-                        reject(new Error(`Upload failed with status ${xhr.status}`));
+                    xhr.upload.addEventListener("progress", (e) => {
+                        if (e.lengthComputable) {
+                            const percentComplete = Math.round((e.loaded / e.total) * 100);
+                            setVideos(prev => prev.map(v => v.id === id ? { ...v, progress: percentComplete } : v));
+                        }
+                    });
+
+                    xhr.addEventListener("load", () => {
+                        if (xhr.status >= 200 && xhr.status < 300) {
+                            const responseData = JSON.parse(xhr.responseText);
+                            const videoUrl = responseData.storage_url
+                                ? `${API_BASE}${responseData.storage_url}`
+                                : undefined;
+                            if (!responseData.gpx_created) {
+                                setVideos(prev => prev.map(v => v.id === id ? { ...v, status: "failed" as VideoStatus, gpxFile: undefined, url: videoUrl } : v));
+                                toast.error(`No GPS data found in ${file.name}. Upload a GPX file to enable processing.`);
+                            } else {
+                                setVideos(prev => prev.map(v => v.id === id ? { ...v, gpxFile: selectedGpxFile?.name || "extracted", url: videoUrl } : v));
+                            }
+                            resolve();
+                        } else {
+                            reject(new Error(`Upload failed with status ${xhr.status}`));
+                        }
+                    });
+
+                    xhr.addEventListener("error", () => reject(new Error("Upload failed")));
+                    xhr.addEventListener("abort", () => reject(new Error("Upload cancelled")));
+
+                    const tokens = localStorage.getItem("auth_tokens");
+                    const access = tokens ? JSON.parse(tokens).access_token : "";
+
+                    xhr.open("POST", `${API_BASE}/api/videos/upload`);
+                    if (access) {
+                        xhr.setRequestHeader("Authorization", `Bearer ${access}`);
                     }
+                    xhr.send(form);
                 });
-
-                xhr.addEventListener("error", () => reject(new Error("Upload failed")));
-                xhr.addEventListener("abort", () => reject(new Error("Upload aborted")));
-
-                const tokens = localStorage.getItem("auth_tokens");
-                const access = tokens ? JSON.parse(tokens).access_token : "";
-
-                xhr.open("POST", `${API_BASE}/api/videos/upload`);
-                if (access) {
-                    xhr.setRequestHeader("Authorization", `Bearer ${access}`);
-                }
-                xhr.send(form);
-            });
+            } finally {
+                xhrRefs.current.delete(id);
+            }
 
             // Update status to uploaded
             // setVideos(prev => prev.map(v => v.id === id ? { ...v, status: "uploaded", progress: 100 } : v));
@@ -311,20 +330,6 @@ export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                 console.error("Failed to generate thumbnail:", thumbError);
             }
 
-            // Upload GPX file if selected and associate with this video
-            if (selectedGpxFile) {
-                const gpxForm = new FormData();
-                gpxForm.append("file", selectedGpxFile);
-                gpxForm.append("video_id", backendId);
-                const tokens = localStorage.getItem("auth_tokens");
-                const access = tokens ? JSON.parse(tokens).access_token : "";
-                await fetch(`${API_BASE}/api/videos/gpx-upload`, {
-                    method: "POST",
-                    headers: access ? { Authorization: `Bearer ${access}` } : undefined,
-                    body: gpxForm,
-                });
-                setVideos(prev => prev.map(v => v.id === id ? { ...v, gpxFile: selectedGpxFile.name } : v));
-            }
         } catch (e) {
             console.error("Upload error:", e);
             setVideos(prev => prev.map(v => v.id === id ? { ...v, status: "error" } : v));
@@ -551,6 +556,32 @@ export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         }
     };
 
+    const cancelUpload = async (videoId: string) => {
+        const video = videos.find((v) => v.id === videoId);
+        if (!video) return;
+
+        // Abort active XHR if the upload is still in progress
+        const xhr = xhrRefs.current.get(videoId);
+        if (xhr) {
+            xhr.abort();
+            xhrRefs.current.delete(videoId);
+        }
+        activeUploads.current.delete(videoId);
+
+        // Remove from local state immediately
+        setVideos((prev) => prev.filter((v) => v.id !== videoId));
+
+        // Delete the survey (and associated video) from backend
+        console.log("Cancelling upload and deleting survey for video:", video);
+        if (video.surveyId) {
+            try {
+                await api.Surveys.delete(video.surveyId);
+            } catch (err) {
+                console.error("Failed to delete survey during cancel:", err);
+            }
+        }
+    };
+
     const processWithAI = async (videoId: string) => {
         const video = videos.find((v) => v.id === videoId);
         if (!video || !video.backendId) {
@@ -595,7 +626,7 @@ export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     };
 
     return (
-        <UploadContext.Provider value={{ videos, isUploading, uploadFiles, uploadFromLibrary, retryUpload, removeVideo, uploadGpxForVideo, processWithAI, resetVideoStatus, loading }}>
+        <UploadContext.Provider value={{ videos, isUploading, uploadFiles, uploadFromLibrary, retryUpload, removeVideo, uploadGpxForVideo, processWithAI, cancelUpload, resetVideoStatus, loading }}>
             {children}
         </UploadContext.Provider>
     );

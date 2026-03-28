@@ -426,15 +426,28 @@ def upload_direct():
             500,
         )
 
-    # Extracting gpx from saved video here
-    gpx_file = extract_gpx(str(save_path))
-    gpx_created = gpx_file and os.path.exists(gpx_file)
-
-    # verify gpx extraction
-    if gpx_created:
-        print(f"[UPLOAD] GPX extracted: {gpx_file}")
+    # GPX handling: user-provided GPX takes priority over exiftool extraction
+    if "gpx_file" in request.files and request.files["gpx_file"].filename:
+        gpx_user_file = request.files["gpx_file"]
+        gpx_filename = f"gpx_{secure_filename(gpx_user_file.filename)}"
+        gpx_save_path = upload_root / gpx_filename
+        counter = 1
+        base, ext = os.path.splitext(gpx_filename)
+        while gpx_save_path.exists():
+            gpx_filename = f"{base}_{counter}{ext}"
+            gpx_save_path = upload_root / gpx_filename
+            counter += 1
+        gpx_user_file.save(str(gpx_save_path))
+        gpx_file = str(gpx_save_path)
+        gpx_created = True
+        print(f"[UPLOAD] Using user-provided GPX: {gpx_file}")
     else:
-        print(f"[UPLOAD] No GPX data found in video: {filename}")
+        gpx_file = extract_gpx(str(save_path))
+        gpx_created = gpx_file is not None
+        if gpx_created:
+            print(f"[UPLOAD] GPX extracted: {gpx_file}")
+        else:
+            print(f"[UPLOAD] No GPX data found in video: {filename}")
 
     storage_url = f"/uploads/{filename}"
     gpx_file_url = f"/uploads/{os.path.basename(gpx_file)}" if gpx_file else None
@@ -454,10 +467,12 @@ def upload_direct():
             "storage_url": storage_url,
             "gpx_file_url": gpx_file_url,
             "size_bytes": file_size,
-            "status": "uploaded",
+            "status": "uploaded" if gpx_created else "failed",
             "progress": 100,
             "updated_at": get_now_iso(),
         }
+        if not gpx_created:
+            update_fields["error"] = "No GPS data found. Upload a GPX file to enable processing."
         if survey_display_id:
             update_fields["survey_display_id"] = survey_display_id
 
@@ -502,11 +517,13 @@ def upload_direct():
         "storage_url": storage_url,
         "gpx_file_url": gpx_file_url,
         "size_bytes": file_size,
-        "status": "uploaded",
+        "status": "uploaded" if gpx_created else "failed",
         "progress": 100,
         "created_at": get_now_iso(),
         "updated_at": get_now_iso(),
     }
+    if not gpx_created:
+        doc["error"] = "No GPS data found. Upload a GPX file to enable processing."
 
     res = db.videos.insert_one(doc)
     return (
@@ -725,6 +742,12 @@ def process_video_with_ai(video_id: str):
         return jsonify({"error": "Video file not uploaded yet"}), 400
 
     gpx_file_url = video.get("gpx_file_url")
+    if not gpx_file_url:
+        db.videos.update_one(
+            {"_id": ObjectId(video_id)},
+            {"$set": {"status": "failed", "error": "No GPS data found. Upload a GPX file to enable processing.", "updated_at": get_now_iso()}},
+        )
+        return jsonify({"error": "No GPS data found. Upload a GPX file to enable processing."}), 400
     route_id = video.get("route_id")
     survey_id = video.get("survey_id")
 
@@ -746,13 +769,17 @@ def process_video_with_ai(video_id: str):
     # Example: corridor_fence_000_2025_0817_115147_F_annotated_compressed.mp4
     # where 2025_0817_115147_F is the filename_no_ext
 
+    # Handle storage_url which might be relative or absolute
+    storage_filename = storage_url.lstrip("/uploads/").lstrip("/")
+    video_path = upload_root / storage_filename
+
     demo_matches = []
     if annotated_lib_path.exists():
         search_pattern = f"*{filename_no_ext}*.mp4"
         demo_matches = list(annotated_lib_path.glob(search_pattern))
 
     # demo_matches = []
-    if demo_matches:
+    if demo_matches and "video_library" in storage_url:
         print(
             f"[PROCESS] DEMO MODE DETECTED for {video_id}. Found {len(demo_matches)} annotated files."
         )
@@ -773,17 +800,6 @@ def process_video_with_ai(video_id: str):
         from flask import current_app
 
         app = current_app._get_current_object()
-
-        # Setup paths with absolute path
-        upload_root = Path(
-            os.getenv("UPLOAD_DIR")
-            or str(Path(__file__).resolve().parents[1] / "uploads")
-        )
-        upload_root = upload_root.resolve()  # Ensure absolute path
-
-        # Handle storage_url which might be relative or absolute
-        storage_filename = storage_url.lstrip("/uploads/").lstrip("/")
-        video_path = upload_root / storage_filename
 
         print(f"[PROCESS] Upload root: {upload_root}")
 
@@ -996,6 +1012,7 @@ def process_video_with_ai(video_id: str):
 
                 # Process video
                 gpx_path = upload_root / gpx_file_url.lstrip("/uploads/") if gpx_file_url else None
+                print(f"[PROCESS] GPX path for processing: {gpx_path}")
                 result = processor.process_video(
                     video_path=video_path,
                     output_dir=upload_root,  # Pass upload_root directly

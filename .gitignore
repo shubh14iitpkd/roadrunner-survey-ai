@@ -74,6 +74,6 @@ cleanup.sh
 db_dock
 **/.env.*
 
-build.sh
+*.sh
 **/*.md
 !**/README.md
