@@ -30,7 +30,6 @@ interface VideoData {
   thumbnail: string;
   thumbnailUrl?: string;
   storageUrl?: string;
-  annotatedVideoUrl?: string;
   gpxFileUrl?: string;
   categoryVideos?: Record<string, string>;
 }
@@ -113,7 +112,6 @@ export default function VideoLibrary() {
             thumbnail: "",
             thumbnailUrl: buildUrl(v.thumbnail_url),
             storageUrl: buildUrl(v.storage_url),
-            annotatedVideoUrl: buildUrl(v.annotated_video_url),
             gpxFileUrl: buildUrl(v.gpx_file_url),
             categoryVideos: catVideos,
           } as VideoData;

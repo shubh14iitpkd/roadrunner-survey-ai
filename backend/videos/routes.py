@@ -850,7 +850,6 @@ def process_video_with_ai(video_id: str):
                             "$set": {
                                 "status": "asset_linking",
                                 "progress": 100,
-                                "annotated_video_url": primary_annotated_url,
                                 "category_videos": category_videos,
                                 "updated_at": get_now_iso(),
                             }
@@ -971,9 +970,6 @@ def process_video_with_ai(video_id: str):
                 print(f"[PROCESS] Video path: {video_path}")
                 print(f"[PROCESS] Video exists: {video_path.exists()}")
 
-                # Create output directories
-                (upload_root / "annotated_videos").mkdir(parents=True, exist_ok=True)
-
                 if not video_path.exists():
                     raise FileNotFoundError(
                         f"Source video not found at: {video_path}"
@@ -1013,40 +1009,6 @@ def process_video_with_ai(video_id: str):
 
                 print(f"[PROCESS] Processing complete: {result}")
 
-                # Update video record with results
-                # Build paths from result - paths from processor already include 'uploads/' prefix
-                # So we just need to add leading '/' if not present
-                def normalize_path(path: str) -> str:
-                    """Ensure path starts with / but doesn't have double /uploads/"""
-                    if not path:
-                        return path
-                    # Remove any leading slashes
-                    path = path.lstrip("/")
-                    # Add single leading slash
-                    return f"/{path}"
-
-                annotated_video_url = normalize_path(
-                    result.get(
-                        "annotated_video_path",
-                        f"uploads/annotated_videos/{video_id}_annotated.mp4",
-                    )
-                )
-                # frames_directory = normalize_path(
-                #     result.get(
-                #         "frames_directory",
-                #         (
-                #             f"uploads/frames/route_{route_id}/{video_id}"
-                #             if route_id
-                #             else f"uploads/frames/{video_id}"
-                #         ),
-                #     )
-                # )
-                # frame_metadata_url = normalize_path(
-                #     result.get(
-                #         "frame_metadata_path",
-                #         f"uploads/metadata/{video_id}_frame_metadata.json",
-                #     )
-                # )
                 # Set video to asset_linking phase first (before completed)
                 mongo_db.videos.update_one(
                     {"_id": ObjectId(video_id)},
@@ -1054,9 +1016,6 @@ def process_video_with_ai(video_id: str):
                         "$set": {
                             "status": "asset_linking",
                             "progress": 100,
-                            "annotated_video_url": annotated_video_url,
-                            # "frames_directory": frames_directory,
-                            # "frame_metadata_url": frame_metadata_url,
                             "total_detections": result.get("total_detections", 0),
                             "detections_summary": result.get("detections_summary", {}),
                             "processed_frames": result.get("processed_frames", 0),
@@ -1379,17 +1338,7 @@ def get_video_frame(video_id: str):
     if not video:
         return jsonify({"error": "Video not found"}), 404
 
-    # Check if we should use annotated video
-    use_annotated = request.args.get("annotated", "false").lower() == "true"
-
-    # Get the appropriate video URL
-    if use_annotated:
-        video_url = video.get("annotated_video_url")
-        if not video_url:
-            # Fall back to raw video if annotated not available
-            video_url = video.get("storage_url")
-    else:
-        video_url = video.get("storage_url")
+    video_url = video.get("storage_url")
 
     if not video_url:
         return jsonify({"error": "Video file not uploaded yet"}), 400

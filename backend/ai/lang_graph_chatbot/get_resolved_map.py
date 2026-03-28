@@ -1,23 +1,5 @@
-from pymongo import MongoClient
-import os
+from db import get_db
 
-
-MONGO_URI = os.environ.get("MONGO_URI", "mongodb://localhost:27017")
-DB_NAME = os.environ.get("DB_NAME", "roadrunner")
-
-_client = None
-
-def get_db():
-    """Get MongoDB database connection"""
-    global _client
-    if _client is None:
-        _client = MongoClient(
-            MONGO_URI,
-            uuidRepresentation="standard",
-            maxPoolSize=50,
-            serverSelectionTimeoutMS=5000,
-        )
-    return _client[DB_NAME]
 
 def get_resolved_map(user_id: str | None = None):
     """Get resolved map from database for display names"""

@@ -10,7 +10,6 @@ from typing import Dict, List, Tuple, Optional
 import numpy as np
 from datetime import datetime
 from bson import ObjectId
-import subprocess
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from services.LatLongEstimator import LatLongEstimator
 from services.ZoneMapper import ZoneMapper
@@ -55,7 +54,6 @@ class LocalVideoProcessor:
         # Confidence threshold
         self.confidence_threshold = float(os.getenv("CONFIDENCE_THRESHOLD", "0.25"))
 
-        self.has_gpu = self._check_gpu_availability()
         self.chunk_size = int(self.config.get("chunk_size", "500"))
 
         self.tracker = DeepSort(
@@ -77,7 +75,6 @@ class LocalVideoProcessor:
         print(f"[LOCAL] Frame interval: {self.frame_interval}")
         print(f"[LOCAL] Max concurrency: {self.max_concurrency}")
         print(f"[LOCAL] Confidence threshold: {self.confidence_threshold}")
-        print(f"[LOCAL] GPU Available: {self.has_gpu}")
 
     def _load_model(self) -> YOLO:
         """
@@ -99,24 +96,6 @@ class LocalVideoProcessor:
         except Exception as e:
             raise RuntimeError(f"Failed to load YOLO model: {e}")
     
-    def _check_gpu_availability(self) -> bool:
-        """Checks if an NVIDIA GPU is present and accessible via drivers."""
-        try:
-            # nvidia-smi returns 0 if GPU is working, non-zero if error/missing
-            code = subprocess.check_call(
-                ["nvidia-smi"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-            )
-
-            if code == 0:
-                print("[LOCAL] Hardware Acceleration: ENABLED (NVIDIA GPU detected)")
-                return True
-            else:
-                print("[LOCAL] Hardware Acceleration: DISABLED (Falling back to CPU)")
-                return False
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            print("[LOCAL] Hardware Acceleration: DISABLED (Falling back to CPU)")
-            return False
-
     def _load_label_map(self, db) -> Dict[str, Dict[str, str]]:
         """
         Load the system label map from MongoDB.
@@ -185,62 +164,6 @@ class LocalVideoProcessor:
         )
         return {}
 
-    def get_ffmpeg_command(
-        self, width: int, height: int, fps: int, output_path: Path
-    ) -> List[str]:
-        """
-        Generates the optimal FFmpeg command for the current hardware.
-        """
-        cmd = [
-            "ffmpeg",
-            "-y",
-            "-f",
-            "rawvideo",
-            "-vcodec",
-            "rawvideo",
-            "-s",
-            f"{width}x{height}",
-            "-pix_fmt",
-            "bgr24",
-            "-r",
-            str(fps),
-            "-i",
-            "-",
-        ]
-
-        if self.has_gpu:
-            cmd.extend(
-                [
-                    "-c:v",
-                    "h264_nvenc",
-                    "-preset",
-                    "p2",
-                    "-tune",
-                    "ull",
-                    "-rc",
-                    "vbr",
-                    "-cq",
-                    "24",
-                ]
-            )
-        else:
-            # --- CPU (x264) FALLBACK ---
-            cmd.extend(
-                [
-                    "-c:v",
-                    "libx264",
-                    "-preset",
-                    "ultrafast",
-                    "-crf",
-                    "25",
-                    "-threads",
-                    "0",
-                ]
-            )
-
-        cmd.extend(["-pix_fmt", "yuv420p", str(output_path)])
-        return cmd
-
     def process_video(
         self,
         video_path: Path,
@@ -253,12 +176,12 @@ class LocalVideoProcessor:
         progress_callback: callable = None,
     ) -> Dict:
         """
-        Process video with SageMaker endpoint using chunked two-phase architecture.
+        Process video with a local model using chunked two-phase architecture.
 
         Processes video in chunks of ~500 frames to minimize memory usage while
         maximizing inference parallelism. Each chunk:
         1. Phase 1: Read frames and submit all inference requests in parallel
-        2. Phase 2: Write all frames (annotated + original) to FFmpeg in order
+        2. Phase 2: Write all frames (annotated + original) to FFmpeg in order (No longer done since we draw annotation at runtime but storing detections in DB)
 
         Args:
             video_path: Path to input video
@@ -281,11 +204,6 @@ class LocalVideoProcessor:
         # Chunk size for processing (configurable via environment)
         chunk_size = self.chunk_size
 
-        # Create output directories - organize by route_id if available, otherwise video_id
-        # frames_identifier = f"route_{route_id}" if route_id is not None else video_id
-        # frames_dir = output_dir / "frames" / frames_identifier / video_id
-        # frames_dir.mkdir(parents=True, exist_ok=True)
-
         # Open video
         cap = cv2.VideoCapture(str(video_path))
         if not cap.isOpened():
@@ -303,28 +221,6 @@ class LocalVideoProcessor:
         )
         print(f"[LOCAL] Using chunk size: {chunk_size}")
 
-        # Setup video writer for annotated output - save in annotated_videos folder
-        annotated_videos_dir = output_dir / "annotated_videos"
-        annotated_videos_dir.mkdir(parents=True, exist_ok=True)
-        output_video_path = annotated_videos_dir / f"{video_id}_annotated.mp4"
-
-        # FFmpeg command
-        ffmpeg_cmd = self.get_ffmpeg_command(width, height, fps, output_video_path)
-        print(ffmpeg_cmd)
-
-        # Start FFmpeg process
-        try:
-            ffmpeg_process = subprocess.Popen(
-                ffmpeg_cmd,
-                stdin=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,  # Discard stderr to prevent deadlock
-            )
-            if not ffmpeg_process.stdin:
-                raise Exception("ffmpeg input stream not found")
-        except Exception as e:
-            print(f"[LOCAL] Error starting FFmpeg: {e}")
-            raise
-        
         gpx_data = {}
         print(f"[LOCAL] GPX path: {gpx_path}")
         if gpx_path:
@@ -387,31 +283,18 @@ class LocalVideoProcessor:
                             single_frame_results = future.result()
                         except Exception as e:
                             print(f"[LOCAL] Error in inference: {e}")
-                            frame_num, frame, timestamp = chunk_frames[chunk_idx]
-                            single_frame_results = (
-                                None,
-                                chunk_frames[chunk_idx][1],
-                                [],
-                            )
+                            frame_num = chunk_frames[chunk_idx][0]
+                            single_frame_results = (frame_num, [])
                         inference_results[chunk_idx] = single_frame_results
 
-                    # ========== PHASE 2: Write all chunk frames to FFmpeg ==========
+                    # ========== PHASE 2: Process inference results ==========
                     for chunk_idx, (frame_num, frame, timestamp) in enumerate(
                         chunk_frames
                     ):
                         if chunk_idx in inference_results:
-                            # This is an inference frame - draw annotations
-                            _, annotated_frame, detections = inference_results[
-                                chunk_idx
-                            ]
-                            # annotated_frame = self.draw_detections(frame.copy(), detections)
+                            _, detections = inference_results[chunk_idx]
 
-                            # # Store frame metadata
-                            # frame_doc = {
-                            #     "frame_number": frame_num,
-                            #     "timestamp": timestamp,
-                            #     "detections": detections
-                            # }
+                            # Store frame metadata
                             frame_metadata.append(
                                 {
                                     "frame_num": frame_num,
@@ -525,21 +408,9 @@ class LocalVideoProcessor:
                                 except Exception as e:
                                     print(f"[LOCAL] Warning: Failed to store frame in MongoDB: {e}")
 
-                            # Write annotated frame to output video
-                            try:
-                                ffmpeg_process.stdin.write(annotated_frame.tobytes())
-                            except Exception as e:
-                                print(f"[LOCAL] Error writing frame to FFmpeg: {e}")
-
                             # Store detections
                             detections_list.extend(detections)
                             processed_count += 1
-                        else:
-                            # Non-inference frame - write original
-                            try:
-                                ffmpeg_process.stdin.write(frame.tobytes())
-                            except Exception as e:
-                                print(f"[LOCAL] Error writing frame to FFmpeg: {e}")
 
                         # Progress callback
                         if progress_callback:
@@ -555,16 +426,10 @@ class LocalVideoProcessor:
             db.assets.insert_many(assets_detected)
         finally:
             cap.release()
-            if "ffmpeg_process" in locals():
-                ffmpeg_process.stdin.close()
-                ffmpeg_process.wait()
-                if ffmpeg_process.returncode != 0:
-                    print(f"[LOCAL] FFmpeg exited with error code: {ffmpeg_process.returncode}")
 
 
         print(f"[LOCAL] Processing complete!")
         print(f"[LOCAL] Processed {processed_count} inference frames")
-        print(f"[LOCAL] Annotated video: {output_video_path}")
 
         return {
             "video_id": video_id,
@@ -574,12 +439,7 @@ class LocalVideoProcessor:
             "duration": duration,
             "width": width,
             "height": height,
-            "annotated_video_path": str(
-                output_video_path.relative_to(output_dir.parent)
-            ),
             "assets_summary": summary,
-            # "frames_directory": str(frames_dir.relative_to(output_dir.parent)),
-            # "frame_metadata_path": str(metadata_path.relative_to(output_dir.parent)),
             "total_detections": len(detections_list),
             "detections_summary": self._summarize_detections(detections_list),
         }
@@ -644,94 +504,9 @@ class LocalVideoProcessor:
             traceback.print_exc()
             return []
 
-
-    def draw_detections(self, frame: np.ndarray, detections: List[Dict]) -> np.ndarray:
-        """
-        Draw detection bounding boxes and labels on frame (YOLO format).
-
-        Args:
-            frame: Video frame
-            detections: List of detections with box format (accepts both box and bbox)
-
-        Returns:
-            Annotated frame
-        """
-        # Color map for different classes
-        class_colors = {}
-        default_colors = [
-            (0, 255, 0),  # Green
-            (255, 0, 0),  # Blue
-            (0, 0, 255),  # Red
-            (255, 255, 0),  # Cyan
-            (255, 0, 255),  # Magenta
-            (0, 255, 255),  # Yellow
-        ]
-
-        for detection in detections:
-            # Accept both box and bbox formats
-            box = detection.get("box") or detection.get("bbox", [])
-            class_name = detection.get("class_name", "unknown")
-            confidence = detection.get("confidence", 0.0)
-
-            # Handle box as array [x1, y1, x2, y2] or dict {x1, y1, x2, y2}
-            if isinstance(box, list) and len(box) == 4:
-                x1, y1, x2, y2 = int(box[0]), int(box[1]), int(box[2]), int(box[3])
-            elif isinstance(box, dict):
-                x1 = int(box.get("x1", 0))
-                y1 = int(box.get("y1", 0))
-                x2 = int(box.get("x2", 0))
-                y2 = int(box.get("y2", 0))
-            else:
-                continue  # Skip invalid box format
-
-            # Assign color to class
-            if class_name not in class_colors:
-                color_idx = len(class_colors) % len(default_colors)
-                class_colors[class_name] = default_colors[color_idx]
-
-            color = class_colors[class_name]
-
-            # Draw bounding box (thicker for visibility)
-            cv2.rectangle(frame, (x1, y1), (x2, y2), color, 3)
-
-            # Draw label with background
-            label = f"{class_name}: {confidence:.2f}"
-            font = cv2.FONT_HERSHEY_SIMPLEX
-            font_scale = 0.7
-            thickness = 2
-
-            (label_w, label_h), baseline = cv2.getTextSize(
-                label, font, font_scale, thickness
-            )
-
-            # Label background
-            cv2.rectangle(
-                frame,
-                (x1, y1 - label_h - baseline - 10),
-                (x1 + label_w + 10, y1),
-                color,
-                -1,
-            )
-
-            # Label text
-            cv2.putText(
-                frame,
-                label,
-                (x1 + 5, y1 - baseline - 5),
-                font,
-                font_scale,
-                (255, 255, 255),
-                thickness,
-            )
-
-        return frame
-
     def _process_single_frame(self, frame, width, height, frame_num):
         detections = self._run_local_inference(frame, width, height)
-
-        annotated_frame = self.draw_detections(frame, detections)
-
-        return (frame_num, annotated_frame, detections)
+        return (frame_num, detections)
 
     def _summarize_detections(self, detections: List[Dict]) -> Dict:
         """Summarize detections by class (YOLO format)."""
@@ -789,46 +564,3 @@ class LocalVideoProcessor:
                 }
             )
         return detections
-
-    def check_endpoint_health(self) -> Tuple[bool, str]:
-        """
-        Check if the SageMaker endpoint is healthy and in service.
-
-        Returns:
-            Tuple of (is_healthy, message)
-        """
-        if not self.endpoint_name or self.endpoint_name.lower() == "mock":
-            msg = f"Endpoint configuration is '{self.endpoint_name}' (Mock mode)"
-            print(f"[LOCAL] Health check failed: {msg}")
-            return False, msg
-
-        if not self.sagemaker_runtime:
-            msg = "AWS credentials not found or invalid (boto3 client failed to initialize)"
-            print(f"[LOCAL] Health check failed: {msg}")
-            return False, msg
-
-        try:
-            # We need a sagemaker client (not runtime) to check status
-            sm_client = boto3.client(
-                "sagemaker",
-                region_name=self.region,
-                aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
-                aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
-            )
-
-            response = sm_client.describe_endpoint(EndpointName=self.endpoint_name)
-            status = response["EndpointStatus"]
-
-            if status == "InService":
-                msg = f"SageMaker endpoint '{self.endpoint_name}' is InService"
-                print(f"[LOCAL] Health check passed: {msg}")
-                return True, msg
-            else:
-                msg = f"SageMaker endpoint '{self.endpoint_name}' status is '{status}' (expected 'InService')"
-                print(f"[LOCAL] Health check failed: {msg}")
-                return False, msg
-
-        except Exception as e:
-            msg = f"AWS Error: {str(e)}"
-            print(f"[LOCAL] Health check error: {msg}")
-            return False, msg
