@@ -1,13 +1,15 @@
 from services.local_processor import LocalVideoProcessor
 import pymongo
 import os
+import shutil
+import threading
 import time
 from datetime import datetime
 import boto3
 import base64
 from pathlib import Path
 from werkzeug.utils import secure_filename
-from flask import Blueprint, jsonify, request, Response, send_file
+from flask import Blueprint, jsonify, request, Response, send_file, current_app
 from bson import ObjectId, json_util
 from pymongo import DESCENDING
 import cv2
@@ -16,7 +18,7 @@ from PIL import Image
 from flask_jwt_extended import jwt_required
 from flasgger import swag_from
 
-from db import get_db
+from db import get_db, get_client
 from utils.ids import get_now_iso
 from utils.rbac import role_required
 from utils.extract_gpx import extract_gpx
@@ -27,6 +29,116 @@ from config import Config
 
 config = Config()
 aws_session = boto3.Session(region_name=config.AWS_REGION)
+
+# ── Anonymization helpers ─────────────────────────────────────────────────────
+
+_anonymization_service = None
+_anonymization_lock = threading.Lock()
+
+
+def _get_anonymizer():
+    global _anonymization_service
+    if _anonymization_service is None:
+        with _anonymization_lock:
+            if _anonymization_service is None:
+                try:
+                    from services.anonymization_service import AnonymizationService
+                    _anonymization_service = AnonymizationService()
+                except Exception as e:
+                    print(f"[ANON] Failed to initialize AnonymizationService: {e}")
+                    return None
+    return _anonymization_service
+
+
+def _run_local_anonymization(app, video_id: str, save_path: Path, upload_root: Path):
+    """
+    Background task for upload_direct:
+    Anonymizes the video, replaces the original with the anonymized copy,
+    then sets status → 'uploaded'.
+    """
+    with app.app_context():
+        db = get_client(app)[app.config["MONGO_DB_NAME"]]
+
+        last_pct = [-1]  # mutable cell so the closure can update it
+
+        def _progress(pct: int, _msg: str):
+            if pct != last_pct[0]:
+                last_pct[0] = pct
+                db.videos.update_one(
+                    {"_id": ObjectId(video_id)},
+                    {"$set": {"progress": pct, "updated_at": get_now_iso()}},
+                )
+
+        try:
+            svc = _get_anonymizer()
+            if svc is None:
+                raise RuntimeError("AnonymizationService unavailable")
+            anon_path = svc.process_video(
+                video_path=save_path,
+                upload_dir=upload_root,
+                upload_type="local",
+                progress_callback=_progress,
+            )
+            # Replace original with anonymized file (storage_url stays the same)
+            shutil.move(str(anon_path), str(save_path))
+            print(f"[ANON] local anonymization done for video {video_id}")
+        except Exception as e:
+            print(f"[ANON] local anonymization failed for video {video_id}: {e}")
+            # Don't block the user — fall through to mark uploaded anyway
+        finally:
+            db.videos.find_one_and_update(
+                {"_id": ObjectId(video_id)},
+                {"$set": {"status": "uploaded", "progress": 100, "updated_at": get_now_iso()}},
+            )
+
+
+def _run_library_anonymization(app, video_id: str, full_path: Path, upload_root: Path):
+    """
+    Background task for upload_library_video:
+    Anonymizes the video into anonymized/video_library/, updates storage_url,
+    then sets status → 'uploaded'. Never deletes the original.
+    """
+    with app.app_context():
+        db = get_client(app)[app.config["MONGO_DB_NAME"]]
+
+        last_pct = [-1]
+
+        def _progress(pct: int, _msg: str):
+            if pct != last_pct[0]:
+                last_pct[0] = pct
+                db.videos.update_one(
+                    {"_id": ObjectId(video_id)},
+                    {"$set": {"progress": pct, "updated_at": get_now_iso()}},
+                )
+
+        try:
+            svc = _get_anonymizer()
+            if svc is None:
+                raise RuntimeError("AnonymizationService unavailable")
+            anon_path = svc.process_video(
+                video_path=full_path,
+                upload_dir=upload_root,
+                upload_type="video_library",
+                progress_callback=_progress,
+            )
+            rel = anon_path.relative_to(upload_root)
+            new_storage_url = f"/uploads/{rel}"
+            db.videos.find_one_and_update(
+                {"_id": ObjectId(video_id)},
+                {"$set": {
+                    "status": "uploaded",
+                    "storage_url": new_storage_url,
+                    "progress": 100,
+                    "updated_at": get_now_iso(),
+                }},
+            )
+            print(f"[ANON] library anonymization done for video {video_id}, url={new_storage_url}")
+        except Exception as e:
+            print(f"[ANON] library anonymization failed for video {video_id}: {e}")
+            db.videos.find_one_and_update(
+                {"_id": ObjectId(video_id)},
+                {"$set": {"status": "uploaded", "progress": 100, "updated_at": get_now_iso()}},
+            )
 
 
 @videos_bp.get("/")
@@ -467,8 +579,8 @@ def upload_direct():
             "storage_url": storage_url,
             "gpx_file_url": gpx_file_url,
             "size_bytes": file_size,
-            "status": "uploaded" if gpx_created else "failed",
-            "progress": 100,
+            "status": "anonymizing" if gpx_created else "failed",
+            "progress": 0,
             "updated_at": get_now_iso(),
         }
         if not gpx_created:
@@ -480,6 +592,16 @@ def upload_direct():
             {"_id": ObjectId(video_id)},
             {"$set": update_fields},
         )
+
+        if gpx_created:
+            _app = current_app._get_current_object()
+            threading.Thread(
+                target=_run_local_anonymization,
+                args=(_app, video_id, save_path, upload_root),
+                daemon=True,
+                name=f"anon-local-{video_id}",
+            ).start()
+
         return (
             jsonify(
                 {
@@ -517,8 +639,8 @@ def upload_direct():
         "storage_url": storage_url,
         "gpx_file_url": gpx_file_url,
         "size_bytes": file_size,
-        "status": "uploaded" if gpx_created else "failed",
-        "progress": 100,
+        "status": "anonymizing" if gpx_created else "failed",
+        "progress": 0,
         "created_at": get_now_iso(),
         "updated_at": get_now_iso(),
     }
@@ -526,12 +648,23 @@ def upload_direct():
         doc["error"] = "No GPS data found. Upload a GPX file to enable processing."
 
     res = db.videos.insert_one(doc)
+    new_video_id = str(res.inserted_id)
+
+    if gpx_created:
+        _app = current_app._get_current_object()
+        threading.Thread(
+            target=_run_local_anonymization,
+            args=(_app, new_video_id, save_path, upload_root),
+            daemon=True,
+            name=f"anon-local-{new_video_id}",
+        ).start()
+
     return (
         jsonify(
             {
                 "item": {
                     **doc,
-                    "_id": str(res.inserted_id),
+                    "_id": new_video_id,
                     "survey_id": survey_id,
                     "gpx_created": gpx_created,
                 }
@@ -1655,8 +1788,8 @@ def upload_library_video():
         "gpx_file_url": gpx_file_url,
         "thumbnail_url": thumbnail_url,
         "size_bytes": file_size,
-        "status": "uploaded",
-        "progress": 100,
+        "status": "anonymizing",
+        "progress": 0,
         "updated_at": get_now_iso(),
         "survey_display_id": survey_display_id,
     }
@@ -1699,6 +1832,13 @@ def upload_library_video():
         res = db.videos.find_one_and_update(
             {"_id": ObjectId(video_id)}, {"$set": update_doc}
         )
+        _app = current_app._get_current_object()
+        threading.Thread(
+            target=_run_library_anonymization,
+            args=(_app, video_id, full_path, upload_root),
+            daemon=True,
+            name=f"anon-library-{video_id}",
+        ).start()
         return (
             jsonify(
                 {
@@ -1720,13 +1860,21 @@ def upload_library_video():
     }
 
     res = db.videos.insert_one(doc)
+    new_video_id = str(res.inserted_id)
+    _app = current_app._get_current_object()
+    threading.Thread(
+        target=_run_library_anonymization,
+        args=(_app, new_video_id, full_path, upload_root),
+        daemon=True,
+        name=f"anon-library-{new_video_id}",
+    ).start()
     return (
         jsonify(
             {
-                "id": str(res.inserted_id),
+                "id": new_video_id,
                 "item": {
                     **doc,
-                    "_id": str(res.inserted_id),
+                    "_id": new_video_id,
                     "survey_id": str(survey_id),
                 },
                 "gpx_created": gpx_created,

@@ -132,7 +132,7 @@ export default function SurveyUpload() {
   const totalUploaded = videos.filter(v => v.status === "uploaded" || v.status === "processing" || v.status === "completed").length;
   const totalProcessed = videos.filter(v => v.status === "completed").length;
   const inQueue = videos.filter(v => v.status === "queue").length;
-  const processing = videos.filter(v => v.status === "uploading" || v.status === "processing" || v.status === "asset_linking").length;
+  const processing = videos.filter(v => v.status === "uploading" || v.status === "anonymizing" || v.status === "processing" || v.status === "asset_linking").length;
 
   // Track uploads in progress for showing status
   const [uploadingItems, setUploadingItems] = useState<string[]>([]);
@@ -249,6 +249,8 @@ export default function SurveyUpload() {
         return <Clock className="h-4 w-4 text-muted-foreground" />;
       case "uploading":
         return <Loader2 className="h-4 w-4 text-purple-500 animate-spin" />;
+      case "anonymizing":
+        return <Loader2 className="h-4 w-4 text-pink-500 animate-spin" />;
       case "processing":
         return <Loader2 className="h-4 w-4 text-blue-500 animate-spin" />;
       case "asset_linking":
@@ -267,6 +269,7 @@ export default function SurveyUpload() {
     const labels: Record<string, string> = {
       queue: "In Queue for Processing",
       uploading: "Uploading",
+      anonymizing: "Anonymizing Video",
       uploaded: "Uploaded",
       processing: "Processing with AI",
       asset_linking: "Linking Assets",
@@ -633,8 +636,8 @@ export default function SurveyUpload() {
                             <div className="relative group">
                               {video.thumbnailUrl ? (
                                 <div
-                                  className="w-20 h-14 rounded-lg overflow-hidden shadow-sm border border-border bg-muted cursor-pointer hover:ring-2 hover:ring-primary transition-all"
-                                  onClick={() => openVideoPlayer(video)}
+                                  className={`w-20 h-14 rounded-lg overflow-hidden shadow-sm border border-border bg-muted transition-all ${video.status === "completed" ? "cursor-pointer hover:ring-2 hover:ring-primary" : "cursor-default"}`}
+                                  onClick={() => video.status === "completed" && openVideoPlayer(video)}
                                 >
                                   <img
                                     src={`${API_BASE}${video.thumbnailUrl}`}
@@ -647,8 +650,8 @@ export default function SurveyUpload() {
                                 </div>
                               ) : (
                                 <div
-                                  className="w-20 h-14 rounded-lg overflow-hidden shadow-sm border border-border bg-gradient-to-br from-gray-100 to-gray-200 dark:from-gray-800 dark:to-gray-900 flex items-center justify-center cursor-pointer hover:ring-2 hover:ring-primary transition-all"
-                                  onClick={() => openVideoPlayer(video)}
+                                  className={`w-20 h-14 rounded-lg overflow-hidden shadow-sm border border-border bg-gradient-to-br from-gray-100 to-gray-200 dark:from-gray-800 dark:to-gray-900 flex items-center justify-center transition-all ${video.status === "completed" ? "cursor-pointer hover:ring-2 hover:ring-primary" : "cursor-default"}`}
+                                  onClick={() => video.status === "completed" && openVideoPlayer(video)}
                                 >
                                   <Video className="h-6 w-6 text-gray-400" />
                                 </div>
@@ -727,6 +730,7 @@ export default function SurveyUpload() {
                                     "text-[10px] font-medium px-1.5 py-0.5",
                                     video.status === "completed" && "bg-green-100 dark:bg-green-950/30 text-green-700 dark:text-green-400",
                                     video.status === "processing" && "bg-blue-100 dark:bg-blue-950/30 text-blue-700 dark:text-blue-400",
+                                    video.status === "anonymizing" && "bg-pink-100 dark:bg-pink-950/30 text-pink-700 dark:text-pink-400",
                                     video.status === "asset_linking" && "bg-teal-100 dark:bg-teal-950/30 text-teal-700 dark:text-teal-400",
                                     video.status === "uploading" && "bg-purple-100 dark:bg-purple-950/30 text-purple-700 dark:text-purple-400",
                                     video.status === "uploaded" && "bg-amber-100 dark:bg-amber-950/30 text-amber-700 dark:text-amber-400",
@@ -738,8 +742,8 @@ export default function SurveyUpload() {
                                   {getStatusLabel(video.status)}
                                 </Badge>
                               </div>
-                              {/* Progress bar for uploading/processing/asset_linking */}
-                              {(video.status === "uploading" || video.status === "processing" || video.status === "asset_linking") && (
+                              {/* Progress bar for uploading/anonymizing/processing/asset_linking */}
+                              {(video.status === "uploading" || video.status === "anonymizing" || video.status === "processing" || video.status === "asset_linking") && (
                                 <div className="flex items-center gap-2">
                                   <Progress value={video.progress} className="h-1.5 flex-1" />
                                   <span className="text-[10px] font-medium text-primary dark:text-muted-secondary whitespace-nowrap">{video.progress}%</span>
@@ -851,7 +855,7 @@ export default function SurveyUpload() {
                                 setDeleteDialogOpen(true);
                               }}
                               className="h-7 w-7 p-0 text-red-400 hover:text-red-600 hover:bg-red-50"
-                              disabled={video.status === "uploading" || video.status === "processing" || isDeleting || !video.surveyId}
+                              disabled={video.status === "uploading" || video.status === "anonymizing" || video.status === "processing" || isDeleting || !video.surveyId}
                             >
                               <Trash2 className="h-3.5 w-3.5" />
                             </Button>}

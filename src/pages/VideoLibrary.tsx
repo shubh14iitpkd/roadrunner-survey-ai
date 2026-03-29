@@ -148,6 +148,7 @@ export default function VideoLibrary() {
   }, []);
 
   const filteredVideos = videos.filter((video) => {
+    if (video.status !== "completed") return false;
     const matchesSearch = video.surveyDisplayId.toLowerCase().includes(searchQuery.toLowerCase()) ||
       video.roadName.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesRoute = selectedRoute === "all" || video.routeId.toString() === selectedRoute;
