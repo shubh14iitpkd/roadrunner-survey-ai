@@ -278,6 +278,7 @@ export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                                 toast.error(`No GPS data found in ${file.name}. Upload a GPX file to enable processing.`);
                             } else {
                                 setVideos(prev => prev.map(v => v.id === id ? { ...v, status: "anonymizing" as VideoStatus, progress: 0, gpxFile: selectedGpxFile?.name || "extracted", url: videoUrl } : v));
+                                toast.success(`${file.name} uploaded successfully`);
                             }
                             resolve();
                         } else {
@@ -496,8 +497,6 @@ export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             Promise.all(uploadPromises).catch(err => {
                 console.error("Background upload batch error:", err);
             });
-
-            toast.success(`${files.length} video(s) uploaded successfully`);
 
             // We set isUploading to false immediately so the UI is unblocked
             // The individual videos will show "uploading" status

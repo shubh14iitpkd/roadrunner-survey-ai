@@ -356,7 +356,8 @@ def delete_survey(survey_id: str):
     preserved_files = []
     reset_assets = 0       # demo video: good-marked assets reverted to damaged
     deleted_assets = 0     # real video: assets hard-deleted
-    
+    del_frames = 0
+
     for video in videos:
         video_id = video["_id"]
         storage_url = video.get("storage_url", "")
@@ -369,7 +370,9 @@ def delete_survey(survey_id: str):
 
         # Real video: delete all associated assets from DB first
         del_res = db.assets.delete_many({"survey_id": ObjectId(survey_id)})
+        del_f = db.frames.delete_many({"survey_id": ObjectId(survey_id)})
         deleted_assets += del_res.deleted_count
+        del_frames += del_f.deleted_count
 
         # Check if video is from library (preserve library files)
 
@@ -491,6 +494,7 @@ def delete_survey(survey_id: str):
         "preserved_library_files": len(preserved_files),
         "reset_good_assets": reset_assets,
         "deleted_assets": deleted_assets,
+        "deleted_frames": del_frames,
         "master_assets_deleted": master_assets_deleted,
         "master_assets_updated": master_assets_updated,
     })

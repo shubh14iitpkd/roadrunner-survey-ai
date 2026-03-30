@@ -1,4 +1,5 @@
-import { useState, useMemo, useEffect, useCallback } from "react";
+import { useState, useMemo, useEffect, useCallback, useRef } from "react";
+import { createPortal } from "react-dom";
 import { useSearchParams, Link } from "react-router-dom";
 import LibraryMapView from "@/components/asset-library/LibraryMapView";
 import FrameComparisonPopup from "@/components/FrameComparisonPopup";
@@ -10,6 +11,7 @@ import {
 import { api } from "@/lib/api";
 import { exportToExcel } from "@/lib/excelExport";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Download, AlertTriangle, CheckCircle2, Loader2, Pencil } from "lucide-react";
 import {
   Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator,
@@ -26,22 +28,72 @@ import AssetTable, { type ColumnDef } from "@/components/asset-library/AssetTabl
 import { useAuth } from "@/contexts/AuthContext";
 import capitalize from "@/helpers/capitalize";
 
-// Dummy issue types by category (until DB has real defect data)
-const DUMMY_ISSUES: Record<string, string[]> = {
-  "DIRECTIONAL SIGNAGE": ["Faded text/symbol", "Sign face damaged", "Post tilted >15°"],
-  "ITS": ["Device offline", "Lens obscured", "Housing damaged"],
-  "OTHER INFRASTRUCTURE ASSETS": ["Guardrail deformed", "Surface cracking >5mm", "Corrosion >30%"],
-  "ROADWAY LIGHTING": ["Lamp not operational", "Pole leaning >5°", "Cable exposed"],
-  "STRUCTURES": ["Concrete spalling", "Expansion joint damaged", "Crack width >2mm"],
-  "BEAUTIFICATION": ["Tree dead/dying", "Planter damaged", "Fence broken"],
-};
-
 // function capitalizeFirstWord(str) {
 //   if (!str) return "";
 //   const [first, ...rest] = str.split(" ");
 //   if (rest.length === 0) return capitalize(first);
 //   return first.charAt(0).toUpperCase() + first.slice(1) + " " + rest.join(" ");
 // }
+
+// ── Custom tooltip cell for Issue column ──────────────────
+const ISSUE_TRUNCATE_LEN = 18;
+
+function IssueCell({ issue }: { issue: string }) {
+  const [rect, setRect] = useState<DOMRect | null>(null);
+  const badgeRef = useRef<HTMLSpanElement>(null);
+  const isTruncated = issue.length > ISSUE_TRUNCATE_LEN;
+  const display = isTruncated ? issue.slice(0, ISSUE_TRUNCATE_LEN) + "…" : issue;
+
+  const handleMouseEnter = () => {
+    if (isTruncated && badgeRef.current) {
+      setRect(badgeRef.current.getBoundingClientRect());
+    }
+  };
+  const handleMouseLeave = () => setRect(null);
+
+  // Tooltip width for centering calculation
+  const TOOLTIP_W = 200;
+
+  return (
+    <div className="inline-flex items-center justify-center" onMouseEnter={handleMouseEnter} onMouseLeave={handleMouseLeave}>
+      <span
+        ref={badgeRef}
+        className="inline-flex items-center rounded-md bg-destructive/10 text-destructive px-1.5 py-0.5 text-[9px] font-semibold leading-tight cursor-default"
+      >
+        {display}
+      </span>
+      {rect && isTruncated && createPortal(
+        <div
+          className="pointer-events-none"
+          style={{
+            position: "fixed",
+            top: rect.top - 8,
+            left: rect.left + rect.width / 2,
+            transform: "translate(-50%, -100%)",
+            zIndex: 99999,
+          }}
+        >
+          {/* Tooltip box */}
+          <div className="relative bg-popover border border-border rounded-md shadow-xl px-3 py-2 text-[11px] font-medium text-popover-foreground break-words"
+            style={{ width: TOOLTIP_W, maxWidth: TOOLTIP_W }}
+          >
+            {issue}
+          </div>
+          {/* Downward caret centered on badge */}
+          <span
+            className="absolute w-3 h-3 bg-popover border-r border-b border-border"
+            style={{
+              bottom: "-7px",
+              left: "50%",
+              transform: "translateX(-50%) rotate(45deg)",
+            }}
+          />
+        </div>,
+        document.body
+      )}
+    </div>
+  );
+}
 
 // ── Table columns for Defect Library ──────────────────────
 const BASE_DEFECT_COLUMNS: ColumnDef[] = [
@@ -55,7 +107,7 @@ const BASE_DEFECT_COLUMNS: ColumnDef[] = [
   { key: "zone", header: "Zone", className: "text-[11px] py-1.5 px-1.5 text-center capitalize", render: (a) => a.zone, getValue: (a) => a.zone },
   { key: "survey", header: "Survey", className: "text-[11px] py-1.5 px-1.5 whitespace-nowrap text-center", render: (a) => a.lastSurveyDate, getValue: (a) => a.lastSurveyDate },
   { key: "issue", header: "Issue", className: "py-1.5 px-1.5 min-w-[100px] text-center", getValue: (a) => a.issue, render: (a) => (
-    <span className="inline-flex items-center rounded-md bg-destructive/10 text-destructive px-1.5 py-0.5 text-[9px] font-semibold leading-tight line-clamp-2">{a.issue}</span>
+    <IssueCell issue={a.issue} />
   )},
 ];
 
@@ -771,14 +823,20 @@ export default function DefectLibrary() {
             </DialogDescription>
           </DialogHeader>
           <div className="flex flex-col gap-3 pt-1">
-            <Input
-              value={editIssueValue}
-              onChange={(e) => setEditIssueValue(e.target.value)}
-              placeholder="Describe the issue…"
-              className="text-sm"
-              onKeyDown={(e) => e.key === "Enter" && handleSaveIssue()}
-              autoFocus
-            />
+            <div className="flex flex-col gap-1">
+              <Textarea
+                value={editIssueValue}
+                onChange={(e) => setEditIssueValue(e.target.value.slice(0, 100))}
+                placeholder="Describe the issue…"
+                className="text-sm resize-none"
+                maxLength={100}
+                rows={3}
+                autoFocus
+              />
+              <span className={cn("text-[10px] text-right tabular-nums", editIssueValue.length >= 100 ? "text-destructive" : "text-muted-foreground")}>
+                {editIssueValue.length}/100
+              </span>
+            </div>
             <div className="flex justify-end gap-2">
               <Button variant="outline" size="sm" onClick={() => setEditIssueAsset(null)}>
                 Cancel
