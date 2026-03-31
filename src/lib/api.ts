@@ -102,7 +102,7 @@ export const api = {
 		processWithAI: (video_id: string) =>
 			apiFetch(`/api/videos/${video_id}/process`, { method: "POST" }),
 		getMetadata: (video_id: string) => apiFetch(`/api/videos/${video_id}/metadata`),
-		getLibrary: (bucket: string, path: string | null) => apiFetch(`/api/videos/library?bucket=${bucket}&path=${path || ""}`),
+		getLibrary: (bucket?: string, path?: string | null) => apiFetch(`/api/videos/library?bucket=${bucket}&path=${path || ""}`),
 		postFromLibrary: (video_key: string, video_id: string, survey_id: string, route_id: string, thumb_path?: string) =>
 			apiFetch("/api/videos/library", { method: "POST", body: JSON.stringify({ video_key, video_id, survey_id, route_id, thumb_path }) }),
 		getFrameWithDetections: (video_id: string, timestamp?: number | string, frame_number?: number, width?: number, resize?: boolean) =>

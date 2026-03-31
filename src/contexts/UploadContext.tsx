@@ -411,8 +411,9 @@ export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             return id
         } catch (err) {
             console.error("Failed to upload from library:", err);
+        } finally {
+            setIsUploading(false);
         }
-        setIsUploading(false);
     }
 
     const uploadFiles = async (files: File[], routeId: string, surveyDate: string, surveyorName: string, selectedGpxFile: File | null) => {
