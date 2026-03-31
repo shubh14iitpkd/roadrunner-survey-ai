@@ -362,6 +362,9 @@ def delete_survey(survey_id: str):
         video_id = video["_id"]
         storage_url = video.get("storage_url", "")
         
+        # 2. Delete za J*bs <3
+        db.processing_queue.delete_many({"video_id": str(video_id)})  # Remove any pending/running jobs for this video
+
         # 3. Delete frames associated with this video
         db.frames.delete_many({"video_id": ObjectId(video_id)})
         

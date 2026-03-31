@@ -17,4 +17,10 @@ class Config:
 		self.AWS_REGION = os.getenv("AWS_REGION", "ap-south-1")
 		self.AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID", "")
 		self.AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY", "")
+		# ── Job queue concurrency limits ──────────────────────────────────────
+		# Set these env vars to control how many jobs of each type run in parallel.
+		# Default is 1 for all (single GPU / single machine).
+		self.MAX_CONCURRENT_ANONYMIZATION = int(os.getenv("MAX_CONCURRENT_ANONYMIZATION", "1"))
+		self.MAX_CONCURRENT_AI_PROCESSING = int(os.getenv("MAX_CONCURRENT_AI_PROCESSING", "1"))
+		self.MAX_CONCURRENT_ASSET_LINKING = int(os.getenv("MAX_CONCURRENT_ASSET_LINKING", "1"))
 

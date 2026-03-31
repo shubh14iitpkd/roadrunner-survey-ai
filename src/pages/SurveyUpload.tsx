@@ -228,6 +228,8 @@ export default function SurveyUpload() {
     switch (status) {
       case "queue":
         return <Clock className="h-4 w-4 text-muted-foreground" />;
+      case "queued":
+        return <Clock className="h-4 w-4 text-muted-foreground" />;
       case "uploading":
         return <Loader2 className="h-4 w-4 text-purple-500 animate-spin" />;
       case "anonymizing":
@@ -249,6 +251,7 @@ export default function SurveyUpload() {
   const getStatusLabel = (status: VideoStatus) => {
     const labels: Record<string, string> = {
       queue: "In Queue for Processing",
+      queued: "In Queue for Processing",
       uploading: "Uploading",
       anonymizing: "Anonymizing Video",
       uploaded: "Uploaded",
@@ -704,12 +707,12 @@ export default function SurveyUpload() {
                           {/* Status column */}
                           <div className="p-3 flex-1 flex justify-start">
                             <div className="flex flex-col gap-1 w-full">
-                              <div className="flex items-center gap-1.5">
+                              <div className="flex items-center gap-1.5 -ml-2">
                                 {getStatusIcon(video.status)}
                                 <Badge
                                   variant="secondary"
                                   className={cn(
-                                    "text-[10px] font-medium px-1.5 py-0.5",
+                                    "text-[10px] font-bold px-1.5 py-0.5 text-center",
                                     video.status === "completed" && "bg-green-100 dark:bg-green-950/30 text-green-700 dark:text-green-400",
                                     video.status === "processing" && "bg-blue-100 dark:bg-blue-950/30 text-blue-700 dark:text-blue-400",
                                     video.status === "anonymizing" && "bg-pink-100 dark:bg-pink-950/30 text-pink-700 dark:text-pink-400",
@@ -837,7 +840,7 @@ export default function SurveyUpload() {
                                 setDeleteDialogOpen(true);
                               }}
                               className="h-7 w-7 p-0 text-red-400 hover:text-red-600 hover:bg-red-50"
-                              disabled={video.status === "uploading" || video.status === "anonymizing" || video.status === "processing" || isDeleting || !video.surveyId}
+                              disabled={video.status === "uploading" || video.status === "anonymizing" || video.status === "processing" || video.status === "queue" || isDeleting || !video.surveyId}
                             >
                               <Trash2 className="h-3.5 w-3.5" />
                             </Button>}

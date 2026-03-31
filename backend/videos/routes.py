@@ -5,7 +5,6 @@ import shutil
 import threading
 import time
 from datetime import datetime
-import boto3
 import base64
 from pathlib import Path
 from werkzeug.utils import secure_filename
@@ -23,12 +22,12 @@ from utils.ids import get_now_iso
 from utils.rbac import role_required
 from utils.extract_gpx import extract_gpx
 from utils.is_demo_video import DEMO_VIDEOS
+from services.job_queue import job_queue
 
 videos_bp = Blueprint("videos", __name__)
 from config import Config
 
 config = Config()
-aws_session = boto3.Session(region_name=config.AWS_REGION)
 
 # ── Anonymization helpers ─────────────────────────────────────────────────────
 
@@ -58,6 +57,12 @@ def _run_local_anonymization(app, video_id: str, save_path: Path, upload_root: P
     """
     with app.app_context():
         db = get_client(app)[app.config["MONGO_DB_NAME"]]
+
+        # Mark as actively anonymizing now that this job has been picked up
+        db.videos.update_one(
+            {"_id": ObjectId(video_id)},
+            {"$set": {"status": "anonymizing", "updated_at": get_now_iso()}},
+        )
 
         last_pct = [-1]  # mutable cell so the closure can update it
 
@@ -101,6 +106,12 @@ def _run_library_anonymization(app, video_id: str, full_path: Path, upload_root:
     with app.app_context():
         db = get_client(app)[app.config["MONGO_DB_NAME"]]
 
+        # Mark as actively anonymizing now that this job has been picked up
+        db.videos.update_one(
+            {"_id": ObjectId(video_id)},
+            {"$set": {"status": "anonymizing", "updated_at": get_now_iso()}},
+        )
+
         last_pct = [-1]
 
         def _progress(pct: int, _msg: str):
@@ -138,6 +149,280 @@ def _run_library_anonymization(app, video_id: str, full_path: Path, upload_root:
             db.videos.find_one_and_update(
                 {"_id": ObjectId(video_id)},
                 {"$set": {"status": "uploaded", "progress": 100, "updated_at": get_now_iso()}},
+            )
+
+
+# ── Job queue handlers ────────────────────────────────────────────────────────
+# These are registered with job_queue in app.py and called by the queue worker.
+
+def _handle_anonymization_job(app, video_id: str, payload: dict):
+    """Queue handler: dispatch to local or library anonymization."""
+    upload_type = payload["upload_type"]
+    video_path = Path(payload["video_path"])
+    upload_root = Path(payload["upload_root"])
+    if upload_type == "local":
+        _run_local_anonymization(app, video_id, video_path, upload_root)
+    else:
+        _run_library_anonymization(app, video_id, video_path, upload_root)
+
+
+def _handle_ai_processing_job(app, video_id: str, payload: dict):
+    """Queue handler: dispatch to demo or real AI processing."""
+    if payload.get("is_demo", False):
+        _run_demo_ai_processing(app, video_id, payload)
+    else:
+        _run_real_ai_processing(app, video_id, payload)
+
+
+def _handle_asset_linking_job(app, video_id: str, payload: dict):
+    """Queue handler: run asset linking and mark video completed."""
+    _run_asset_linking(app, video_id, payload)
+
+
+def _run_real_ai_processing(app, video_id: str, payload: dict):
+    """
+    Extracted module-level version of the former process_in_background closure.
+    Runs YOLO inference, then enqueues an asset_linking job.
+    """
+    import traceback as _tb
+    from pymongo import MongoClient
+
+    storage_url = payload["storage_url"]
+    gpx_file_url = payload.get("gpx_file_url")
+    route_id = payload.get("route_id")
+    survey_id = payload.get("survey_id")
+    upload_root = Path(payload["upload_root"])
+
+    storage_filename = storage_url.lstrip("/uploads/").lstrip("/")
+    video_path = upload_root / storage_filename
+
+    with app.app_context():
+        mongo_client = MongoClient(app.config["MONGO_URI"])
+        mongo_db = mongo_client[app.config["MONGO_DB_NAME"]]
+
+        try:
+            mongo_db.videos.update_one(
+                {"_id": ObjectId(video_id)},
+                {"$set": {"status": "processing", "progress": 0, "updated_at": get_now_iso()}},
+            )
+
+            print(f"[PROCESS] Video path: {video_path}, exists: {video_path.exists()}")
+
+            if not video_path.exists():
+                raise FileNotFoundError(f"Source video not found at: {video_path}")
+
+            print(f"[PROCESS] Starting local processing for video {video_id}")
+
+            processor = LocalVideoProcessor()
+
+            def update_progress(progress: int, message: str):
+                mongo_db.videos.update_one(
+                    {"_id": ObjectId(video_id)},
+                    {"$set": {"progress": progress, "updated_at": get_now_iso()}},
+                )
+                print(f"[PROCESS] {message} ({progress}%)")
+
+            gpx_path = upload_root / gpx_file_url.lstrip("/uploads/") if gpx_file_url else None
+            result = processor.process_video(
+                video_path=video_path,
+                output_dir=upload_root,
+                video_id=video_id,
+                route_id=route_id,
+                survey_id=survey_id,
+                gpx_path=gpx_path,
+                db=mongo_db,
+                progress_callback=update_progress,
+            )
+
+            print(f"[PROCESS] YOLO complete: {result}")
+
+            mongo_db.videos.update_one(
+                {"_id": ObjectId(video_id)},
+                {
+                    "$set": {
+                        "status": "asset_linking",
+                        "progress": 100,
+                        "total_detections": result.get("total_detections", 0),
+                        "detections_summary": result.get("detections_summary", {}),
+                        "processed_frames": result.get("processed_frames", 0),
+                        "updated_at": get_now_iso(),
+                    }
+                },
+            )
+
+            # Enqueue asset linking as a separate, independently-rate-limited job
+            job_queue.enqueue("asset_linking", video_id, {
+                "survey_id": str(survey_id) if survey_id else None,
+                "route_id": route_id,
+                "video_path": str(video_path),
+            })
+
+        except Exception as e:
+            print(f"[PROCESS] Error processing video {video_id}: {e}")
+            _tb.print_exc()
+            mongo_db.videos.update_one(
+                {"_id": ObjectId(video_id)},
+                {"$set": {"status": "failed", "error": str(e), "updated_at": get_now_iso()}},
+            )
+
+
+def _run_demo_ai_processing(app, video_id: str, payload: dict):
+    """
+    Extracted module-level version of the former process_demo_in_background closure.
+    Simulates processing progress, then enqueues an asset_linking job.
+    """
+    import time
+    import traceback as _tb
+    from pymongo import MongoClient
+
+    storage_url = payload["storage_url"]
+    survey_id = payload.get("survey_id")
+    route_id = payload.get("route_id")
+    upload_root = Path(payload["upload_root"])
+    filename_no_ext = payload["filename_no_ext"]
+    demo_matches = [Path(p) for p in payload.get("demo_matches", [])]
+
+    storage_filename = storage_url.lstrip("/uploads/").lstrip("/")
+    video_path = upload_root / storage_filename
+
+    known_categories = [
+        "oia", "corridor_pavement", "corridor_structure",
+        "directional_signage", "its", "roadway_lighting",
+    ]
+
+    with app.app_context():
+        mongo_client = MongoClient(app.config["MONGO_URI"])
+        mongo_db = mongo_client[app.config["MONGO_DB_NAME"]]
+
+        try:
+            mongo_db.videos.update_one(
+                {"_id": ObjectId(video_id)},
+                {"$set": {"status": "processing", "progress": 0, "updated_at": get_now_iso()}},
+            )
+
+            # Simulate inference progress
+            for i in range(1, 101, 10):
+                time.sleep(2.3)
+                print(f"[PROCESS] Demo progress {i}%")
+                mongo_db.videos.update_one(
+                    {"_id": ObjectId(video_id)},
+                    {"$set": {"progress": i, "updated_at": get_now_iso()}},
+                )
+
+            # Build category → annotated video URL map
+            category_videos = {}
+            for match in demo_matches:
+                found_cat = "default"
+                for cat in known_categories:
+                    if match.name.startswith(cat):
+                        found_cat = cat
+                        break
+                rel_path = match.relative_to(upload_root)
+                category_videos[found_cat] = f"/uploads/{rel_path}"
+
+            mongo_db.videos.update_one(
+                {"_id": ObjectId(video_id)},
+                {
+                    "$set": {
+                        "status": "asset_linking",
+                        "progress": 100,
+                        "category_videos": category_videos,
+                        "updated_at": get_now_iso(),
+                    }
+                },
+            )
+            print(f"[PROCESS] Demo processing complete for {video_id}")
+
+            # Demo-specific: aggregate pre-computed asset counts for the survey
+            try:
+                if filename_no_ext:
+                    pipeline = [
+                        {"$match": {"video_key": filename_no_ext}},
+                        {"$group": {
+                            "_id": None,
+                            "total_assets": {"$sum": 1},
+                            "good": {"$sum": {"$cond": [{"$eq": ["$condition", "good"]}, 1, 0]}},
+                            "damaged": {"$sum": {"$cond": [{"$eq": ["$condition", "damaged"]}, 1, 0]}}
+                        }}
+                    ]
+                    agg_res = list(mongo_db.assets.aggregate(pipeline))
+                    totals = {"total_assets": 0, "good": 0, "damaged": 0}
+                    if agg_res:
+                        r = agg_res[0]
+                        totals["total_assets"] = r.get("total_assets", 0)
+                        totals["good"] = r.get("good", 0)
+                        totals["damaged"] = r.get("damaged", 0)
+                    if survey_id:
+                        mongo_db.surveys.update_one(
+                            {"_id": ObjectId(survey_id)},
+                            {"$set": {"totals": totals, "status": "processed"}}
+                        )
+            except Exception as agge:
+                print(f"[PROCESS] Error calculating demo aggregates: {agge}")
+
+            # Enqueue asset linking as a separate, independently-rate-limited job
+            job_queue.enqueue("asset_linking", video_id, {
+                "survey_id": str(survey_id) if survey_id else None,
+                "route_id": route_id,
+                "video_path": str(video_path),
+                "filename_no_ext": filename_no_ext,
+            })
+
+        except Exception as e:
+            print(f"[PROCESS] Error in demo processing for {video_id}: {e}")
+            _tb.print_exc()
+
+
+def _run_asset_linking(app, video_id: str, payload: dict):
+    """
+    Extracted module-level asset linking handler.
+    Runs link_assets_for_video and marks the video completed.
+    """
+    import traceback as _tb
+    from pymongo import MongoClient
+    from services.asset_linker import link_assets_for_video
+
+    survey_id = payload.get("survey_id")
+    route_id = payload.get("route_id")
+    video_path_str = payload.get("video_path")
+
+    with app.app_context():
+        mongo_client = MongoClient(app.config["MONGO_URI"])
+        mongo_db = mongo_client[app.config["MONGO_DB_NAME"]]
+
+        try:
+            survey_doc = None
+            if survey_id:
+                survey_doc = mongo_db.surveys.find_one(
+                    {"_id": ObjectId(survey_id)},
+                    {"survey_display_id": 1, "survey_date": 1},
+                )
+            survey_display_id_str = survey_doc.get("survey_display_id") if survey_doc else None
+            survey_date_val = survey_doc.get("survey_date") if survey_doc else None
+
+            linker_summary = link_assets_for_video(
+                db=mongo_db,
+                video_id=video_id,
+                survey_id=survey_id,
+                survey_display_id=survey_display_id_str,
+                route_id=route_id,
+                survey_date=survey_date_val,
+                video_path=Path(video_path_str) if video_path_str else None,
+            )
+            print(f"[QUEUE] Asset linking complete for video {video_id}: {linker_summary}")
+        except Exception as link_err:
+            print(f"[QUEUE] Warning: asset linking failed for video {video_id}: {link_err}")
+            _tb.print_exc()
+
+        # Always mark completed — linking failure is non-fatal
+        mongo_db.videos.update_one(
+            {"_id": ObjectId(video_id)},
+            {"$set": {"status": "completed", "updated_at": get_now_iso()}},
+        )
+        if survey_id:
+            mongo_db.surveys.update_one(
+                {"_id": ObjectId(survey_id)},
+                {"$set": {"status": "processed", "updated_at": get_now_iso()}},
             )
 
 
@@ -579,7 +864,7 @@ def upload_direct():
             "storage_url": storage_url,
             "gpx_file_url": gpx_file_url,
             "size_bytes": file_size,
-            "status": "anonymizing" if gpx_created else "failed",
+            "status": "queued" if gpx_created else "failed",
             "progress": 0,
             "updated_at": get_now_iso(),
         }
@@ -594,13 +879,11 @@ def upload_direct():
         )
 
         if gpx_created:
-            _app = current_app._get_current_object()
-            threading.Thread(
-                target=_run_local_anonymization,
-                args=(_app, video_id, save_path, upload_root),
-                daemon=True,
-                name=f"anon-local-{video_id}",
-            ).start()
+            job_queue.enqueue("anonymization", video_id, {
+                "upload_type": "local",
+                "video_path": str(save_path),
+                "upload_root": str(upload_root),
+            })
 
         return (
             jsonify(
@@ -639,7 +922,7 @@ def upload_direct():
         "storage_url": storage_url,
         "gpx_file_url": gpx_file_url,
         "size_bytes": file_size,
-        "status": "anonymizing" if gpx_created else "failed",
+        "status": "queued" if gpx_created else "failed",
         "progress": 0,
         "created_at": get_now_iso(),
         "updated_at": get_now_iso(),
@@ -651,13 +934,11 @@ def upload_direct():
     new_video_id = str(res.inserted_id)
 
     if gpx_created:
-        _app = current_app._get_current_object()
-        threading.Thread(
-            target=_run_local_anonymization,
-            args=(_app, new_video_id, save_path, upload_root),
-            daemon=True,
-            name=f"anon-local-{new_video_id}",
-        ).start()
+        job_queue.enqueue("anonymization", new_video_id, {
+            "upload_type": "local",
+            "video_path": str(save_path),
+            "upload_root": str(upload_root),
+        })
 
     return (
         jsonify(
@@ -907,352 +1188,60 @@ def process_video_with_ai(video_id: str):
     video_path = upload_root / storage_filename
 
     demo_matches = []
-    if annotated_lib_path.exists():
-        search_pattern = f"*{filename_no_ext}*.mp4"
-        demo_matches = list(annotated_lib_path.glob(search_pattern))
+    # if annotated_lib_path.exists():
+    #     search_pattern = f"*{filename_no_ext}*.mp4"
+    #     demo_matches = list(annotated_lib_path.glob(search_pattern))
 
     # demo_matches = []
-    if demo_matches and "video_library" in storage_url:
+    if "video_library" in storage_url:
         print(
             f"[PROCESS] DEMO MODE DETECTED for {video_id}. Found {len(demo_matches)} annotated files."
         )
-
-        # Update to processing first
         db.videos.update_one(
             {"_id": ObjectId(video_id)},
-            {
-                "$set": {
-                    "status": "processing",
-                    "progress": 0,
-                    "updated_at": get_now_iso(),
-                }
-            },
+            {"$set": {"status": "queued", "progress": 0, "updated_at": get_now_iso()}},
         )
-
-        # Get Flask app for context
-        from flask import current_app
-
-        app = current_app._get_current_object()
-
-        print(f"[PROCESS] Upload root: {upload_root}")
-
-        def process_demo_in_background():
-            with app.app_context():
-                try:
-                    import time
-                    from pymongo import MongoClient
-
-                    mongo_client = MongoClient(app.config["MONGO_URI"])
-                    mongo_db = mongo_client[app.config["MONGO_DB_NAME"]]
-
-                    # Simulate progress
-                    for i in range(1, 101, 10):
-                        time.sleep(2.3)
-                        print(f"[PROCESS] Updating progress to {i}%")
-                        mongo_db.videos.update_one(
-                            {"_id": ObjectId(video_id)},
-                            {"$set": {"progress": i, "updated_at": get_now_iso()}},
-                        )
-
-                    # Construct category map
-                    # Filename format: {CATEGORY}_{INDEX}_{ORIGINAL}_annotated_compressed.mp4
-                    # e.g. corridor_fence_000_2025...
-                    category_videos = {}
-
-                    known_categories = [
-                        "oia",
-                        "corridor_pavement",
-                        "corridor_structure",
-                        "directional_signage",
-                        "its",
-                        "roadway_lighting",
-                    ]
-
-                    primary_annotated_url = None
-
-                    for match in demo_matches:
-                        match_name = match.name
-                        # Try to match category
-                        found_cat = "default"
-                        for cat in known_categories:
-                            if match_name.startswith(cat):
-                                found_cat = cat
-                                break
-
-                        # Fix for categories that might be substrings of each other?
-                        # In this list, they seem distinct enough.
-
-                        # Build URL
-                        # Path relative to uploads
-                        rel_path = match.relative_to(upload_root)
-                        url = f"/uploads/{rel_path}"
-
-                        category_videos[found_cat] = url
-
-                        if not primary_annotated_url:
-                            primary_annotated_url = url
-
-                    # Update DB completion
-                    mongo_db.videos.update_one(
-                        {"_id": ObjectId(video_id)},
-                        {
-                            "$set": {
-                                "status": "asset_linking",
-                                "progress": 100,
-                                "category_videos": category_videos,
-                                "updated_at": get_now_iso(),
-                            }
-                        },
-                    )
-
-                    print(f"[PROCESS] Demo processing complete for {video_id}")
-
-                    # Calculate aggregates
-                    try:
-                        if filename_no_ext:
-                            print(f"[PROCESS] Aggregating assets for demo video key: {filename_no_ext}")
-                            pipeline = [
-                                {"$match": {"video_key": filename_no_ext}},
-                                {"$group": {
-                                    "_id": None,
-                                    "total_assets": {"$sum": 1},
-                                    "good": {"$sum": {"$cond": [{"$eq": ["$condition", "good"]}, 1, 0]}},
-                                    "damaged": {"$sum": {"$cond": [{"$eq": ["$condition", "damaged"]}, 1, 0]}}
-                                }}
-                            ]
-                            
-                            agg_res = list(mongo_db.assets.aggregate(pipeline))
-                            totals = {"total_assets": 0, "good": 0, "damaged": 0}
-                            
-                            if agg_res:
-                                res = agg_res[0]
-                                totals["total_assets"] = res.get("total_assets", 0)
-                                totals["good"] = res.get("good", 0)
-                                totals["damaged"] = res.get("damaged", 0)
-                                
-                            print(f"[PROCESS] Calculated totals for survey {survey_id}: {totals}")
-
-                            if survey_id:
-                                mongo_db.surveys.update_one(
-                                    {"_id": ObjectId(survey_id)},
-                                    {"$set": {"totals": totals, "status": "processed"}}
-                                )
-                    except Exception as agge:
-                        print(f"[PROCESS] Error calculating demo aggregates: {agge}")
-
-                    # ── Asset Linking (demo) ───────────────────────────────
-                    try:
-                        mongo_db.videos.update_one(
-                            {"_id": ObjectId(video_id)},
-                            {"$set": {"status": "asset_linking", "updated_at": get_now_iso()}},
-                        )
-                        from services.asset_linker import link_assets_for_video
-                        survey_doc = mongo_db.surveys.find_one(
-                            {"_id": ObjectId(survey_id)} if survey_id else {},
-                            {"survey_display_id": 1, "survey_date": 1}
-                        ) if survey_id else None
-                        survey_display_id_str = survey_doc.get("survey_display_id") if survey_doc else None
-                        survey_date_val = survey_doc.get("survey_date") if survey_doc else None
-
-                        linker_summary = link_assets_for_video(
-                            db=mongo_db,
-                            video_id=video_id,
-                            survey_id=survey_id,
-                            survey_display_id=survey_display_id_str,
-                            route_id=route_id,
-                            survey_date=survey_date_val,
-                            video_path=video_path,
-                        )
-                        print(f"[PROCESS] Demo asset linking complete for {video_id}: {linker_summary}")
-                    except Exception as link_err:
-                        print(f"[PROCESS] Warning: demo asset linking failed for {video_id}: {link_err}")
-                        import traceback
-                        traceback.print_exc()
-
-                    # Mark as truly completed
-                    mongo_db.videos.update_one(
-                        {"_id": ObjectId(video_id)},
-                        {"$set": {"status": "completed", "updated_at": get_now_iso()}},
-                    )
-                    # ── END Asset Linking (demo) ───────────────────────────
-
-                except Exception as e:
-                    print(f"Error in demo processing: {e}")
-                    import traceback
-
-                    traceback.print_exc()
-
-        thread = threading.Thread(target=process_demo_in_background, daemon=True)
-        thread.start()
-
+        job_queue.enqueue("ai_processing", video_id, {
+            "is_demo": True,
+            "storage_url": storage_url,
+            "survey_id": str(survey_id) if survey_id else None,
+            "route_id": route_id,
+            "upload_root": str(upload_root),
+            "filename_no_ext": filename_no_ext,
+            "demo_matches": [str(m) for m in demo_matches],
+        })
         return (
             jsonify(
                 {
                     "ok": True,
-                    "message": "Video processing started",
+                    "message": "Video processing queued",
                     "video_id": video_id,
-                    "status": "processing",
+                    "status": "queued",
                 }
             ),
             202,
         )
 
-    # Update status to processing
+    # Queue real AI processing
     db.videos.update_one(
         {"_id": ObjectId(video_id)},
-        {"$set": {"status": "processing", "progress": 0, "updated_at": get_now_iso()}},
+        {"$set": {"status": "queued", "progress": 0, "updated_at": get_now_iso()}},
     )
-
-    # Get Flask app for context
-    from flask import current_app
-
-    app = current_app._get_current_object()
-
-    # Start background processing
-    def process_in_background():
-        with app.app_context():
-            try:
-                import json
-
-                print(f"[PROCESS] Storage URL: {storage_url}")
-                print(f"[PROCESS] Video filename: {storage_filename}")
-                print(f"[PROCESS] Video path: {video_path}")
-                print(f"[PROCESS] Video exists: {video_path.exists()}")
-
-                if not video_path.exists():
-                    raise FileNotFoundError(
-                        f"Source video not found at: {video_path}"
-                    )
-
-                print(f"[PROCESS] Starting Local processing for video {video_id}")
-
-                # Initialize local processor
-                processor = LocalVideoProcessor()
-
-                # Get MongoDB client directly (not using get_db() to avoid Flask context issues in callback)
-                from pymongo import MongoClient
-
-                mongo_client = MongoClient(app.config["MONGO_URI"])
-                mongo_db = mongo_client[app.config["MONGO_DB_NAME"]]
-
-                # Progress callback to update database
-                def update_progress(progress: int, message: str):
-                    mongo_db.videos.update_one(
-                        {"_id": ObjectId(video_id)},
-                        {"$set": {"progress": progress, "updated_at": get_now_iso()}},
-                    )
-                    print(f"[PROCESS] {message} ({progress}%)")
-
-                # Process video
-                gpx_path = upload_root / gpx_file_url.lstrip("/uploads/") if gpx_file_url else None
-                print(f"[PROCESS] GPX path for processing: {gpx_path}")
-                result = processor.process_video(
-                    video_path=video_path,
-                    output_dir=upload_root,  # Pass upload_root directly
-                    video_id=video_id,
-                    route_id=route_id,  # Pass route_id for organizing frames by road
-                    survey_id=survey_id,  # Pass survey_id for linking frames
-                    gpx_path=gpx_path,
-                    db=mongo_db,  # Pass MongoDB connection for frame storage
-                    progress_callback=update_progress,
-                )
-
-                print(f"[PROCESS] Processing complete: {result}")
-
-                # Set video to asset_linking phase first (before completed)
-                mongo_db.videos.update_one(
-                    {"_id": ObjectId(video_id)},
-                    {
-                        "$set": {
-                            "status": "asset_linking",
-                            "progress": 100,
-                            "total_detections": result.get("total_detections", 0),
-                            "detections_summary": result.get("detections_summary", {}),
-                            "processed_frames": result.get("processed_frames", 0),
-                            "updated_at": get_now_iso(),
-                        }
-                    },
-                )
-
-                # ── Asset Linking ──────────────────────────────────────────
-                try:
-                    from services.asset_linker import link_assets_for_video
-                    survey_doc = mongo_db.surveys.find_one(
-                        {"_id": ObjectId(survey_id)} if survey_id else {},
-                        {"survey_display_id": 1, "survey_date": 1}
-                    ) if survey_id else None
-                    survey_display_id_str = survey_doc.get("survey_display_id") if survey_doc else None
-                    survey_date_val = survey_doc.get("survey_date") if survey_doc else None
-
-                    linker_summary = link_assets_for_video(
-                        db=mongo_db,
-                        video_id=video_id,
-                        survey_id=survey_id,
-                        survey_display_id=survey_display_id_str,
-                        route_id=route_id,
-                        survey_date=survey_date_val,
-                        video_path=video_path,
-                    )
-                    print(f"[PROCESS] Asset linking complete for video {video_id}: {linker_summary}")
-                except Exception as link_err:
-                    print(f"[PROCESS] Warning: asset linking failed for video {video_id}: {link_err}")
-                    import traceback
-                    traceback.print_exc()
-                # ── END Asset Linking ──────────────────────────────────────
-
-                # Now mark as fully completed
-                mongo_db.videos.update_one(
-                    {"_id": ObjectId(video_id)},
-                    {"$set": {"status": "completed", "updated_at": get_now_iso()}},
-                )
-
-                # store aggregates
-                if survey_id:
-                    mongo_db.surveys.update_one(
-                        {"_id": ObjectId(survey_id)},
-                        {
-                            "$set": {
-
-                                "status": "processed",
-                                "updated_at": get_now_iso(),
-                            }
-                        }
-                    )
-                print(f"[PROCESS] Video {video_id} processing completed successfully")
-
-            except Exception as e:
-                print(f"[PROCESS] Error processing video {video_id}: {e}")
-                import traceback
-
-                traceback.print_exc()
-
-                # Update status to failed
-                from pymongo import MongoClient
-
-                mongo_client = MongoClient(app.config["MONGO_URI"])
-                mongo_db = mongo_client[app.config["MONGO_DB_NAME"]]
-                mongo_db.videos.update_one(
-                    {"_id": ObjectId(video_id)},
-                    {
-                        "$set": {
-                            "status": "failed",
-                            "error": str(e),
-                            "updated_at": get_now_iso(),
-                        }
-                    },
-                )
-
-    # Start background thread
-    thread = threading.Thread(target=process_in_background, daemon=True)
-    thread.start()
-    # time.sleep(3)  # Simulate brief delay for demo purposes
+    job_queue.enqueue("ai_processing", video_id, {
+        "is_demo": False,
+        "storage_url": storage_url,
+        "gpx_file_url": gpx_file_url,
+        "route_id": route_id,
+        "survey_id": str(survey_id) if survey_id else None,
+        "upload_root": str(upload_root),
+    })
     return (
         jsonify(
             {
                 "ok": True,
-                "message": "Video processing started",
+                "message": "Video processing queued",
                 "video_id": video_id,
-                "status": "processing",
+                "status": "queued",
             }
         ),
         202,
@@ -1788,7 +1777,7 @@ def upload_library_video():
         "gpx_file_url": gpx_file_url,
         "thumbnail_url": thumbnail_url,
         "size_bytes": file_size,
-        "status": "anonymizing",
+        "status": "queued",
         "progress": 0,
         "updated_at": get_now_iso(),
         "survey_display_id": survey_display_id,
@@ -1832,13 +1821,11 @@ def upload_library_video():
         res = db.videos.find_one_and_update(
             {"_id": ObjectId(video_id)}, {"$set": update_doc}
         )
-        _app = current_app._get_current_object()
-        threading.Thread(
-            target=_run_library_anonymization,
-            args=(_app, video_id, full_path, upload_root),
-            daemon=True,
-            name=f"anon-library-{video_id}",
-        ).start()
+        job_queue.enqueue("anonymization", video_id, {
+            "upload_type": "library",
+            "video_path": str(full_path),
+            "upload_root": str(upload_root),
+        })
         return (
             jsonify(
                 {
@@ -1861,13 +1848,11 @@ def upload_library_video():
 
     res = db.videos.insert_one(doc)
     new_video_id = str(res.inserted_id)
-    _app = current_app._get_current_object()
-    threading.Thread(
-        target=_run_library_anonymization,
-        args=(_app, new_video_id, full_path, upload_root),
-        daemon=True,
-        name=f"anon-library-{new_video_id}",
-    ).start()
+    job_queue.enqueue("anonymization", new_video_id, {
+        "upload_type": "library",
+        "video_path": str(full_path),
+        "upload_root": str(upload_root),
+    })
     return (
         jsonify(
             {
