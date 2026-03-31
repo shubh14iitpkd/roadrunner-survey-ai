@@ -75,6 +75,7 @@ export default function AnnotatedVideoPlayer({
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
+  const [isBuffering, setIsBuffering] = useState(false);
 
   /* ── 1. Fetch all detections upfront ─────────────────── */
   useEffect(() => {
@@ -159,6 +160,8 @@ export default function AnnotatedVideoPlayer({
     const rect = canvas.getBoundingClientRect();
     const displayW = Math.round(rect.width);
     const displayH = Math.round(rect.height);
+
+    // This will ensure that canvas matches the size set by css
     if (canvas.width !== displayW || canvas.height !== displayH) {
       canvas.width = displayW;
       canvas.height = displayH;
@@ -171,7 +174,7 @@ export default function AnnotatedVideoPlayer({
     const detections = frameMap.get(frameNumber);
     if (!detections || detections.length === 0) return;
 
-    // ── Compute the actual rendered video rect inside the container ──
+    // Compute the actual rendered video rect inside the container
     // object-contain centers the video and may add horizontal or vertical
     // letterbox bars. We need to know where the actual video pixels are.
     const videoAspect = origDims.w / origDims.h;
@@ -270,17 +273,25 @@ export default function AnnotatedVideoPlayer({
     if (!v) return;
     const onTimeUpdate = () => setCurrentTime(v.currentTime);
     const onPlay = () => setIsPlaying(true);
-    const onPause = () => setIsPlaying(false);
-    const onEnded = () => setIsPlaying(false);
+    const onPause = () => { setIsPlaying(false); setIsBuffering(false); };
+    const onEnded = () => { setIsPlaying(false); setIsBuffering(false); };
+    const onWaiting = () => setIsBuffering(true);
+    const onCanPlay = () => setIsBuffering(false);
     v.addEventListener("timeupdate", onTimeUpdate);
     v.addEventListener("play", onPlay);
     v.addEventListener("pause", onPause);
     v.addEventListener("ended", onEnded);
+    v.addEventListener("waiting", onWaiting);
+    v.addEventListener("canplay", onCanPlay);
+    v.addEventListener("playing", onCanPlay);
     return () => {
       v.removeEventListener("timeupdate", onTimeUpdate);
       v.removeEventListener("play", onPlay);
       v.removeEventListener("pause", onPause);
       v.removeEventListener("ended", onEnded);
+      v.removeEventListener("waiting", onWaiting);
+      v.removeEventListener("canplay", onCanPlay);
+      v.removeEventListener("playing", onCanPlay);
     };
   }, [videoSrc]);
 
@@ -399,6 +410,11 @@ export default function AnnotatedVideoPlayer({
               ref={canvasRef}
               className="absolute inset-0 w-full h-full pointer-events-none"
             />
+            {isBuffering && (
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                <Loader2 className="h-10 w-10 animate-spin text-white drop-shadow-lg" />
+              </div>
+            )}
               {/* Custom controls bar */}
               <div className="absolute left-0 right-0 bottom-0 flex items-center gap-2 px-3 py-2 bg-black/50 text-white text-xs select-none">
                 <button onClick={togglePlay} className="p-1 hover:text-blue-400 transition-colors focus:outline-none focus:ring-none focus:border-none">
