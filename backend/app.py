@@ -255,6 +255,18 @@ def create_app() -> Flask:
 		identity = get_jwt_identity()
 		return jsonify({"message": "You are authenticated", "user": identity})
 
+	# ── Job queue ─────────────────────────────────────────────────────────────
+	from services.job_queue import job_queue
+	from videos.routes import (
+		_handle_anonymization_job,
+		_handle_ai_processing_job,
+		_handle_asset_linking_job,
+	)
+	job_queue.register_handler("anonymization", _handle_anonymization_job)
+	job_queue.register_handler("ai_processing", _handle_ai_processing_job)
+	job_queue.register_handler("asset_linking", _handle_asset_linking_job)
+	job_queue.init_app(app)
+
 	return app
 
 

@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useCallback, use
 import { toast } from "sonner";
 import { api, API_BASE } from "@/lib/api";
 
-export type VideoStatus = "queue" | "uploading" | "anonymizing" | "uploaded" | "processing" | "asset_linking" | "completed" | "error" | "failed";
+export type VideoStatus = "queue" | "queued" | "uploading" | "anonymizing" | "uploaded" | "processing" | "asset_linking" | "completed" | "error" | "failed";
 
 export interface VideoFile {
     id: string;
@@ -197,7 +197,7 @@ export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             // For simplicity, we'll poll everything that looks active on backend.
 
             const activeVideos = videos.filter(v =>
-                (v.status === "processing" || v.status === "uploading" || v.status === "anonymizing" || v.status === "asset_linking") && v.backendId
+                (v.status === "processing" || v.status === "queued" || v.status === "uploading" || v.status === "anonymizing" || v.status === "asset_linking") && v.backendId
             );
             // console.log(activeVideos)
             if (activeVideos.length === 0) return;
@@ -366,7 +366,7 @@ export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                 title: filename,
                 size_bytes: filesize,
                 duration_seconds: duration,
-                status: "queue",
+                status: "queued",
                 progress: 0,
             });
 
