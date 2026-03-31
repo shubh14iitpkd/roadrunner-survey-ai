@@ -53,7 +53,6 @@ export default function SurveyUpload() {
   const [surveyDate, setSurveyDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [surveyorName, setSurveyorName] = useState<string>("");
   const [isUploadDialogOpen, setIsUploadDialogOpen] = useState(false);
-  const [s3BucketUrl, setS3BucketUrl] = useState("");
   const { user } = useAuth();
   // gpxFiles state removed (not really needed if we just upload immediately, or we can keep local if needed for UI but context handles it)
   // Actually context doesn't expose gpxFiles map, but it updates video object.
@@ -205,22 +204,6 @@ export default function SurveyUpload() {
     });
   }
 
-  const handleGpxFileSelect = async (e: React.ChangeEvent<HTMLInputElement>, videoId: string) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    await uploadGpxForVideo(file, videoId);
-  };
-
-  const handleCloudUpload = () => {
-    if (!selectedRoute || !surveyorName || !s3BucketUrl) {
-      toast.error("Please fill all fields");
-      return;
-    }
-    toast.info("Cloud upload will be implemented in backend integration phase");
-    setIsUploadDialogOpen(false);
-  };
-
   const handleDeleteSurvey = async () => {
     if (!videoToDelete) return;
 
@@ -238,8 +221,6 @@ export default function SurveyUpload() {
       setVideoToDelete(null);
     }
   };
-
-  // simulateUpload removed
 
   // processWithAI removed (using context)
 
@@ -642,6 +623,7 @@ export default function SurveyUpload() {
                                   <img
                                     src={`${API_BASE}${video.thumbnailUrl}`}
                                     alt={video.name}
+                                    loading="lazy"
                                     className="w-full h-full object-cover"
                                     onError={(e) => {
                                       e.currentTarget.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="100" height="60" viewBox="0 0 100 60"%3E%3Crect fill="%23ddd" width="100" height="60"/%3E%3Ctext x="50%25" y="50%25" fill="%23999" font-family="Arial" font-size="10" text-anchor="middle" dominant-baseline="middle"%3ENo Thumb%3C/text%3E%3C/svg%3E';

@@ -431,11 +431,11 @@ export default function VideoLibrary() {
                           <Play className="h-3 w-3 mr-1" />
                           {video.storageUrl ? "Watch" : "No Video"}
                         </Button>
-                        <Button size="sm" variant="outline" asChild disabled={!video.storageUrl}>
+                        {/* <Button size="sm" variant="outline" asChild disabled={!video.storageUrl}>
                           <a href={video.storageUrl} download title="Download">
                             <Download className="h-3 w-3"/>
                           </a>
-                        </Button>
+                        </Button> */}
                         {video.gpxFileUrl && (
                           <Button size="sm" variant="outline" asChild>
                             <a href={`/asset-library?id=${video.routeId}`} title="View in Asset Library">
@@ -507,7 +507,7 @@ export default function VideoLibrary() {
                         <Badge variant="secondary" className="text-xs">{video.surveyDate}</Badge>
                       </div>
                       <p className="text-xs text-muted-foreground">Surveyor: {video.surveyorName}</p>
-                      {hasCats && (
+                      {/* {hasCats && (
                         <div className="flex flex-wrap gap-2 mt-1">
                           {Object.keys(video.categoryVideos!).sort().map(cat => (
                             <Button
@@ -525,7 +525,7 @@ export default function VideoLibrary() {
                             </Button>
                           ))}
                         </div>
-                      )}
+                      )} */}
                     </div>
                   </Card>
 

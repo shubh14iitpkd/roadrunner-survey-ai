@@ -7,14 +7,6 @@ import { Loader2, Video, FileVideo, Search } from "lucide-react";
 import { toast } from "sonner";
 import { LibraryVideoItem } from "@/contexts/UploadContext";
 
-interface LibraryItem {
-  name: string;
-  path?: string;
-  size?: number;
-  modified?: string;
-  url?: string;
-}
-
 interface VideoLibraryUploadProps {
   selectedRoute?: string;
   surveyorName?: string;
@@ -58,9 +50,6 @@ export const VideoLibraryUpload: React.FC<VideoLibraryUploadProps> = ({
   uploadingItems = [],
 }) => {
   const [items, setItems] = useState<LibraryVideoItem[]>([]);
-  const [folders, setFolders] = useState<string[]>([]);
-  const [currentPath, setCurrentPath] = useState<string>("");
-  const [bucket, setBucket] = useState<string>("");
   const [loading, setLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
 
@@ -72,16 +61,12 @@ export const VideoLibraryUpload: React.FC<VideoLibraryUploadProps> = ({
 
   useEffect(() => {
     let cancelled = false;
-    const load = async (bucketName: string, path: string) => {
+    (async () => {
       setLoading(true);
       try {
-        const resp: any = await api.videos.getLibrary(bucketName, path || "");
+        const resp: any = await api.videos.getLibrary();
         if (cancelled) return;
-        const respPath: string = resp?.current_path || path || "";
-        const respFolders: string[] = resp?.folders || [];
         const respItems: LibraryVideoItem[] = resp?.items || [];
-        setCurrentPath(respPath);
-        setFolders(respFolders.map((f) => f.replace(respPath, "")));
         setItems(respItems);
       } catch (err: any) {
         console.error("Failed to load library:", err);
@@ -89,13 +74,11 @@ export const VideoLibraryUpload: React.FC<VideoLibraryUploadProps> = ({
       } finally {
         setLoading(false);
       }
-    };
-
-    load("", "");
+    })();
     return () => {
       cancelled = true;
     };
-  }, [bucket, selectedRoute]);
+  }, []);
 
   /** Fuzzy-filtered + sorted items derived from `items` and `searchQuery` */
   const filteredItems = useMemo(() => {
@@ -193,6 +176,7 @@ export const VideoLibraryUpload: React.FC<VideoLibraryUploadProps> = ({
                             <img
                               src={`${API_BASE}${video.thumb_url}`}
                               alt={`Thumbnail for ${video.name}`}
+                              loading="lazy"
                               className={`w-full h-full object-cover ${isCurrentlyUploading ? "opacity-50" : ""}`}
                               onError={(e) => {
                                 e.currentTarget.src =
