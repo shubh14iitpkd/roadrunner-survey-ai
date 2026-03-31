@@ -77,6 +77,12 @@ class LatLongEstimator:
         vertical_angle_deg = offset_y_pixels / im_height * self.vertical_fov_degrees
         total_angle_deg  = vertical_angle_deg + self.camera_tilt_degrees
 
+        # Horizontal bearing — computed early so we can use the angle to cap distance
+        horizontal_fov_deg = self.vertical_fov_degrees * im_width / im_height
+        offset_x_pixels    = bbox_center_x - im_width / 2
+        angle_offset_deg   = offset_x_pixels / im_width * horizontal_fov_deg
+        object_bearing     = (car_heading + angle_offset_deg) % 360
+
         # Cap distance: tall boxes (big height ratio) should never project far away
         # A bbox taking up >40% of frame height is almost certainly within 20m
         height_based_cap = max(10.0, 200.0 * (1.0 - bbox_height_ratio * 2.0))
@@ -84,9 +90,22 @@ class LatLongEstimator:
         if is_truly_overhead:
             overhead_ratio   = bottom_normalized / 0.5         # 0=top → 1=midframe
             overhead_cap     = 30 + (100 - 30) * (overhead_ratio ** 2)
-            max_distance     = min(height_based_cap, overhead_cap)
+            # Hard ceiling: overhead objects visible in frame are rarely beyond 40m.
+            # Without this, objects just barely above midframe (ratio≈0.9) get
+            # overhead_cap≈87m with a dampener≈0.9, yielding 78m — severe overshoot.
+            max_distance     = min(height_based_cap, overhead_cap, 40.0)
         else:
             max_distance = min(height_based_cap, 200.0)
+
+        # Lateral overshoot cap: for objects significantly off-centre, the vertical-angle
+        # distance estimate can be spuriously large (bbox bottom near the horizon), which
+        # projects the asset far off the road onto buildings.
+        # Road edge + shoulder is rarely > 15 m laterally.  For a horizontal angle θ,
+        # the distance that would place the asset exactly 15 m laterally is 15/sin(θ).
+        MAX_LATERAL_METERS = 15.0
+        if abs(angle_offset_deg) > 5.0:
+            lateral_cap = MAX_LATERAL_METERS / math.sin(math.radians(abs(angle_offset_deg)))
+            max_distance = min(max_distance, lateral_cap)
 
         if total_angle_deg < 0.5:
             distance_meters = max_distance
@@ -100,12 +119,6 @@ class LatLongEstimator:
             dampener        = 0.3 + 0.7 * (overhead_ratio ** 1.5)
             distance_meters *= dampener
 
-        # Horizontal bearing (unchanged)
-        horizontal_fov_deg = self.vertical_fov_degrees * im_width / im_height
-        offset_x_pixels    = bbox_center_x - im_width / 2
-        angle_offset_deg   = offset_x_pixels / im_width * horizontal_fov_deg
-        object_bearing     = (car_heading + angle_offset_deg) % 360
-
         d_lat = distance_meters * math.cos(math.radians(object_bearing)) / self.R_EARTH
         d_lon = distance_meters * math.sin(math.radians(object_bearing)) / (
             self.R_EARTH * math.cos(math.radians(car_lat))
@@ -118,46 +131,3 @@ class LatLongEstimator:
             "dist":     distance_meters,
             "overhead": is_truly_overhead,
         }
-
-    # def estimate_location(self, car_lat, car_lon, car_heading, im_width, im_height, bbox):
-    #     """
-    #     Estimate the real-world location of an object from its bounding box.
-
-    #     Args:
-    #         car_lat, car_lon: Camera/vehicle position
-    #         car_heading: Vehicle bearing in degrees
-    #         im_width, im_height: Image dimensions in pixels
-    #         bbox: [xmin, ymin, xmax, ymax] in pixels
-
-    #     Returns:
-    #         dict with lat, lon, bearing, dist
-    #     """
-    #     bbox_center_x = (bbox[0] + bbox[2]) / 2
-    #     bbox_bottom_y = bbox[3]
-
-    #     offset_y_pixels = bbox_bottom_y - im_height / 2
-    #     vertical_angle_deg = offset_y_pixels / im_height * self.vertical_fov_degrees
-    #     total_angle_deg = vertical_angle_deg + self.camera_tilt_degrees
-
-    #     if total_angle_deg < 0.5:
-    #         distance_meters = 200
-    #     else:
-    #         distance_meters = self.camera_height_meters / math.tan(math.radians(total_angle_deg))
-    #         distance_meters = min(distance_meters, 200)
-
-    #     horizontal_fov_deg = self.vertical_fov_degrees * im_width / im_height
-    #     offset_x_pixels = bbox_center_x - im_width / 2
-    #     angle_offset_deg = offset_x_pixels / im_width * horizontal_fov_deg
-    #     object_bearing = (car_heading + angle_offset_deg) % 360
-
-    #     d_lat = distance_meters * math.cos(math.radians(object_bearing)) / self.R_EARTH
-    #     d_lon = distance_meters * math.sin(math.radians(object_bearing)) / (
-    #         self.R_EARTH * math.cos(math.radians(car_lat))
-    #     )
-
-    #     return {
-    #         "lat": car_lat + math.degrees(d_lat),
-    #         "lon": car_lon + math.degrees(d_lon),
-    #         "bearing": object_bearing,
-    #         "dist": distance_meters,
-    #     }
