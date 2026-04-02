@@ -1,7 +1,7 @@
 import { get } from "http";
 
 // Use environment variable, fallback to production URL
-const API_BASE = import.meta.env.VITE_API_URL || "https://roadsightai.roadvision.ai";
+const API_BASE = import.meta.env.VITE_API_URL ?? "https://roadsightai.roadvision.ai";
 
 // Export API_BASE so it can be used in other files
 export { API_BASE };

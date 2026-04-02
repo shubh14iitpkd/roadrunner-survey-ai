@@ -381,7 +381,7 @@ def delete_survey(survey_id: str):
 
         is_library_video = "video_library" in storage_url if storage_url else False
 
-        if not is_library_video and storage_url:
+        if storage_url and not is_library_video:
             # Delete the actual video file
             # storage_url is like /uploads/filename.mp4
             relative_path = storage_url.lstrip("/")
@@ -423,6 +423,8 @@ def delete_survey(survey_id: str):
                         pass
         else:
             preserved_files.append(storage_url)
+        
+    print("[SURVEY DELETE] Preserved files: ", preserved_files)
     
     # 5. Delete all videos from DB
     videos_deleted = db.videos.delete_many({"survey_id": ObjectId(survey_id)})
