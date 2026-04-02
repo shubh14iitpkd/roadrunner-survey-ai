@@ -622,7 +622,7 @@ export default function Dashboard() {
           </div>
         </Card>
 
-        {/* Anomalies by Road */}
+        {/* Defects by Route*/}
         <Card className="p-0 border border-border bg-card overflow-hidden">
           <div className="px-5 pt-5 pb-3 flex items-center gap-3">
             <div className="p-2 rounded-lg bg-primary/10 dark:bg-muted-secondary/15">
@@ -630,7 +630,7 @@ export default function Dashboard() {
             </div>
             <div className="flex-1">
               <p className="text-xs font-medium text-muted-foreground uppercase tracking-widest">Defects</p>
-              <p className="text-sm font-semibold text-foreground mt-0.5">By Road</p>
+              <p className="text-sm font-semibold text-foreground mt-0.5">By Route</p>
             </div>
             <div className="flex gap-1.5">
               <Button
