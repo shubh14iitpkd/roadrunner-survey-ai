@@ -147,7 +147,7 @@ def create_road():
 	    description: Missing required fields
 	"""
 	body = request.get_json(silent=True) or {}
-	required = ["road_name", "estimated_distance_km", "road_type", "road_side"]
+	required = ["road_name", "estimated_distance_km","road_side"]
 	missing = [k for k in required if body.get(k) in (None, "")]
 	if missing:
 		return jsonify({"error": f"missing: {', '.join(missing)}"}), 400
@@ -181,7 +181,7 @@ def create_road():
 		"end_lat": end_lat,
 		"end_lng": end_lng,
 		"estimated_distance_km": body.get("estimated_distance_km"),
-		"road_type": body.get("road_type"),
+		# "road_type": body.get("road_type"),
 		"road_side": road_side,
 		"created_at": get_now_iso(),
 		"updated_at": get_now_iso(),

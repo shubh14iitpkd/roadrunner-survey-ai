@@ -518,7 +518,6 @@ export default function RoadRegister() {
       end_lat: parseFloat(endLat || (formData.get("end_lat") as string)),
       end_lng: parseFloat(endLng || (formData.get("end_lng") as string)),
       estimated_distance_km: parseFloat(distance || (formData.get("estimated_distance_km") as string)),
-      road_type: formData.get("road_type") as string,
       road_side: formData.get("road_side") as string,
     };
 
@@ -655,7 +654,7 @@ export default function RoadRegister() {
               </DialogContent>
             </Dialog> */}
 
-            {user.role==='Admin' && <Dialog open={isAddDialogOpen} onOpenChange={(open) => {
+            {['Admin', 'Super Admin'].includes(user.role) && <Dialog open={isAddDialogOpen} onOpenChange={(open) => {
               // Prevent closing when clicking on Google Places autocomplete
               const pacContainer = document.querySelector('.pac-container') as HTMLElement | null;
               if (!open && pacContainer && pacContainer.offsetParent !== null) {
@@ -882,7 +881,7 @@ export default function RoadRegister() {
                       </div>
                     </div>
 
-                    <div className="grid gap-2">
+                    {/* <div className="grid gap-2">
                       <Label htmlFor="road_type">Road Type *</Label>
                       <Select name="road_type" required>
                         <SelectTrigger>
@@ -896,7 +895,7 @@ export default function RoadRegister() {
                           ))}
                         </SelectContent>
                       </Select>
-                    </div>
+                    </div> */}
 
                     <div className="flex justify-end gap-2 pt-4">
                       <Button type="button" variant="outline" onClick={() => setIsAddDialogOpen(false)}>
