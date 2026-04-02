@@ -213,6 +213,7 @@ export default function DefectLibrary() {
   // ── Mark as Good state ──
   const [goodSet, setGoodSet] = useState<Set<string>>(new Set());
   const [markingGood, setMarkingGood] = useState<Set<string>>(new Set());
+  const [confirmMarkGoodAsset, setConfirmMarkGoodAsset] = useState<AssetRecord | null>(null);
 
   // ── Edit Issue state ──
   const [editIssueAsset, setEditIssueAsset] = useState<AssetRecord | null>(null);
@@ -425,11 +426,19 @@ export default function DefectLibrary() {
     setMarkerPopup(null);
   }, []);
 
-  const handleMarkGood = useCallback(async (asset: AssetRecord) => {
+  const handleMarkGood = useCallback((asset: AssetRecord) => {
     if (user.role === "Viewer") {
       toast.error("You do not have permission to mark assets as good.");
       return;
     }
+    setConfirmMarkGoodAsset(asset);
+  }, [user]);
+
+  const handleConfirmMarkGood = useCallback(async () => {
+    const asset = confirmMarkGoodAsset;
+    if (!asset) return;
+    setConfirmMarkGoodAsset(null);
+
     const assetKey = asset.assetDisplayId ?? asset.defectId;
     const mongoId = asset.id;
     if (!mongoId) {
@@ -451,7 +460,7 @@ export default function DefectLibrary() {
     } finally {
       setMarkingGood((prev) => { const s = new Set(prev); s.delete(assetKey); return s; });
     }
-  }, [user]);
+  }, [confirmMarkGoodAsset, user]);
 
   const handleUnmarkGood = useCallback(async (asset: AssetRecord) => {
     const assetKey = asset.assetDisplayId ?? asset.defectId;
@@ -737,7 +746,7 @@ export default function DefectLibrary() {
                       <div className="flex items-center gap-2">
                         <AlertTriangle className="h-3.5 w-3.5 text-destructive" />
                         <span className="text-xs font-semibold text-destructive">
-                          Defect Detected — {latestIssue}
+                          Defect Detected: <span>{capitalize(latestIssue)}</span>
                         </span>
                       </div>
                       <span className="text-[10px] text-muted-foreground">
@@ -810,6 +819,56 @@ export default function DefectLibrary() {
                   </div>
                 );
               })()}
+        </DialogContent>
+      </Dialog>
+
+      {/* Confirm Mark as Good Dialog */}
+      <Dialog open={!!confirmMarkGoodAsset} onOpenChange={(open) => !open && setConfirmMarkGoodAsset(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+              Mark Asset as Good?
+            </DialogTitle>
+            <DialogDescription>
+              Please confirm you want to mark the following asset as good condition.
+            </DialogDescription>
+          </DialogHeader>
+          {confirmMarkGoodAsset && (
+            <div className="flex flex-col gap-2 py-2">
+              <div className="rounded-lg border bg-muted/40 px-4 py-3 text-xs space-y-2">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Asset ID</span>
+                  <span className="font-mono font-semibold">{confirmMarkGoodAsset.assetDisplayId}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Type</span>
+                  <span className="font-semibold">{confirmMarkGoodAsset.assetType}</span>
+                </div>
+                {confirmMarkGoodAsset.assetCategory && (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Category</span>
+                    <span className="font-semibold">{confirmMarkGoodAsset.assetCategory}</span>
+                  </div>
+                )}
+                {confirmMarkGoodAsset.roadName && (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Road</span>
+                    <span className="font-semibold">{confirmMarkGoodAsset.roadName}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+          <div className="flex justify-end gap-2 pt-1">
+            <Button variant="outline" size="sm" onClick={() => setConfirmMarkGoodAsset(null)}>
+              Cancel
+            </Button>
+            <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700 text-white" onClick={handleConfirmMarkGood}>
+              <CheckCircle2 className="h-3.5 w-3.5 mr-1" />
+              Confirm
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
 

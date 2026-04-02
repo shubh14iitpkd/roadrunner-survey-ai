@@ -598,7 +598,7 @@ export default function RoadRegister() {
             <Map className="h-4 w-4 text-primary dark:text-muted-secondary" />
             <div>
               <p className="text-[9px] font-semibold text-muted-foreground uppercase tracking-[0.15em]">Project Management</p>
-              <h1 className="text-sm font-bold text-foreground tracking-tight">Road Register</h1>
+              <h1 className="text-sm font-bold text-foreground tracking-tight">Route Register</h1>
             </div>
           </div>
           <div className="flex gap-2">
