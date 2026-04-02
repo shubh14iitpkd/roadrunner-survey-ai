@@ -272,7 +272,6 @@ def link_assets_for_video(
     Returns a summary dict with counts.
     """
     log.info("[LINKER] Starting asset linking for video %s", video_id)
-
     # Fetch all assets for this video.
     assets = list(db.assets.find(
         {"video_id": video_id},

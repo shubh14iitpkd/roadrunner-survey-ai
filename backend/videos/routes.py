@@ -123,15 +123,26 @@ def _run_library_anonymization(app, video_id: str, full_path: Path, upload_root:
                 )
 
         try:
-            svc = _get_anonymizer()
-            if svc is None:
-                raise RuntimeError("AnonymizationService unavailable")
-            anon_path = svc.process_video(
-                video_path=full_path,
-                upload_dir=upload_root,
-                upload_type="video_library",
-                progress_callback=_progress,
-            )
+            # checking if blurred video already exists
+            anon_dir = upload_root / "anonymized" / "video_library"
+            video_name = full_path.stem
+            matches = list(anon_dir.glob(f"*{video_name}_blurred.*"))
+            if matches:
+                print(f"[ANON] Blurred video already exists for {video_id}")
+                anon_path = matches[0]
+                for i in range(1, 100, 5):
+                    _progress(i, "")
+                    time.sleep(0.8)
+            else:
+                svc = _get_anonymizer()
+                if svc is None:
+                    raise RuntimeError("AnonymizationService unavailable")
+                anon_path = svc.process_video(
+                    video_path=full_path,
+                    upload_dir=upload_root,
+                    upload_type="video_library",
+                    progress_callback=_progress,
+                )
             rel = anon_path.relative_to(upload_root)
             new_storage_url = f"/uploads/{rel}"
             db.videos.find_one_and_update(
@@ -275,15 +286,16 @@ def _run_demo_ai_processing(app, video_id: str, payload: dict):
     import traceback as _tb
     from pymongo import MongoClient
 
+    up = Path("/uploads")
     storage_url = payload["storage_url"]
     survey_id = payload.get("survey_id")
     route_id = payload.get("route_id")
     upload_root = Path(payload["upload_root"])
     filename_no_ext = payload["filename_no_ext"]
     demo_matches = [Path(p) for p in payload.get("demo_matches", [])]
-
+    print(f"[DEMO ASSET LINKING] path of video {storage_url}")
     storage_filename = storage_url.lstrip("/uploads/").lstrip("/")
-    video_path = upload_root / storage_filename
+    video_path = upload_root / Path(storage_url).relative_to(up)
 
     known_categories = [
         "oia", "corridor_pavement", "corridor_structure",
@@ -361,6 +373,7 @@ def _run_demo_ai_processing(app, video_id: str, payload: dict):
                 print(f"[PROCESS] Error calculating demo aggregates: {agge}")
 
             # Enqueue asset linking as a separate, independently-rate-limited job
+            print(f"[DEMO ASSET LINKING] Enqueuing asset linking for video {video_path}")
             job_queue.enqueue("asset_linking", video_id, {
                 "survey_id": str(survey_id) if survey_id else None,
                 "route_id": route_id,

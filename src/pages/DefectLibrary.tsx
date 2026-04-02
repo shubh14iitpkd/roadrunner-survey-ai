@@ -784,8 +784,8 @@ export default function DefectLibrary() {
                                       <p className="font-mono font-semibold text-foreground">{entry.survey_display_id || '—'}</p>
                                     </div>
                                     <div>
-                                      <p className="text-muted-foreground text-[9px] uppercase tracking-wider">Issue</p>
-                                      <p className={cn("font-semibold", isDamaged ? "text-destructive" : "text-emerald-600")}>{isDamaged ? (entry.condition || '—') : "Good"}</p>
+                                      <p className="text-muted-foreground text-[9px] uppercase tracking-wider">Condition</p>
+                                      <p className={cn("font-semibold capitalize", isDamaged ? "text-destructive" : "text-emerald-600")}>{isDamaged ? (entry.condition || '—') : "Good"}</p>
                                     </div>
                                     <div>
                                       <p className="text-muted-foreground text-[9px] uppercase tracking-wider">Asset Type</p>
