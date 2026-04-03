@@ -223,21 +223,28 @@ export const api = {
 		kpis: (timeframe: string = "week") => apiFetch(`/api/dashboard/kpis?timeframe=${timeframe}`),
 		assetsByCategory: () => apiFetch("/api/dashboard/charts/assets-by-category"),
 		anomaliesByCategory: () => apiFetch("/api/dashboard/charts/anomalies-by-category"),
-		topAnomalyRoads: () => apiFetch("/api/dashboard/tables/top-anomaly-roads"),
-		topAssetTypes: (page: number = 1, limit: number = 5, categoryId?: string, condition?: string) => {
+		topAnomalyRoads: (page: number = 1, limit: number = 10, sortBy?: string, sortOrder?: string) => {
+			const qs = new URLSearchParams({ page: String(page), limit: String(limit) });
+			if (sortBy) qs.set("sort_by", sortBy);
+			if (sortOrder) qs.set("sort_order", sortOrder);
+			return apiFetch(`/api/dashboard/tables/top-anomaly-roads?${qs.toString()}`);
+		},
+		topAssetTypes: (page: number = 1, limit: number = 5, categoryId?: string, condition?: string, sortBy?: string, sortOrder?: string) => {
 			const qs = new URLSearchParams({ page: String(page), limit: String(limit) });
 			if (categoryId) qs.set("category_id", categoryId);
 			if (condition) qs.set("condition", condition);
+			if (sortBy) qs.set("sort_by", sortBy);
+			if (sortOrder) qs.set("sort_order", sortOrder);
 			return apiFetch(`/api/dashboard/tables/top-asset-types?${qs.toString()}`);
 		},
 		recentSurveys: () => apiFetch("/api/dashboard/recent-surveys"),
 	},
 	user: {
 		getResolvedLabelMap: (userId: string) => apiFetch(`/api/assets/${userId}/resolved-map`),
-		updateLabelPreference: (userId: string, assetIds: string[], displayName: string) =>
-			apiFetch(`/api/users/${userId}/preferences/label`, { method: "PUT", body: JSON.stringify({ asset_ids: assetIds, display_name: displayName }) }),
-		updateCategoryPreference: (userId: string, categoryId: string, displayName: string) =>
-			apiFetch(`/api/users/${userId}/preferences/category`, { method: "PUT", body: JSON.stringify({ category_id: categoryId, display_name: displayName }) }),
+		updateGlobalLabel: (assetIds: string[], displayName: string, oldGroupId?: string, newGroupId?: string) =>
+			apiFetch(`/api/assets/global-label`, { method: "PUT", body: JSON.stringify({ asset_ids: assetIds, display_name: displayName, old_group_id: oldGroupId, new_group_id: newGroupId }) }),
+		updateGlobalCategory: (categoryId: string, displayName: string) =>
+			apiFetch(`/api/assets/global-category`, { method: "PUT", body: JSON.stringify({ category_id: categoryId, display_name: displayName }) }),
 		updatePassword: (userId: string, payload: any) =>
 			apiFetch(`/api/users/${userId}/password`, { method: "PUT", body: JSON.stringify(payload) }),
 		list: () => apiFetch("/api/users/"),
