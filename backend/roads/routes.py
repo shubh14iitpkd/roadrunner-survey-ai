@@ -24,10 +24,6 @@ def list_roads():
 	    in: query
 	    type: string
 	    description: Search term for road name
-	  - name: type
-	    in: query
-	    type: string
-	    description: Filter by road type
 	  - name: side
 	    in: query
 	    type: string
@@ -47,12 +43,9 @@ def list_roads():
 	"""
 	query = {}
 	search = request.args.get("search")
-	road_type = request.args.get("type")
 	road_side = request.args.get("side")
 	if search:
 		query["$text"] = {"$search": search}
-	if road_type:
-		query["road_type"] = road_type
 	if road_side:
 		query["road_side"] = road_side
 
@@ -70,7 +63,6 @@ def list_roads():
 			"end_lat": r.get("end_lat"),
 			"end_lng": r.get("end_lng"),
 			"estimated_distance_km": r.get("estimated_distance_km"),
-			"road_type": r.get("road_type"),
 			"road_side": r.get("road_side"),
 			"gpx_file_url": r.get("gpx_file_url"),
 		})
@@ -125,7 +117,6 @@ def create_road():
 	      required:
 	        - road_name
 	        - estimated_distance_km
-	        - road_type
 	        - road_side
 	      properties:
 	        road_name:
@@ -136,8 +127,6 @@ def create_road():
 	          type: string
 	        estimated_distance_km:
 	          type: number
-	        road_type:
-	          type: string
 	        road_side:
 	          type: string
 	responses:
@@ -181,7 +170,6 @@ def create_road():
 		"end_lat": end_lat,
 		"end_lng": end_lng,
 		"estimated_distance_km": body.get("estimated_distance_km"),
-		# "road_type": body.get("road_type"),
 		"road_side": road_side,
 		"created_at": get_now_iso(),
 		"updated_at": get_now_iso(),
