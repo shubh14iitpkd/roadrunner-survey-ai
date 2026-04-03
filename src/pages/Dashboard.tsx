@@ -7,7 +7,10 @@ import {
   MapPin, Eye, ChevronLeft, ChevronRight, Map, ArrowUpRight, Activity, X, Download,
   BarChart, Loader2,
   PieChartIcon,
-  Database
+  Database,
+  ArrowUp,
+  ArrowDown,
+  ArrowUpDown,
 } from "lucide-react";
 import {
   PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Sector,
@@ -64,6 +67,26 @@ const renderActiveShape = (props: any) => {
   );
 };
 
+// Active shape renderer for condition donut
+const renderActiveConditionShape = (props: any) => {
+  const { cx, cy, innerRadius, outerRadius, startAngle, endAngle, fill, payload, value, percent } = props;
+  return (
+    <g>
+      <Sector cx={cx} cy={cy} innerRadius={innerRadius - 3} outerRadius={outerRadius + 4} startAngle={startAngle} endAngle={endAngle} fill={fill} opacity={0.9} />
+      <Sector cx={cx} cy={cy} innerRadius={outerRadius + 6} outerRadius={outerRadius + 9} startAngle={startAngle} endAngle={endAngle} fill={fill} opacity={0.4} />
+      <text x={cx} y={cy - 10} textAnchor="middle" fill="currentColor" className="text-foreground" fontSize={22} fontWeight={700}>
+        {value}
+      </text>
+      <text x={cx} y={cy + 8} textAnchor="middle" fill="currentColor" className="text-muted-foreground" fontSize={10}>
+        {payload.condition}
+      </text>
+      <text x={cx} y={cy + 22} textAnchor="middle" fill="currentColor" className="text-muted-foreground" fontSize={10}>
+        {(percent * 100).toFixed(0)}%
+      </text>
+    </g>
+  );
+};
+
 // Center text when no slice is active
 const renderCenterText = (cx: number, cy: number, total: number) => (
   <g>
@@ -83,6 +106,7 @@ export default function Dashboard() {
   const { data: labelMapData } = useLabelMap();
   const [activeDonutIndex, setActiveDonutIndex] = useState<number | undefined>(undefined);
   const [activeConditionIndex, setActiveConditionIndex] = useState<number | undefined>(undefined);
+  const [selectedCondition, setSelectedCondition] = useState<string | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
   const onDonutEnter = useCallback((_: any, index: number) => setActiveDonutIndex(index), []);
@@ -108,9 +132,27 @@ export default function Dashboard() {
   // Show selected slice when not hovering
   const effectiveDonutIndex = activeDonutIndex !== undefined ? activeDonutIndex : selectedDonutIndex;
 
+  // Compute the selected condition's donut index
+  const selectedConditionDonutIndex = useMemo(() => {
+    if (!selectedCondition) return undefined;
+    const idx = conditionSummaryData.findIndex(d => d.condition === selectedCondition);
+    return idx >= 0 ? idx : undefined;
+  }, [selectedCondition, conditionSummaryData]);
+
+  // Show selected condition slice when not hovering
+  const effectiveConditionIndex = activeConditionIndex !== undefined ? activeConditionIndex : selectedConditionDonutIndex;
+
   const [defectPage, setDefectPage] = useState(1);
   const [defectPageSize] = useState(10);
   const [defectTableMeta, setDefectTableMeta] = useState({ total: 0, pages: 0 });
+  const [defectSortBy, setDefectSortBy] = useState("defects");
+  const [defectSortOrder, setDefectSortOrder] = useState<"asc" | "desc">("desc");
+
+  const [roadPage, setRoadPage] = useState(1);
+  const [roadPageSize] = useState(10);
+  const [roadTableMeta, setRoadTableMeta] = useState({ total: 0, pages: 0 });
+  const [roadSortBy, setRoadSortBy] = useState("defects");
+  const [roadSortOrder, setRoadSortOrder] = useState<"asc" | "desc">("desc");
 
   // Anomaly data from API
   const [defectByAsset, setDefectByAsset] = useState<any[]>([]);
@@ -123,6 +165,39 @@ export default function Dashboard() {
       setExportingKeys(prev => { const s = new Set(prev); s.delete(key); return s; });
     }
   }, []);
+
+  // Helper: toggle sort for a table
+  const handleDefectSort = useCallback((col: string) => {
+    setDefectSortBy(prev => {
+      if (prev === col) {
+        setDefectSortOrder(o => o === "asc" ? "desc" : "asc");
+        return col;
+      }
+      setDefectSortOrder("desc");
+      return col;
+    });
+    setDefectPage(1);
+  }, []);
+
+  const handleRoadSort = useCallback((col: string) => {
+    setRoadSortBy(prev => {
+      if (prev === col) {
+        setRoadSortOrder(o => o === "asc" ? "desc" : "asc");
+        return col;
+      }
+      setRoadSortOrder("desc");
+      return col;
+    });
+    setRoadPage(1);
+  }, []);
+
+  // Sort icon helper
+  const SortIcon = ({ col, activeSortBy, activeSortOrder }: { col: string; activeSortBy: string; activeSortOrder: "asc" | "desc" }) => {
+    if (activeSortBy !== col) return <ArrowUpDown className="h-3 w-3 ml-1 inline opacity-40" />;
+    return activeSortOrder === "asc"
+      ? <ArrowUp className="h-3 w-3 ml-1 inline" />
+      : <ArrowDown className="h-3 w-3 ml-1 inline" />;
+  };
 
   // Helper to get category display name from labelMap
   const getCategoryDisplayName = useCallback((item) => {
@@ -148,10 +223,9 @@ export default function Dashboard() {
     (async () => {
       try {
         setLoading(true);
-        const [kpisResp, assetsByCategoryResp, topRoadsResp] = await Promise.all([
+        const [kpisResp, assetsByCategoryResp] = await Promise.all([
           api.dashboard.kpis(timePeriod),
           api.dashboard.assetsByCategory(),
-          api.dashboard.topAnomalyRoads(),
         ]);
         if (kpisResp) setKpis(kpisResp);
         if (assetsByCategoryResp?.items && assetsByCategoryResp.items.length > 0) {
@@ -163,10 +237,6 @@ export default function Dashboard() {
             }))
           );
         }
-
-        if (topRoadsResp?.items && topRoadsResp.items.length > 0) {
-          setTopDefectRoads(topRoadsResp.items);
-        }
       } catch (err) {
         console.error("Failed to load dashboard data:", err);
       } finally {
@@ -175,11 +245,11 @@ export default function Dashboard() {
     })();
   }, [timePeriod, labelMapData, getCategoryDisplayName]);
 
-  // Load Defects by Asset Type data (paginated, sorted by damaged count)
+  // Load Defects by Asset Type data (paginated, sortable)
   useEffect(() => {
     (async () => {
       try {
-        const resp = await api.dashboard.topAssetTypes(defectPage, defectPageSize, selectedCategoryId || undefined, "damaged");
+        const resp = await api.dashboard.topAssetTypes(defectPage, defectPageSize, selectedCategoryId || undefined, "damaged", defectSortBy, defectSortOrder);
         if (resp?.items) {
           setDefectByAsset(
             resp.items.map((item: any) => ({
@@ -198,7 +268,22 @@ export default function Dashboard() {
         console.error("Failed to load anomaly data:", err);
       }
     })();
-  }, [labelMapData, selectedCategoryId, defectPage, defectPageSize, getCategoryDisplayName, getAssetDisplayName]);
+  }, [labelMapData, selectedCategoryId, defectPage, defectPageSize, defectSortBy, defectSortOrder, getCategoryDisplayName, getAssetDisplayName]);
+
+  // Load Roads (paginated, sortable)
+  useEffect(() => {
+    (async () => {
+      try {
+        const resp = await api.dashboard.topAnomalyRoads(roadPage, roadPageSize, roadSortBy, roadSortOrder);
+        if (resp?.items) {
+          setTopDefectRoads(resp.items);
+          setRoadTableMeta({ total: resp.total || 0, pages: resp.pages || 1 });
+        }
+      } catch (err) {
+        console.error("Failed to load roads data:", err);
+      }
+    })();
+  }, [roadPage, roadPageSize, roadSortBy, roadSortOrder]);
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-accent/10 to-background">
       {/* Header */}
@@ -384,25 +469,9 @@ export default function Dashboard() {
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
                     <Pie
-                      activeIndex={activeConditionIndex}
-                      activeShape={(props: any) => {
-                        const { cx, cy, innerRadius, outerRadius, startAngle, endAngle, fill, payload, value, percent } = props;
-                        return (
-                          <g>
-                            <Sector cx={cx} cy={cy} innerRadius={innerRadius - 3} outerRadius={outerRadius + 4} startAngle={startAngle} endAngle={endAngle} fill={fill} opacity={0.9} />
-                            <Sector cx={cx} cy={cy} innerRadius={outerRadius + 6} outerRadius={outerRadius + 9} startAngle={startAngle} endAngle={endAngle} fill={fill} opacity={0.4} />
-                            <text x={cx} y={cy - 10} textAnchor="middle" fill="currentColor" className="text-foreground" fontSize={22} fontWeight={700}>
-                              {value}
-                            </text>
-                            <text x={cx} y={cy + 8} textAnchor="middle" fill="currentColor" className="text-muted-foreground" fontSize={10}>
-                              {payload.condition}
-                            </text>
-                            <text x={cx} y={cy + 22} textAnchor="middle" fill="currentColor" className="text-muted-foreground" fontSize={10}>
-                              {(percent * 100).toFixed(0)}%
-                            </text>
-                          </g>
-                        );
-                      }}
+                      className="recharts-sector"
+                      activeIndex={effectiveConditionIndex !== undefined ? effectiveConditionIndex : undefined}
+                      activeShape={effectiveConditionIndex !== undefined ? renderActiveConditionShape : undefined}
                       data={conditionSummaryData}
                       cx="50%"
                       cy="50%"
@@ -415,18 +484,27 @@ export default function Dashboard() {
                       strokeWidth={2}
                       onMouseEnter={(_, index) => setActiveConditionIndex(index)}
                       onMouseLeave={() => setActiveConditionIndex(undefined)}
-                      style={{ cursor: 'pointer' }}
+                      onClick={(_, index) => {
+                        const item = conditionSummaryData[index];
+                        const cond = item?.condition;
+                        if (selectedCondition === cond) {
+                          setSelectedCondition(null);
+                        } else {
+                          setSelectedCondition(cond);
+                        }
+                      }}
+                      style={{ cursor: 'pointer', outline: 'none', border: 'none' }}
                     >
                       {conditionSummaryData.map((entry) => (
-                        <Cell key={entry.condition} name={"ASds"} fill={CONDITION_COLORS[entry.condition] || "#fff"} />
+                        <Cell key={entry.condition} fill={CONDITION_COLORS[entry.condition] || "#fff"} />
                       ))}
                     </Pie>
-                    {activeConditionIndex === undefined && (
+                    {effectiveConditionIndex === undefined && (
                       <text x="50%" y="46%" textAnchor="middle" fill="currentColor" className="text-foreground" fontSize={22} fontWeight={700}>
                         {conditionSummaryData.reduce((sum, d) => sum + d.count, 0)}
                       </text>
                     )}
-                    {activeConditionIndex === undefined && (
+                    {effectiveConditionIndex === undefined && (
                       <text x="50%" y="56%" textAnchor="middle" fill="currentColor" className="text-muted-foreground" fontSize={10}>
                         Total Assets
                       </text>
@@ -436,39 +514,50 @@ export default function Dashboard() {
               </div>
             </div>
             {/* Legend */}
-            <div className="px-5 pb-12 flex-1 flex flex-col justify-end gap-4">
-              {conditionSummaryData.map((d) => {
+            <div className="px-5 pb-2 flex-1 flex flex-col justify-end gap-4">
+              {conditionSummaryData.map((d, i) => {
                 const total = conditionSummaryData.reduce((s, c) => s + c.count, 0);
                 const pct = total > 0 ? Math.round((d.count / total) * 100) : 0;
-                const condColors: Record<string, string> = { Good: "#16a34a", Damaged: "#ef4444" };
                 return (
                   <div
                     key={d.condition}
-                    className="flex items-center gap-2 text-xs px-2 py-1.5 rounded-md hover:bg-muted/40 transition-colors"
+                    className={cn(
+                      "flex items-center gap-2 text-xs px-2 py-1.5 rounded-md transition-colors cursor-pointer",
+                      selectedCondition === d.condition ? "bg-muted-secondary/10 ring-1 ring-muted-secondary/30" : activeConditionIndex === i ? "bg-muted/80" : "hover:bg-muted/40"
+                    )}
+                    onMouseEnter={() => setActiveConditionIndex(i)}
+                    onMouseLeave={() => setActiveConditionIndex(undefined)}
+                    onClick={() => {
+                      if (selectedCondition === d.condition) {
+                        setSelectedCondition(null);
+                      } else {
+                        setSelectedCondition(d.condition);
+                      }
+                    }}
                   >
                     <span
                       className="w-2.5 h-2.5 rounded-full shrink-0"
-                      style={{ backgroundColor: condColors[d.condition] || "#888" }}
+                      style={{ backgroundColor: CONDITION_COLORS[d.condition] || "#888" }}
                     />
-                    <span className="text-foreground font-medium text-xs capitalize">{d.condition}</span>
+                    <span className="text-foreground font-medium text-sm capitalize">{d.condition}</span>
                     <span className="text-muted-foreground text-[11px] ml-1">{pct}%</span>
                     <span className="font-bold text-foreground ml-auto tabular-nums text-[11px]">{d.count}</span>
                   </div>
                 );
               })}
             </div>
-            {/* <div className="px-5 pb-3">
+            <div className="px-5 pb-3">
               <Button
                 variant="outline"
                 size="sm"
-                className="w-full h-7 text-[11px] gap-1.5"
-                onClick={() => navigate('/gis')}
+                className="w-full h-7 text-sm gap-1.5"
+                onClick={() => navigate(selectedCondition ? `/asset-library?condition=${encodeURIComponent(selectedCondition.toLowerCase())}` : '/asset-library')}
               >
                 <MapPin className="h-3 w-3" />
-                View All on Map
+                {selectedCondition ? `View ${selectedCondition} Assets on Map` : "View All on Map"}
                 <ArrowUpRight className="h-3 w-3" />
               </Button>
-            </div> */}
+            </div>
           </Card>
         </div>
 
@@ -549,10 +638,30 @@ export default function Dashboard() {
             <Table>
               <TableHeader className="top-0 z-10 bg-card">
                 <TableRow className="border-b hover:bg-transparent">
-                  <TableHead className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Asset Type</TableHead>
-                  <TableHead className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Category</TableHead>
-                  <TableHead className="text-sm font-semibold uppercase tracking-wider text-muted-foreground text-right">Total</TableHead>
-                  <TableHead className="text-sm font-semibold uppercase tracking-wider text-muted-foreground text-right">Defects</TableHead>
+                  <TableHead
+                    className="text-sm font-semibold uppercase tracking-wider text-muted-foreground cursor-pointer select-none hover:text-foreground transition-colors"
+                    onClick={() => handleDefectSort("type")}
+                  >
+                    Asset Type<SortIcon col="type" activeSortBy={defectSortBy} activeSortOrder={defectSortOrder} />
+                  </TableHead>
+                  <TableHead
+                    className="text-sm font-semibold uppercase tracking-wider text-muted-foreground cursor-pointer select-none hover:text-foreground transition-colors"
+                    onClick={() => handleDefectSort("category")}
+                  >
+                    Category<SortIcon col="category" activeSortBy={defectSortBy} activeSortOrder={defectSortOrder} />
+                  </TableHead>
+                  <TableHead
+                    className="text-sm font-semibold uppercase tracking-wider text-muted-foreground text-right cursor-pointer select-none hover:text-foreground transition-colors"
+                    onClick={() => handleDefectSort("total")}
+                  >
+                    Total<SortIcon col="total" activeSortBy={defectSortBy} activeSortOrder={defectSortOrder} />
+                  </TableHead>
+                  <TableHead
+                    className="text-sm font-semibold uppercase tracking-wider text-muted-foreground text-right cursor-pointer select-none hover:text-foreground transition-colors"
+                    onClick={() => handleDefectSort("defects")}
+                  >
+                    Defects<SortIcon col="defects" activeSortBy={defectSortBy} activeSortOrder={defectSortOrder} />
+                  </TableHead>
                   <TableHead className="text-sm font-semibold uppercase tracking-wider text-muted-foreground text-right w-48">Actions</TableHead>
                 </TableRow>
               </TableHeader>
@@ -659,10 +768,30 @@ export default function Dashboard() {
             <Table>
               <TableHeader className="top-0 z-10 bg-card">
                 <TableRow className="border-b border-border hover:bg-transparent">
-                  <TableHead className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Road</TableHead>
-                  <TableHead className="text-sm font-semibold uppercase tracking-wider text-muted-foreground text-right">Total</TableHead>
-                  <TableHead className="text-sm font-semibold uppercase tracking-wider text-muted-foreground text-right">Defects</TableHead>
-                  <TableHead className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Last Survey</TableHead>
+                  <TableHead
+                    className="text-sm font-semibold uppercase tracking-wider text-muted-foreground cursor-pointer select-none hover:text-foreground transition-colors"
+                    onClick={() => handleRoadSort("road")}
+                  >
+                    Road<SortIcon col="road" activeSortBy={roadSortBy} activeSortOrder={roadSortOrder} />
+                  </TableHead>
+                  <TableHead
+                    className="text-sm font-semibold uppercase tracking-wider text-muted-foreground text-right cursor-pointer select-none hover:text-foreground transition-colors"
+                    onClick={() => handleRoadSort("total")}
+                  >
+                    Total<SortIcon col="total" activeSortBy={roadSortBy} activeSortOrder={roadSortOrder} />
+                  </TableHead>
+                  <TableHead
+                    className="text-sm font-semibold uppercase tracking-wider text-muted-foreground text-right cursor-pointer select-none hover:text-foreground transition-colors"
+                    onClick={() => handleRoadSort("defects")}
+                  >
+                    Defects<SortIcon col="defects" activeSortBy={roadSortBy} activeSortOrder={roadSortOrder} />
+                  </TableHead>
+                  <TableHead
+                    className="text-sm font-semibold uppercase tracking-wider text-muted-foreground cursor-pointer select-none hover:text-foreground transition-colors"
+                    onClick={() => handleRoadSort("last_survey")}
+                  >
+                    Last Survey<SortIcon col="last_survey" activeSortBy={roadSortBy} activeSortOrder={roadSortOrder} />
+                  </TableHead>
                   <TableHead className="text-sm font-semibold uppercase tracking-wider text-muted-foreground text-right w-48">Actions</TableHead>
                 </TableRow>
               </TableHeader>
@@ -707,6 +836,22 @@ export default function Dashboard() {
                 ))}
               </TableBody>
             </Table>
+          </div>
+          <div className="flex items-center justify-between px-4 py-2 border-t border-border">
+            <span className="text-sm text-muted-foreground tabular-nums">
+              {roadTableMeta.total > 0
+                ? `${(roadPage - 1) * roadPageSize + 1}–${Math.min(roadPage * roadPageSize, roadTableMeta.total)} of ${roadTableMeta.total}`
+                : "No results"}
+            </span>
+            <div className="flex items-center gap-1">
+              <span className="text-sm text-muted-foreground tabular-nums mr-1">{roadPage}/{roadTableMeta.pages || 1}</span>
+              <Button variant="ghost" size="icon" className="h-7 w-7" disabled={roadPage <= 1} onClick={() => setRoadPage(p => p - 1)}>
+                <ChevronLeft className="h-3.5 w-3.5" />
+              </Button>
+              <Button variant="ghost" size="icon" className="h-7 w-7" disabled={roadPage >= (roadTableMeta.pages || 1)} onClick={() => setRoadPage(p => p + 1)}>
+                <ChevronRight className="h-3.5 w-3.5" />
+              </Button>
+            </div>
           </div>
         </Card>
       </div>

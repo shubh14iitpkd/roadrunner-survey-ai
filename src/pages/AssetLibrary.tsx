@@ -228,6 +228,8 @@ export default function AssetLibrary() {
     const routeIdParam = searchParams.get("route_id");
     if (typeParam) setSelectedAssetTypes([typeParam]);
     if (categoryParam) setCategoryFilter(categoryParam);
+    const conditionParam = searchParams.get("condition");
+    if (conditionParam && (conditionParam === "good" || conditionParam === "damaged")) setConditionFilter(conditionParam);
     if (routeIdParam) setSelectedRouteId(Number(routeIdParam));
   }, [searchParams]);
 

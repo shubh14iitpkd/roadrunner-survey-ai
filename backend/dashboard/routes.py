@@ -158,19 +158,29 @@ def top_asset_types():
 	limit = request.args.get("limit", 5, type=int)
 	category_id = request.args.get("category_id", None)
 	condition = request.args.get("condition", None)
+	sort_by = request.args.get("sort_by", "damaged_count")  # type, category, count, damaged_count
+	sort_order = request.args.get("sort_order", "desc")  # asc | desc
 	skip = (page - 1) * limit
 
 	db = get_db()
+
+	# Map frontend sort keys to MongoDB field names
+	SORT_FIELD_MAP = {
+		"type": "asset_type",
+		"category": "category_id",
+		"total": "count",
+		"defects": "damaged_count",
+		# allow raw field names as fallback
+		"count": "count",
+		"damaged_count": "damaged_count",
+	}
+	sort_field = SORT_FIELD_MAP.get(sort_by, "damaged_count")
+	sort_dir = 1 if sort_order == "asc" else -1
 
 	# Build match query on master_assets
 	match_query: dict = {}
 	if category_id:
 		match_query["category_id"] = category_id
-	# if condition:
-	# 	if condition == "damaged":
-	# 		match_query["latest_condition"] = {"$ne": "good"}
-	# 	else:
-	# 		match_query["latest_condition"] = condition
 
 	# Group by group_id (fall back to asset_id when group_id is absent)
 	group_key = {"$ifNull": ["$group_id", "$asset_id"]}
@@ -194,12 +204,13 @@ def top_asset_types():
 			"_id": group_key,
 			"asset_id": {"$first": "$asset_id"},
 			"asset_type": {"$first": "$asset_type"},
+			"category_id": {"$first": "$category_id"},
 			"count": {"$sum": 1},
 			"damaged_count": {
 				"$sum": {"$cond": [{"$ne": ["$latest_condition", "good"]}, 1, 0]}
 			},
 		}},
-		{"$sort": {"damaged_count": -1, "count": -1}},
+		{"$sort": {sort_field: sort_dir }},
 		{"$skip": skip},
 		{"$limit": limit},
 	])
@@ -247,43 +258,97 @@ def top_asset_types():
 @dashboard_bp.get("/tables/top-anomaly-roads")
 def top_anomaly_roads():
 	"""
-	Get top roads with anomalies
+	Get roads with anomalies (paginated, sortable)
 
 	tags:
 	  - Dashboard
+	parameters:
+	  - name: page
+	    in: query
+	    type: integer
+	    default: 1
+	  - name: limit
+	    in: query
+	    type: integer
+	    default: 10
+	  - name: sort_by
+	    in: query
+	    type: string
+	    description: Field to sort by (road, total, defects, last_survey)
+	  - name: sort_order
+	    in: query
+	    type: string
+	    description: Sort direction (asc | desc)
 	responses:
 	  200:
 	    description: Table data retrieved successfully
 	"""
+	page = request.args.get("page", 1, type=int)
+	limit = request.args.get("limit", 10, type=int)
+	sort_by = request.args.get("sort_by", "defects")  # road, total, defects, last_survey
+	sort_order = request.args.get("sort_order", "desc")  # asc | desc
+	skip = (page - 1) * limit
+
 	db = get_db()
 
-	agg = db.master_assets.aggregate([
+	# Step 1: Aggregate defects per route from master_assets
+	defect_agg = db.master_assets.aggregate([
 		{"$match": {"latest_condition": {"$ne": "good"}}},
-		{"$group": {"_id": "$route_id", "count": {"$sum": 1}}},
-		{"$sort": {"count": -1}},
-		{"$limit": 5},
+		{"$group": {"_id": "$route_id", "defect_count": {"$sum": 1}}},
 	])
+	defect_map = {d["_id"]: d["defect_count"] for d in defect_agg}
 
-	items = []
-	for d in agg:
-		route_id = d.get("_id")
-		road = db.roads.find_one({"route_id": route_id})
-		# Find latest survey date for this route
+	# Step 2: Total asset count per route
+	total_agg = db.master_assets.aggregate([
+		{"$group": {"_id": "$route_id", "total_count": {"$sum": 1}}},
+	])
+	total_map = {d["_id"]: d["total_count"] for d in total_agg}
+
+	# Step 3: Fetch all roads and enrich
+	all_roads = list(db.roads.find({}, {"route_id": 1, "road_name": 1}))
+
+	items_raw = []
+	for road in all_roads:
+		route_id = road.get("route_id")
+		road_name = road.get("road_name") or f"Route {route_id}"
+		defects = defect_map.get(route_id, 0)
+		total = total_map.get(route_id, 0)
+		# Fetch latest survey date
 		latest_survey = db.surveys.find_one(
 			{"route_id": route_id, "is_latest": True},
 			{"survey_date": 1},
 		)
 		survey_date = latest_survey.get("survey_date") if latest_survey else None
-		total_count = db.master_assets.count_documents({"route_id": route_id})
-		items.append({
-			"road": road.get("road_name") if road else f"Route {route_id}",
+		items_raw.append({
+			"road": road_name,
 			"route_id": route_id,
-			"count": d.get("count", 0),
-			"total_count": total_count,
+			"count": defects,
+			"total_count": total,
 			"lastSurvey": survey_date,
 		})
 
-	return jsonify({"items": items})
+	# Step 4: Sort in Python
+	reverse = sort_order != "asc"
+	if sort_by == "road":
+		items_raw.sort(key=lambda x: (x["road"] or "").lower(), reverse=reverse)
+	elif sort_by == "total":
+		items_raw.sort(key=lambda x: x["total_count"] or 0, reverse=reverse)
+	elif sort_by == "last_survey":
+		items_raw.sort(key=lambda x: x["lastSurvey"] or "", reverse=reverse)
+	else:  # defects (default)
+		items_raw.sort(key=lambda x: x["count"] or 0, reverse=reverse)
+
+	# Step 5: Paginate
+	total_count = len(items_raw)
+	total_pages = math.ceil(total_count / limit) if limit else 0
+	paged_items = items_raw[skip: skip + limit]
+
+	return jsonify({
+		"items": paged_items,
+		"total": total_count,
+		"page": page,
+		"pages": total_pages,
+	})
 
 
 @dashboard_bp.get("/recent-surveys")
