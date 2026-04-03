@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Plus, Upload, MapPin, Search, FileJson, FileSpreadsheet, Database, Pencil, Check, X, Map, Route, TrendingUp, CircleCheck } from "lucide-react";
+import { Plus, Upload, MapPin, Search, ArrowUpDown, ArrowDown, ArrowUp, Database, Pencil, Check, X, Map, Route, TrendingUp, CircleCheck } from "lucide-react";
 import { Link } from "react-router-dom";
 import {
   Dialog,
@@ -27,17 +27,8 @@ import { api } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNavigate } from 'react-router-dom';
 
-const ROAD_TYPES = [
-  "National/Expressway",
-  "Municipal/Urban Road",
-  "Local Access Road",
-  "Special Zone"
-];
-
 const ROAD_SIDES = ["LHS", "RHS"];
-
-const CHART_COLORS = ["hsl(var(--chart-1))", "hsl(var(--chart-2))", "hsl(var(--chart-3))", "hsl(var(--chart-4))"];
-
+type RoadSortKey = "route_id" | "road_name" | "distance" | "road_side" | null
 export default function RoadRegister() {
   const [roads, setRoads] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -46,6 +37,18 @@ export default function RoadRegister() {
   const [isImportDialogOpen, setIsImportDialogOpen] = useState(false);
   const [editingRoadId, setEditingRoadId] = useState<number | null>(null);
   const [editingRoadName, setEditingRoadName] = useState("");
+  
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc" | null>(null);
+  const [sortBy, setSortBy] = useState<RoadSortKey>(null);
+
+  const handleSortKeySelect= async (key: RoadSortKey) => {
+    if (key === sortBy) {
+      setSortOrder(sortOrder === "asc" ? "desc" : "asc");
+    } else {
+      setSortBy(key);
+      setSortOrder("asc");
+    }
+  }
 
   // Form state for Add Road dialog
   const [startLat, setStartLat] = useState("");
@@ -71,6 +74,24 @@ export default function RoadRegister() {
 
   const { user } = useAuth();
   const navigate = useNavigate();
+
+  useEffect(()=>{
+    if(sortBy && sortOrder){
+      const sortedRoads = [...roads].sort((a, b)=>{
+        if(sortBy === "road_name"){
+          return sortOrder === "asc" ? a.road_name.localeCompare(b.road_name) : b.road_name.localeCompare(a.road_name);
+        } else if (sortBy === "distance"){
+          return sortOrder === "asc" ? a.estimated_distance_km - b.estimated_distance_km : b.estimated_distance_km - a.estimated_distance_km;
+        } else if (sortBy === "road_side"){
+          return sortOrder === "asc" ? a.road_side.localeCompare(b.road_side) : b.road_side.localeCompare(a.road_side);
+        } else if (sortBy === "route_id"){
+          return sortOrder === "asc" ? a.route_id - b.route_id : b.route_id - a.route_id;
+        }
+      })
+
+      setRoads(sortedRoads)
+    }
+  }, [sortBy, sortOrder])
 
   const loadRoads = async () => {
     try {
@@ -504,6 +525,15 @@ export default function RoadRegister() {
     name,
     value
   }));
+
+    // Sort icon helper
+  const SortIcon = ({ col, activeSortBy, activeSortOrder }: { col: string; activeSortBy: string; activeSortOrder: "asc" | "desc" }) => {
+      if (activeSortBy !== col) return <ArrowUpDown className="h-3 w-3 ml-1 inline opacity-40" />;
+
+      return activeSortOrder === "asc"
+        ? <ArrowUp className="h-3 w-3 ml-1 inline" />
+        : <ArrowDown className="h-3 w-3 ml-1 inline" />;
+  };
 
   const handleAddRoad = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -1025,12 +1055,30 @@ export default function RoadRegister() {
             <table className="w-full min-w-[1400px]">
               <thead className="bg-gradient-to-r from-primary/5 via-accent/5 to-primary/5 border-b-2 border-primary/20">
                 <tr>
-                  <th className="text-left p-4 font-semibold text-sm whitespace-nowrap">Route ID</th>
-                  <th className="text-left p-4 font-semibold text-sm whitespace-nowrap">Road Name</th>
+                  <th 
+                    className="text-left p-4 font-semibold cursor-pointer text-sm whitespace-nowrap" 
+                    onClick={()=>handleSortKeySelect("route_id")}>
+                      Route ID
+                      <SortIcon col="route_id" activeSortBy={sortBy} activeSortOrder={sortOrder} />
+                  </th>
+                  <th className="text-left p-4 font-semibold cursor-pointer text-sm whitespace-nowrap" onClick={()=>handleSortKeySelect("road_name")}>
+                    Road Name
+                    <SortIcon col="road_name" activeSortBy={sortBy} activeSortOrder={sortOrder} />
+                  </th>
                   <th className="text-left p-4 font-semibold text-sm whitespace-nowrap">Start Point</th>
                   <th className="text-left p-4 font-semibold text-sm whitespace-nowrap">End Point</th>
-                  <th className="text-left p-4 font-semibold text-sm whitespace-nowrap">Distance</th>
-                  <th className="text-left p-4 font-semibold text-sm whitespace-nowrap">Side</th>
+                  <th 
+                    className="text-left p-4 font-semibold cursor-pointer text-sm whitespace-nowrap" 
+                    onClick={()=>handleSortKeySelect("distance")}>
+                      Distance
+                      <SortIcon col="distance" activeSortBy={sortBy} activeSortOrder={sortOrder} />
+                  </th>
+                  <th 
+                    className="text-left p-4 font-semibold cursor-pointer text-sm whitespace-nowrap" 
+                    onClick={()=>handleSortKeySelect("road_side")}>
+                      Side
+                      <SortIcon col="road_side" activeSortBy={sortBy} activeSortOrder={sortOrder} />
+                  </th>
                   <th className="text-left p-4 font-semibold text-sm whitespace-nowrap">Actions</th>
                 </tr>
               </thead>
@@ -1110,7 +1158,7 @@ export default function RoadRegister() {
                       </div>
                     </td>
                     <td className="p-4">
-                      <Badge variant="secondary" className="font-semibold">
+                      <Badge variant="secondary" className="font-semibold flex !nowrap">
                         {road.estimated_distance_km?.toFixed(2) || "—"} km
                       </Badge>
                     </td>
