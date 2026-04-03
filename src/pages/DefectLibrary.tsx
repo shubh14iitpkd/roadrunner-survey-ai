@@ -184,6 +184,7 @@ export default function DefectLibrary() {
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [markedGoodCount, setMarkingGoodCount] = useState(0);
   const { data: labelMapData } = useLabelMap();
 
   const [selectedRouteId, setSelectedRouteId] = useState<number | null>(null);
@@ -454,6 +455,7 @@ export default function DefectLibrary() {
     try {
       await api.assets.markAsGood(mongoId, { name: surveyorName, user_id: surveyorId });
       setGoodSet((prev) => new Set(prev).add(assetKey));
+      setMarkingGoodCount((prev) => prev + 1);
       toast.success(`Asset ${asset.assetDisplayId} marked as good`);
     } catch (err: any) {
       toast.error(err?.message || "Failed to mark asset as good");
@@ -473,6 +475,7 @@ export default function DefectLibrary() {
     try {
       await api.assets.unmarkGood(mongoId);
       setGoodSet((prev) => { const s = new Set(prev); s.delete(assetKey); return s; });
+      setMarkingGoodCount((prev) => prev - 1);
       toast.success(`Asset ${asset.assetDisplayId} reverted to damaged`);
     } catch (err: any) {
       toast.error(err?.message || "Failed to revert asset");
@@ -626,7 +629,7 @@ export default function DefectLibrary() {
 
       {/* Filter Strip */}
       <AssetFilterStrip
-        filteredCount={filteredDefects.length}
+        filteredCount={filteredDefects.length - markedGoodCount}
         countLabel="defects"
         directionFilter={directionFilter}
         onDirectionChange={setDirectionFilter}
