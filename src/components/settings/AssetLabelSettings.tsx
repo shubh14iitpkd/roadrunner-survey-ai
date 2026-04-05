@@ -301,11 +301,11 @@ export default function AssetLabelSettings() {
                             )}
                             <div className="flex items-center gap-2 min-w-0">
                               <span className="font-medium text-sm">{group.displayName}</span>
-                              {group.groupId && group.defaultGroupId && group.groupId !== group.defaultGroupId && (
+                              {/* {group.groupId && group.defaultGroupId && group.groupId !== group.defaultGroupId && (
                                 <Badge variant="outline" className="text-xs h-5 px-1.5 font-normal text-muted-foreground">
                                   Default: {group.defaultGroupId}
                                 </Badge>
-                              )}
+                              )} */}
                             </div>
                           </div>
                           <div className="flex items-center gap-0.5">
