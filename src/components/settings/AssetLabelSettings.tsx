@@ -232,11 +232,6 @@ export default function AssetLabelSettings() {
                   <>
                     <div className="flex flex-col min-w-0">
                       <span className="font-medium text-sm truncate">{cat.display_name}</span>
-                      {cat.display_name !== cat.original_display_name && (
-                        <span className="text-xs text-muted-foreground truncate">
-                          Default: {cat.original_display_name}
-                        </span>
-                      )}
                     </div>
                     <Button
                       size="icon"
@@ -294,39 +289,6 @@ export default function AssetLabelSettings() {
                     className={`border overscroll-none dark:hover:border-muted-secondary rounded-md px-3 bg-card transition-colors hover:bg-accent/5 ${isEditing ? 'border-primary/50 ring-1 ring-primary/20 bg-accent/10' : ''}`}
                   >
                     <div className="flex items-center dark:hover:border-muted-secondary justify-between py-2.5">
-                      {isEditing ? (
-                        <div className="flex items-center gap-2 flex-1 animate-in fade-in zoom-in-95 duration-200">
-                          <Input
-                            value={editValue}
-                            onChange={(e) => setEditValue(e.target.value)}
-                            className="h-8 text-sm"
-                            autoFocus
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter") handleSaveLabel(group.assetIds, group.groupId);
-                              if (e.key === "Escape") handleCancel();
-                            }}
-                          />
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            className="h-8 w-8 hover:bg-green-500/10 hover:text-green-600"
-                            onClick={() => handleSaveLabel(group.assetIds, group.groupId)}
-                            disabled={saving}
-                          >
-                            <Check className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            className="h-8 w-8 hover:bg-destructive/10 hover:text-destructive"
-                            onClick={handleCancel}
-                            disabled={saving}
-                          >
-                            <X className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      ) : (
-                        <>
                         {/* Label Item */}
                           <div className="flex items-center gap-2 dark:hover:border-muted-secondary flex-1 min-w-0 pr-4">
                             {/* Icon preview */}
@@ -355,7 +317,7 @@ export default function AssetLabelSettings() {
                               onClick={(e) => {
                                 e.stopPropagation();
                                 setIconEditTarget({
-                                  displayName: group.displayName,
+                                  displayName: group.groupId,
                                   defaultGroupId: group.defaultGroupId ?? group.groupId ?? "",
                                   assetIds: group.assetIds,
                                   iconUrl: group.iconUrl,
@@ -367,21 +329,7 @@ export default function AssetLabelSettings() {
                             >
                               <Pencil className="h-3.5 w-3.5" />
                             </Button>
-                            {/* <Button
-                              size="icon"
-                              variant="ghost"
-                              className="h-7 w-7 text-muted-foreground hover:text-foreground"
-                              title="Edit display name"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleEdit(`label-${key}`, group.displayName);
-                              }}
-                            >
-                              <Pencil className="h-3.5 w-3.5" />
-                            </Button> */}
                           </div>
-                        </>
-                      )}
                     </div>
                   </AccordionItem>
                 );
