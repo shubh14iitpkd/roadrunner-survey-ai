@@ -113,7 +113,7 @@ export function LabelMapProvider({ children }: { children: ReactNode }) {
         if (updatedLabels[aid]) {
           if (iconConfig.reset) {
             const { icon_url: _a, icon_size: _b, icon_anchor: _c, ...rest } = updatedLabels[aid];
-            updatedLabels[aid] = { ...rest, display_name: rest.default_group_id };
+            updatedLabels[aid] = { ...rest, display_name: rest.default_group_id, group_id: rest.default_group_id };
           } else {
             updatedLabels[aid] = {
               ...updatedLabels[aid],
