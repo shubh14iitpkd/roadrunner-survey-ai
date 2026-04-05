@@ -241,8 +241,8 @@ export const api = {
 	},
 	user: {
 		getResolvedLabelMap: (userId: string) => apiFetch(`/api/assets/${userId}/resolved-map`),
-		updateGlobalLabel: (assetIds: string[], displayName: string, oldGroupId?: string, newGroupId?: string) =>
-			apiFetch(`/api/assets/global-label`, { method: "PUT", body: JSON.stringify({ asset_ids: assetIds, display_name: displayName, old_group_id: oldGroupId, new_group_id: newGroupId }) }),
+		updateGlobalLabel: (newGroupId: string, oldGroupId: string) =>
+			apiFetch(`/api/assets/global-label`, { method: "PUT", body: JSON.stringify({ new_group_id: newGroupId, old_group_id: oldGroupId }) }),
 		updateGlobalCategory: (categoryId: string, displayName: string) =>
 			apiFetch(`/api/assets/global-category`, { method: "PUT", body: JSON.stringify({ category_id: categoryId, display_name: displayName }) }),
 		updatePassword: (userId: string, payload: any) =>

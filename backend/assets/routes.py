@@ -733,8 +733,9 @@ def update_icon_config():
 		update_fields["icon_size"] = data["icon_size"]
 	if "icon_anchor" in data:
 		update_fields["icon_anchor"] = data["icon_anchor"]
-	if "display_name" in data:
-		update_fields["display_name"] = data["display_name"]
+	if "group_id" in data:
+		update_fields["group_id"] = data["group_id"]
+		update_fields["display_name"] = data["group_id"]
 
 	if not update_fields:
 		return jsonify({"error": "no fields to update"}), 400
@@ -814,6 +815,8 @@ def move_asset_category():
 		{"asset_id": {"$in": asset_ids}},
 		{"$set": {"category_id": new_category_id}}
 	)
+
+	# TODO: update asset category in frames as well
 
 	return jsonify({"ok": True, "updated_category": new_category_id})
 
@@ -909,7 +912,7 @@ def upload_icon():
 @assets_bp.get("/<user_id>/resolved-map", endpoint="resolved_map")
 def get_resolved_map(user_id: str):
 	"""
-	Get resolved asset map for a user (including preferences)
+	Get resolved asset map (system-wide values, no per-user overrides)
 	---
 	tags:
 	  - Assets
@@ -918,7 +921,7 @@ def get_resolved_map(user_id: str):
 	    in: path
 	    type: string
 	    required: false
-	    description: The ID of the user
+	    description: The ID of the user (kept for URL compatibility, no longer used)
 	responses:
 	  200:
 	    description: Resolved map retrieved successfully
@@ -934,22 +937,14 @@ def get_resolved_map(user_id: str):
 	system_cats = list(db.system_asset_categories.find())
 	system_labels = list(db.system_asset_labels.find())
 
-	try:
-		prefs = db.user_preferences.find_one({"user_id": ObjectId(user_id)}) or {}
-	except:
-		prefs = {}
-	
-	labels_override = prefs.get("label_overrides", {})
-	cat_override = prefs.get("category_overrides", {})
-
 	resolved_cats = {}
 	for cat in system_cats:
 		cid = cat["category_id"]
 		resolved_cats[cid] = {
 			"category_id": cid,
 			"default_name": cat["default_name"],
-			"original_display_name": cat["display_name"],
-			"display_name": cat_override.get(cid, {}).get("display_name") or cat["display_name"]
+			"original_display_name": cat["default_name"],
+			"display_name": cat["display_name"]
 		}
 		
 	resolved_labels = {}
@@ -958,12 +953,12 @@ def get_resolved_map(user_id: str):
 		entry = {
 			"asset_id": aid,
 			"category_id": l.get("category_id"),
-			"category_name": l.get("category_name"),  
+			"category_name": l.get("category_name"),
 			"default_name": l["default_name"],
 			"group_id": l.get("group_id"),
 			"default_group_id": l.get("default_group_id", ""),
-			"original_display_name": l["display_name"],
-			"display_name": labels_override.get(aid, {}).get("display_name") or l["display_name"]
+			"original_display_name": l["default_name"],
+			"display_name": l["display_name"]
 		}
 		
 		# Include icon config if present
@@ -979,3 +974,119 @@ def get_resolved_map(user_id: str):
 		"categories": resolved_cats,
 		"labels": resolved_labels
 	}
+
+
+@assets_bp.put("/global-label", endpoint="global_label_update")
+@role_required(["super_admin", "admin"])
+def update_global_label():
+	"""
+	Globally update display name for asset label types (admin only).
+	Writes directly to system_asset_labels.display_name.
+	For grouped assets (sharing a group_id), also renames group_id across
+	all rows to the new value so the grouping key stays consistent.
+	The original value is preserved in default_group_id for revert.
+	---
+	tags:
+	  - Assets
+	security:
+	  - Bearer: []
+	parameters:
+	  - name: body
+	    in: body
+	    required: true
+	    schema:
+	      type: object
+	      required:
+	        - asset_ids
+	        - display_name
+	      properties:
+	        asset_ids:
+	          type: array
+	          items:
+	            type: string
+	        display_name:
+	          type: string
+	        old_group_id:
+	          type: string
+	          description: If provided, renames group_id from this value to new_group_id on all rows sharing it
+	        new_group_id:
+	          type: string
+	          description: The new group_id value to assign (required if old_group_id is provided)
+	responses:
+	  200:
+	    description: Label updated globally
+	  400:
+	    description: Missing required fields
+	"""
+	data = request.get_json(silent=True) or {}
+	asset_ids = data.get("asset_ids") or []
+	old_group_id = data.get("old_group_id")
+	new_group_id = data.get("new_group_id")
+
+	if not asset_ids:
+		return jsonify({"error": "asset ids required"}), 400
+	if not new_group_id or not old_group_id:
+		return jsonify({"error": "group id required"}), 400
+
+	db = get_db()
+
+	print("UPDATING", old_group_id,"->", new_group_id)
+	db.system_asset_labels.update_many(
+		{"group_id": old_group_id},
+		{"$set": {"group_id": new_group_id}}
+	)
+
+	return jsonify({"ok": True})
+
+
+@assets_bp.put("/global-category", endpoint="global_category_update")
+@role_required(["super_admin", "admin"])
+def update_global_category():
+	"""
+	Globally update display name for an asset category (admin only).
+	Writes directly to system_asset_categories.display_name.
+	---
+	tags:
+	  - Assets
+	security:
+	  - Bearer: []
+	parameters:
+	  - name: body
+	    in: body
+	    required: true
+	    schema:
+	      type: object
+	      required:
+	        - category_id
+	        - display_name
+	      properties:
+	        category_id:
+	          type: string
+	        display_name:
+	          type: string
+	responses:
+	  200:
+	    description: Category updated globally
+	  400:
+	    description: Missing required fields
+	  404:
+	    description: Category not found
+	"""
+	data = request.get_json(silent=True) or {}
+	category_id = (data.get("category_id") or "").strip()
+	display_name = (data.get("display_name") or "").strip()
+
+	if not category_id:
+		return jsonify({"error": "category_id required"}), 400
+	if not display_name:
+		return jsonify({"error": "display_name required"}), 400
+
+	db = get_db()
+	res = db.system_asset_categories.update_one(
+		{"category_id": category_id},
+		{"$set": {"display_name": display_name}}
+	)
+	if res.matched_count == 0:
+		return jsonify({"error": "category not found"}), 404
+
+	return jsonify({"ok": True})

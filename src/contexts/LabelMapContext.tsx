@@ -7,6 +7,7 @@ interface ResolvedItem {
   asset_id?: string;
   group_id?: string;
   default_name: string;
+  default_group_id?: string;
   display_name: string;
   original_display_name: string;
   icon_url?: string;
@@ -24,7 +25,7 @@ export interface LabelMapContextType {
   loading: boolean;
   error: Error | null;
   updateCategoryLabel: (categoryId: string, displayName: string) => Promise<void>;
-  updateAssetLabel: (assetIds: string[], displayName: string) => Promise<void>;
+  updateAssetLabel: (assetIds: string[], displayName: string, oldGroupId?: string) => Promise<void>;
   updateAssetIcon: (assetIds: string[], iconConfig: { icon_url?: string; icon_size?: [number, number]; icon_anchor?: [number, number]; display_name?: string; reset?: boolean }) => Promise<void>;
   updateAssetCategory: (assetIds: string[], newCategoryId: string) => Promise<void>;
   refreshData: () => Promise<void>;
@@ -62,9 +63,7 @@ export function LabelMapProvider({ children }: { children: ReactNode }) {
   }, [user?.id]);
 
   const updateCategoryLabel = async (categoryId: string, displayName: string) => {
-    if (!user?.id) throw new Error("User not authenticated");
-
-    await api.user.updateCategoryPreference(user.id, categoryId, displayName);
+    await api.user.updateGlobalCategory(categoryId, displayName);
 
     // Update local state
     setData((prev) => {
@@ -82,10 +81,9 @@ export function LabelMapProvider({ children }: { children: ReactNode }) {
     });
   };
 
-  const updateAssetLabel = async (assetIds: string[], displayName: string) => {
-    if (!user?.id) throw new Error("User not authenticated");
+  const updateAssetLabel = async (assetIds: string[], newGroupId: string, oldGroupId?: string) => {
 
-    await api.user.updateLabelPreference(user.id, assetIds, displayName);
+    await api.user.updateGlobalLabel(newGroupId, oldGroupId);
 
     // Update local state for all member IDs
     setData((prev) => {
@@ -93,14 +91,18 @@ export function LabelMapProvider({ children }: { children: ReactNode }) {
       const updatedLabels = { ...prev.labels };
       for (const aid of assetIds) {
         if (updatedLabels[aid]) {
-          updatedLabels[aid] = { ...updatedLabels[aid], display_name: displayName };
+          updatedLabels[aid] = {
+            ...updatedLabels[aid],
+            display_name: newGroupId,
+            ...(newGroupId ? { group_id: newGroupId } : {}),
+          };
         }
       }
       return { ...prev, labels: updatedLabels };
     });
   };
 
-  const updateAssetIcon = async (assetIds: string[], iconConfig: { icon_url?: string; icon_size?: [number, number]; icon_anchor?: [number, number]; display_name?: string; reset?: boolean }) => {
+  const updateAssetIcon = async (assetIds: string[], iconConfig: { icon_url?: string; icon_size?: [number, number]; icon_anchor?: [number, number]; group_id?: string; reset?: boolean }) => {
     await api.user.updateAssetIconConfig(assetIds, iconConfig);
 
     // Update local state
@@ -111,14 +113,14 @@ export function LabelMapProvider({ children }: { children: ReactNode }) {
         if (updatedLabels[aid]) {
           if (iconConfig.reset) {
             const { icon_url: _a, icon_size: _b, icon_anchor: _c, ...rest } = updatedLabels[aid];
-            updatedLabels[aid] = { ...rest, display_name: rest.original_display_name };
+            updatedLabels[aid] = { ...rest, display_name: rest.default_group_id };
           } else {
             updatedLabels[aid] = {
               ...updatedLabels[aid],
               ...(iconConfig.icon_url !== undefined && { icon_url: iconConfig.icon_url }),
               ...(iconConfig.icon_size !== undefined && { icon_size: iconConfig.icon_size }),
               ...(iconConfig.icon_anchor !== undefined && { icon_anchor: iconConfig.icon_anchor }),
-              ...(iconConfig.display_name !== undefined && { display_name: iconConfig.display_name }),
+              ...(iconConfig.group_id !== undefined && { group_id: iconConfig.group_id, display_name: iconConfig.group_id }),
             };
           }
         }

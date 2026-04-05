@@ -17,7 +17,7 @@ interface AssetIconEditDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   displayName: string;
-  originalDisplayName: string;
+  defaultGroupId: string;
   assetIds: string[];
   currentIconUrl?: string;
   currentIconSize?: [number, number];
@@ -28,7 +28,7 @@ interface AssetIconEditDialogProps {
     icon_url?: string;
     icon_size?: [number, number];
     icon_anchor?: [number, number];
-    display_name?: string;
+    group_id?: string;
     reset?: boolean;
     category_id?: string;
   }) => Promise<void>;
@@ -38,7 +38,7 @@ export default function AssetIconEditDialog({
   open,
   onOpenChange,
   displayName,
-  originalDisplayName,
+  defaultGroupId,
   assetIds,
   currentIconUrl,
   currentIconSize,
@@ -90,7 +90,7 @@ export default function AssetIconEditDialog({
     iconSize[1] !== (currentIconSize?.[1] ?? DEFAULT_ICON_SIZE[1]) ||
     selectedCategoryId !== currentCategoryId;
 
-  const hasCustomization = !!currentIconUrl || displayName !== originalDisplayName;
+  const hasCustomization = !!currentIconUrl || displayName !== defaultGroupId;
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -141,7 +141,7 @@ export default function AssetIconEditDialog({
         config.icon_anchor = selectedIconUrl ? iconAnchor : null;
       }
       if (editDisplayName !== displayName) {
-        config.display_name = editDisplayName;
+        config.group_id = editDisplayName;
       }
       if (selectedCategoryId !== currentCategoryId) {
         config.category_id = selectedCategoryId;
@@ -181,11 +181,11 @@ export default function AssetIconEditDialog({
               value={editDisplayName}
               onChange={(e) => setEditDisplayName(e.target.value)}
               className="h-8 text-sm"
-              placeholder={originalDisplayName}
+              placeholder={defaultGroupId}
             />
-            {editDisplayName !== originalDisplayName && (
+            {editDisplayName !== defaultGroupId && (
               <p className="text-[10px] text-muted-foreground">
-                Default: {originalDisplayName}
+                Default: {defaultGroupId}
               </p>
             )}
           </div>

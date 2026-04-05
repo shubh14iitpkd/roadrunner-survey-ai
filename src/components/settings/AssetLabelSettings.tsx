@@ -28,7 +28,7 @@ export default function AssetLabelSettings() {
   // Icon edit dialog state
   const [iconEditTarget, setIconEditTarget] = useState<{
     displayName: string;
-    originalDisplayName: string;
+    defaultGroupId: string;
     assetIds: string[];
     iconUrl?: string;
     iconSize?: [number, number];
@@ -70,12 +70,12 @@ export default function AssetLabelSettings() {
     }
   };
 
-  const handleSaveLabel = async (assetIds: string[]) => {
+  const handleSaveLabel = async (assetIds: string[], currGroupId: string) => {
     if (!editValue.trim()) return;
 
     setSaving(true);
     try {
-      await updateAssetLabel(assetIds, editValue.trim());
+      await updateAssetLabel(assetIds, editValue.trim(), currGroupId);
 
       toast({
         title: "Saved",
@@ -120,18 +120,19 @@ export default function AssetLabelSettings() {
   const allLabels = Object.values(data.labels);
 
   // Group labels by group_id; labels without group_id stay individual
-  const groupedLabels: { groupKey: string; displayName: string; groupId: string | null; assetIds: string[]; originalDisplayName: string; iconUrl?: string; iconSize?: [number, number]; iconAnchor?: [number, number]; categoryId?: string }[] = [];
-  const groupMap = new Map<string, { displayName: string; groupId: string; assetIds: string[]; originalDisplayName: string; iconUrl?: string; iconSize?: [number, number]; iconAnchor?: [number, number]; categoryId?: string }>();
+  const groupedLabels: { groupKey: string; displayName: string; groupId: string | null; defaultGroupId: string | null; assetIds: string[]; iconUrl?: string; iconSize?: [number, number]; iconAnchor?: [number, number]; categoryId?: string }[] = [];
+  const groupMap = new Map<string, { displayName: string; groupId: string; defaultGroupId: string; assetIds: string[]; iconUrl?: string; iconSize?: [number, number]; iconAnchor?: [number, number]; categoryId?: string }>();
 
   for (const label of allLabels) {
-    const gid = (label as any).group_id as string | undefined;
+    const gid = label.group_id as string | undefined;
+    const dgid = label.default_group_id as string | undefined;
     if (gid) {
       if (!groupMap.has(gid)) {
         groupMap.set(gid, {
-          displayName: label.display_name,
+          displayName: gid,
           groupId: gid,
+          defaultGroupId: dgid ?? gid,
           assetIds: [],
-          originalDisplayName: label.original_display_name,
           iconUrl: label.icon_url,
           iconSize: label.icon_size,
           iconAnchor: label.icon_anchor,
@@ -139,27 +140,29 @@ export default function AssetLabelSettings() {
         });
       }
       groupMap.get(gid)!.assetIds.push(label.asset_id!);
-    } else {
-      groupedLabels.push({
-        groupKey: label.asset_id!,
-        displayName: label.display_name,
-        groupId: null,
-        assetIds: [label.asset_id!],
-        originalDisplayName: label.original_display_name,
-        iconUrl: label.icon_url,
-        iconSize: label.icon_size,
-        iconAnchor: label.icon_anchor,
-        categoryId: label.category_id,
-      });
-    }
+    } 
+    // Group ID is always ensured, no longer needed
+    // else {
+    //   groupedLabels.push({
+    //     groupKey: label.asset_id!,
+    //     displayName: label.display_name,
+    //     groupId: null,
+    //     defaultGroupId: null,
+    //     assetIds: [label.asset_id!],
+    //     iconUrl: label.icon_url,
+    //     iconSize: label.icon_size,
+    //     iconAnchor: label.icon_anchor,
+    //     categoryId: label.category_id,
+    //   });
+    // }
   }
   for (const [gid, group] of groupMap) {
     groupedLabels.push({
       groupKey: `group-${gid}`,
       displayName: group.displayName,
       groupId: gid,
+      defaultGroupId: group.defaultGroupId,
       assetIds: group.assetIds,
-      originalDisplayName: group.originalDisplayName,
       iconUrl: group.iconUrl,
       iconSize: group.iconSize,
       iconAnchor: group.iconAnchor,
@@ -171,7 +174,7 @@ export default function AssetLabelSettings() {
   const filteredGroups = groupedLabels.filter((g) =>
     g.displayName.toLowerCase().includes(searchQuery.toLowerCase()) ||
     (g.groupId || "").toLowerCase().includes(searchQuery.toLowerCase()) ||
-    g.originalDisplayName.toLowerCase().includes(searchQuery.toLowerCase())
+    (g.defaultGroupId || "").toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   return (
@@ -299,7 +302,7 @@ export default function AssetLabelSettings() {
                             className="h-8 text-sm"
                             autoFocus
                             onKeyDown={(e) => {
-                              if (e.key === "Enter") handleSaveLabel(group.assetIds);
+                              if (e.key === "Enter") handleSaveLabel(group.assetIds, group.groupId);
                               if (e.key === "Escape") handleCancel();
                             }}
                           />
@@ -307,7 +310,7 @@ export default function AssetLabelSettings() {
                             size="icon"
                             variant="ghost"
                             className="h-8 w-8 hover:bg-green-500/10 hover:text-green-600"
-                            onClick={() => handleSaveLabel(group.assetIds)}
+                            onClick={() => handleSaveLabel(group.assetIds, group.groupId)}
                             disabled={saving}
                           >
                             <Check className="h-4 w-4" />
@@ -336,9 +339,9 @@ export default function AssetLabelSettings() {
                             )}
                             <div className="flex items-center gap-2 min-w-0">
                               <span className="font-medium text-sm">{group.displayName}</span>
-                              {group.displayName !== group.originalDisplayName && (
+                              {group.groupId && group.defaultGroupId && group.groupId !== group.defaultGroupId && (
                                 <Badge variant="outline" className="text-xs h-5 px-1.5 font-normal text-muted-foreground">
-                                  Default: {group.originalDisplayName}
+                                  Default: {group.defaultGroupId}
                                 </Badge>
                               )}
                             </div>
@@ -353,7 +356,7 @@ export default function AssetLabelSettings() {
                                 e.stopPropagation();
                                 setIconEditTarget({
                                   displayName: group.displayName,
-                                  originalDisplayName: group.originalDisplayName,
+                                  defaultGroupId: group.defaultGroupId ?? group.groupId ?? "",
                                   assetIds: group.assetIds,
                                   iconUrl: group.iconUrl,
                                   iconSize: group.iconSize,
@@ -396,7 +399,7 @@ export default function AssetLabelSettings() {
         open={!!iconEditTarget}
         onOpenChange={(open) => { if (!open) setIconEditTarget(null); }}
         displayName={iconEditTarget?.displayName ?? ""}
-        originalDisplayName={iconEditTarget?.originalDisplayName ?? ""}
+        defaultGroupId={iconEditTarget?.defaultGroupId ?? ""}
         assetIds={iconEditTarget?.assetIds ?? []}
         currentIconUrl={iconEditTarget?.iconUrl}
         currentIconSize={iconEditTarget?.iconSize}
