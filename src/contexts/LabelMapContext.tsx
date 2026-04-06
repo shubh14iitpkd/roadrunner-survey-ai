@@ -3,16 +3,20 @@ import { api } from "@/lib/api";
 import { useAuth } from "./AuthContext";
 
 interface ResolvedItem {
+  default_name: string;
+  display_name: string;
+
+  // category specific
   category_id?: string;
+
+  // asset type specific
   asset_id?: string;
   group_id?: string;
-  default_name: string;
   default_group_id?: string;
-  display_name: string;
-  original_display_name: string;
   icon_url?: string;
   icon_size?: [number, number];
   icon_anchor?: [number, number];
+  attributes?: Record<string, readonly string[]>;
 }
 
 export interface ResolvedMap {

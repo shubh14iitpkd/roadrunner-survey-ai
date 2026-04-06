@@ -2,9 +2,19 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { ANNOTATION_CATEGORIES } from '@/services/demoDataService';
 import { Layers, Eye, EyeOff, ZoomIn, ZoomOut } from 'lucide-react';
 import { getCategoryColorCode } from '@/components/CategoryBadge';
+
+
+// Annotation file categories - each file maps to a specific asset category
+export const ANNOTATION_CATEGORIES = {
+  OIA: 'oia',
+  ITS: 'its',
+  ROADWAY_LIGHTING: 'roadway_lighting',
+  STRUCTURES: 'structures',
+  DIRECTIONAL_SIGNAGE: 'directional_signage',
+  CORRIDOR_PAVEMENT: 'pavement',
+};
 
 interface Detection {
   class_name: string;

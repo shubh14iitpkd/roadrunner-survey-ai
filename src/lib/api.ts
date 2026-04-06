@@ -240,7 +240,9 @@ export const api = {
 		recentSurveys: () => apiFetch("/api/dashboard/recent-surveys"),
 	},
 	user: {
-		getResolvedLabelMap: (userId: string) => apiFetch(`/api/assets/${userId}/resolved-map`),
+		// user id was used earlier to fetch user specific map, but now map is global (no user specific)
+		// so removed user id from url, but kept the parameter for backward compatibility
+		getResolvedLabelMap: (userId: string) => apiFetch(`/api/assets/resolved-map`),
 		updateGlobalLabel: (newGroupId: string, oldGroupId: string) =>
 			apiFetch(`/api/assets/global-label`, { method: "PUT", body: JSON.stringify({ new_group_id: newGroupId, old_group_id: oldGroupId }) }),
 		updateGlobalCategory: (categoryId: string, displayName: string) =>

@@ -188,11 +188,11 @@ export default function DefectLibrary() {
   const { data: labelMapData } = useLabelMap();
 
   const [selectedRouteId, setSelectedRouteId] = useState<number | null>(null);
-  const [selectedAssetTypes, setSelectedAssetTypes] = useState<string[]>([]);
+  const [selectedAssetType, setSelectedAssetType] = useState<string>("all");
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
   const [directionFilter, setDirectionFilter] = useState<"all" | "LHS" | "RHS">("all");
   const [zoneFilter, setZoneFilter] = useState<"all" | "shoulder" | "median" | "pavement" | "overhead">("all");
-  const [surveyYear, setSurveyYear] = useState<string>("2025");
+  // const [surveyYear, setSurveyYear] = useState<string>("2025");
 
   const [sortKey, setSortKey] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
@@ -360,7 +360,7 @@ export default function DefectLibrary() {
     const typeParam = searchParams.get("type");
     const categoryParam = searchParams.get("category");
     const routeIdParam = searchParams.get("route_id");
-    if (typeParam) setSelectedAssetTypes([typeParam]);
+    if (typeParam) setSelectedAssetType(typeParam);
     if (categoryParam) setCategoryFilter(categoryParam);
     if (routeIdParam) setSelectedRouteId(Number(routeIdParam));
   }, [searchParams]);
@@ -371,7 +371,7 @@ export default function DefectLibrary() {
     const fil = defects.filter((a) => {
       if (categoryFilter !== "all" && a.assetCategory !== categoryFilter) return false;
       if (directionFilter !== "all" && a.side !== directionFilter) return false;
-      if (selectedAssetTypes.length > 0 && !selectedAssetTypes.includes(a.assetType)) return false;
+      if (selectedAssetType !== "all" && a.assetType !== selectedAssetType) return false;
       if (zoneFilter !== "all" && a.zone !== zoneFilter) return false;
       if (selectedRouteId !== null && a.routeId !== selectedRouteId) return false;
       if (q && !(
@@ -385,7 +385,7 @@ export default function DefectLibrary() {
     });
 
     return fil;
-  }, [defects, categoryFilter, selectedAssetTypes, directionFilter, zoneFilter, selectedRouteId, searchQuery]);
+  }, [defects, categoryFilter, selectedAssetType, directionFilter, zoneFilter, selectedRouteId, searchQuery]);
 
   // ── Sorting filtered defects ──
   const sortedAndFilteredDefects = useMemo(() => {
@@ -543,32 +543,38 @@ export default function DefectLibrary() {
   };
 
   const assetTypeOptions = useMemo(() => {
-    let source = defects;
-    if (categoryFilter !== "all") source = source.filter(a => a.assetCategory === categoryFilter);
-    return [...new Set(source.map((a) => a.assetType))].sort();
-  }, [defects, categoryFilter]);
+    const labels = Object.values(labelMapData.labels || {});
+    if (!labels) return [];
+    const category = categoryFilter !== "all"
+      ? Object.values(labelMapData.categories || {}).find(c => c.display_name === categoryFilter)
+      : null;
+    const uniqueGroupIds = new Set(
+      labels
+        .filter(l => !category || l.category_id === category.category_id)
+        .map(l => l.group_id)
+    );
+    return [...uniqueGroupIds].sort();
+  }, [labelMapData, categoryFilter]);
 
   const categoryOptions = useMemo(() => {
-    const unique = [
-      ...new Map(
-        defects.map(a => [
-          `${a.assetCategory}-${a.category_id}`,
-          { name: a.assetCategory, id: a.category_id }
-        ])
-      ).values()
-    ].sort((a, b) => a.name.localeCompare(b.name));
-    return unique;
-  }, [defects]);
+    const categoryMap = labelMapData.categories;
+    const opts = []
+    for (const [cat, cinfo] of Object.entries(categoryMap)) {
+      opts.push({ id: cat, name: cinfo.display_name });
+    }
+    opts.sort((a, b) => a.name.localeCompare(b.name));
+    return opts
+  }, [labelMapData]);
 
-  const selectedRoadName = searchParams.get("road");
-  const selectedRoadDefects = useMemo(() => {
-    if (!selectedRoadName) return [];
-    return filteredDefects.filter(a => a.roadName === selectedRoadName);
-  }, [filteredDefects, selectedRoadName]);
+  // const selectedRoadName = searchParams.get("road");
+  // const selectedRoadDefects = useMemo(() => {
+  //   if (!selectedRoadName) return [];
+  //   return filteredDefects.filter(a => a.roadName === selectedRoadName);
+  // }, [filteredDefects, selectedRoadName]);
 
   const clearFilters = useCallback(() => {
     setCategoryFilter("all");
-    setSelectedAssetTypes([]);
+    setSelectedAssetType("all");
     setDirectionFilter("all");
     setZoneFilter("all");
     setSearchQuery("");
@@ -637,8 +643,8 @@ export default function DefectLibrary() {
         onZoneChange={setZoneFilter}
         categoryFilter={categoryFilter}
         onCategoryChange={setCategoryFilter}
-        selectedAssetTypes={selectedAssetTypes}
-        onAssetTypesChange={setSelectedAssetTypes}
+        selectedAssetType={selectedAssetType}
+        onAssetTypesChange={setSelectedAssetType}
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
         categoryOptions={categoryOptions}

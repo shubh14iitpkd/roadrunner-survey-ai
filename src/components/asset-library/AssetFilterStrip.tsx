@@ -23,10 +23,10 @@ interface AssetFilterStripProps {
   onZoneChange: (v: zoneFilter) => void;
   categoryFilter: string;
   onCategoryChange: (v: string) => void;
-  selectedAssetTypes: string[];
+  selectedAssetType: string;
   conditionFilter?: condFilter;
   onConditionChange?: (v: condFilter) => void;
-  onAssetTypesChange: (v: string[]) => void;
+  onAssetTypesChange: (v: string) => void;
   searchQuery: string;
   onSearchChange: (v: string) => void;
   categoryOptions: {id: string, name: string}[];
@@ -52,7 +52,7 @@ export default function AssetFilterStrip({
   onCategoryChange,
   conditionFilter,
   onConditionChange,
-  selectedAssetTypes,
+  selectedAssetType,
   onAssetTypesChange,
   searchQuery,
   onSearchChange,
@@ -67,7 +67,7 @@ export default function AssetFilterStrip({
 }: AssetFilterStripProps) {
   const hasActiveFilters =
     categoryFilter !== "all" ||
-    selectedAssetTypes.length > 0 ||
+    selectedAssetType !== "all" ||
     directionFilter !== "all" ||
     zoneFilter !== "all" ||
     searchQuery !== "" ||
@@ -213,7 +213,7 @@ export default function AssetFilterStrip({
         </Select>
       )}
 
-      <Select value={categoryFilter} onValueChange={(v) => { onCategoryChange(v); onAssetTypesChange([]); }}>
+      <Select value={categoryFilter} onValueChange={(v) => { onCategoryChange(v); onAssetTypesChange("all"); }}>
         <SelectTrigger className="w-[115px] h-6 text-[10px] border-border bg-background rounded-md shrink-0 shadow-sm overflow-hidden">
           <span className="truncate block"><SelectValue placeholder="Category" /></span>
         </SelectTrigger>
@@ -230,7 +230,7 @@ export default function AssetFilterStrip({
         </SelectContent>
       </Select>
 
-      <Select value={selectedAssetTypes[0] || "all"} onValueChange={(v) => onAssetTypesChange(v === "all" ? [] : [v])}>
+      <Select value={selectedAssetType || "all"} onValueChange={(v) => onAssetTypesChange(v)}>
         <SelectTrigger className="w-[115px] h-6 text-[10px] border-border bg-background rounded-md shrink-0 shadow-sm">
           <SelectValue placeholder="Asset Type" />
         </SelectTrigger>

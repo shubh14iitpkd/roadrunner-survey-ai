@@ -909,8 +909,8 @@ def upload_icon():
 	return jsonify({"ok": True, "filename": safe_name, "icon_url": icon_url})
 
 
-@assets_bp.get("/<user_id>/resolved-map", endpoint="resolved_map")
-def get_resolved_map(user_id: str):
+@assets_bp.get("/resolved-map", endpoint="resolved_map")
+def get_resolved_map():
 	"""
 	Get resolved asset map (system-wide values, no per-user overrides)
 	---
@@ -943,7 +943,6 @@ def get_resolved_map(user_id: str):
 		resolved_cats[cid] = {
 			"category_id": cid,
 			"default_name": cat["default_name"],
-			"original_display_name": cat["default_name"],
 			"display_name": cat["display_name"]
 		}
 		
@@ -957,11 +956,11 @@ def get_resolved_map(user_id: str):
 			"default_name": l["default_name"],
 			"group_id": l.get("group_id"),
 			"default_group_id": l.get("default_group_id", ""),
-			"original_display_name": l["default_name"],
-			"display_name": l["display_name"]
+			"display_name": l["display_name"],
 		}
-		
-		# Include icon config if present
+
+		if l.get("attributes"):
+			entry["attributes"] = l["attributes"]
 		if l.get("icon_url"):
 			entry["icon_url"] = l["icon_url"]
 		if l.get("icon_size"):

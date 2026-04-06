@@ -64,7 +64,7 @@ export default function AssetLibrary() {
 
   const [roads, setRoads] = useState<{ route_id: number; name: string }[]>([]);
   const [selectedRouteId, setSelectedRouteId] = useState<number | null>(null);
-  const [selectedAssetTypes, setSelectedAssetTypes] = useState<string[]>([]);
+  const [selectedAssetType, setSelectedAssetType] = useState<string>("all");
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
   const [directionFilter, setDirectionFilter] = useState<"all" | "LHS" | "RHS">("all");
   const [conditionFilter, setConditionFilter] = useState<"all" | "good"| "damaged">("all");
@@ -226,7 +226,10 @@ export default function AssetLibrary() {
     const typeParam = searchParams.get("type");
     const categoryParam = searchParams.get("category");
     const routeIdParam = searchParams.get("route_id");
-    if (typeParam) setSelectedAssetTypes([typeParam]);
+
+    if (typeParam) {
+      setSelectedAssetType(typeParam)
+    };
     if (categoryParam) setCategoryFilter(categoryParam);
     const conditionParam = searchParams.get("condition");
     if (conditionParam && (conditionParam === "good" || conditionParam === "damaged")) setConditionFilter(conditionParam);
@@ -240,7 +243,7 @@ export default function AssetLibrary() {
       if (categoryFilter !== "all" && a.assetCategory !== categoryFilter) return false;
       if (conditionFilter !== "all" && a.condition !== conditionFilter) return false;
       if (directionFilter !== "all" && a.side !== directionFilter) return false;
-      if (selectedAssetTypes.length > 0 && !selectedAssetTypes.includes(a.assetType)) return false;
+      if (selectedAssetType !="all" && selectedAssetType !== a.assetType) return false;
       if (zoneFilter !== "all" && a.zone !== zoneFilter) return false;
       if (selectedRouteId !== null && a.routeId !== selectedRouteId) return false;
       if (q && !(
@@ -252,7 +255,7 @@ export default function AssetLibrary() {
       )) return false;
       return true;
     });
-  }, [assets, conditionFilter, categoryFilter, selectedAssetTypes, directionFilter, zoneFilter, selectedRouteId, searchQuery]);
+  }, [assets, conditionFilter, categoryFilter, selectedAssetType, directionFilter, zoneFilter, selectedRouteId, searchQuery]);
 
   // ── Sorting filtered assets ──
   const sortedAndFilteredAssets = useMemo(() => {
@@ -309,7 +312,7 @@ export default function AssetLibrary() {
       exportToExcel({
         filename: "Asset_Library_Report.xlsx",
         sheetName: "Assets",
-        title: "RoadSight AI — Asset Library Report",
+        title: "RoadSight AI - Asset Library Report",
         subtitle: `Generated: ${new Date().toLocaleDateString()} | ${filteredAssets.length} assets`,
         headers,
         rows,
@@ -327,20 +330,18 @@ export default function AssetLibrary() {
   }, [assets, categoryFilter]);
 
   const categoryOptions = useMemo(() => {
-    const unique = [
-      ...new Map(
-        assets.map(a => [
-          `${a.assetCategory}-${a.category_id}`,
-          { name: a.assetCategory, id: a.category_id }
-        ])
-      ).values()
-    ].sort((a, b) => a.name.localeCompare(b.name));
-    return unique;
-  }, [assets]);
+    const categoryMap = labelMapData.categories;
+    const opts = []
+    for (const [cat, cinfo] of Object.entries(categoryMap)) {
+      opts.push({ id: cat, name: cinfo.display_name });
+    }
+    opts.sort((a, b) => a.name.localeCompare(b.name));
+    return opts
+  }, [labelMapData]);
 
   const clearFilters = useCallback(() => {
     setCategoryFilter("all");
-    setSelectedAssetTypes([]);
+    setSelectedAssetType("all");
     setDirectionFilter("all");
     setZoneFilter("all");
     setSearchQuery("");
@@ -402,8 +403,8 @@ export default function AssetLibrary() {
         conditionFilter={conditionFilter}
         onConditionChange={setConditionFilter}
         onCategoryChange={setCategoryFilter}
-        selectedAssetTypes={selectedAssetTypes}
-        onAssetTypesChange={setSelectedAssetTypes}
+        selectedAssetType={selectedAssetType}
+        onAssetTypesChange={setSelectedAssetType}
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
         categoryOptions={categoryOptions}
