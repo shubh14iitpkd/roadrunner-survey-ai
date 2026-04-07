@@ -69,6 +69,7 @@ export default function AssetLibrary() {
   const [directionFilter, setDirectionFilter] = useState<"all" | "LHS" | "RHS">("all");
   const [conditionFilter, setConditionFilter] = useState<"all" | "good"| "damaged">("all");
   const [zoneFilter, setZoneFilter] = useState<"all" | "shoulder" | "median" | "pavement" | "overhead">("all");
+  const [attributes, setAttributes] = useState<Record<string, readonly string[]>>({});
 
   const [sortKey, setSortKey] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
@@ -323,6 +324,15 @@ export default function AssetLibrary() {
     }
   };
 
+  const handleAssetTypeSelect = useCallback((assetType: string)=> {
+    console.log(labelMapData)
+    const assetGroup = Object.values(labelMapData?.labels || {}).find((label) => label.group_id === assetType);
+    setAttributes(assetGroup?.attributes || {})
+    console.log(assetGroup)
+    setSelectedAssetType(assetType)
+  }, [labelMapData])
+
+
   const assetTypeOptions = useMemo(() => {
     let source = assets;
     if (categoryFilter !== "all") source = source.filter(a => a.assetCategory === categoryFilter);
@@ -345,6 +355,7 @@ export default function AssetLibrary() {
     setDirectionFilter("all");
     setZoneFilter("all");
     setSearchQuery("");
+    setAttributes({})
     setSelectedRouteId(null);
   }, []);
 
@@ -404,7 +415,7 @@ export default function AssetLibrary() {
         onConditionChange={setConditionFilter}
         onCategoryChange={setCategoryFilter}
         selectedAssetType={selectedAssetType}
-        onAssetTypesChange={setSelectedAssetType}
+        onAssetTypesChange={handleAssetTypeSelect}
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
         categoryOptions={categoryOptions}

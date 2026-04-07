@@ -419,3 +419,32 @@ All colors MUST be HSL.
   border: none;
   outline: none;
 }
+
+
+.filter-strip {
+  @apply overflow-x-auto;
+  
+  /* Firefox */
+  scrollbar-width: thin;
+  /* thumb color | track color */
+  scrollbar-color: hsl(var(--muted-foreground)) hsl(var(--muted)); 
+}
+
+/* WebKit Browsers (Chrome, Safari, Edge) */
+.filter-strip::-webkit-scrollbar {
+  height: 2px; /* Thinner 'thin' bar */
+}
+
+.filter-strip::-webkit-scrollbar-track {
+  background: hsl(var(--muted));
+  border-radius: 100px;
+}
+
+.filter-strip::-webkit-scrollbar-thumb {
+  background: hsl(var(--muted));
+  border-radius: 100px;
+}
+
+.filter-strip::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted));
+}

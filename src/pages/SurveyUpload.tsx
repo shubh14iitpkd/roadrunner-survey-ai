@@ -1,8 +1,8 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Upload, Play, CheckCircle, Clock, AlertCircle, Video, AlertTriangle, FileVideo, Database, TrendingUp, Calendar, MapPin, Loader2, Trash2, X, Map } from "lucide-react";
+import { Upload, Play, CheckCircle, Clock, AlertCircle, Video, AlertTriangle, FileVideo, Database, TrendingUp, Calendar, MapPin, Loader2, Trash2, X, Map, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -43,10 +43,31 @@ import { platform } from "os";
 
 
 
+type SurveySortKey = "surveyDisplayId" | "routeId" | "surveyDate" | "surveyorName" | "gpxFile" | "status" | null;
+
 export default function SurveyUpload() {
   const navigate = useNavigate();
   const actionRoles = ["Admin", "Super Admin"]; 
   const { videos, isUploading, uploadFiles, uploadFromLibrary, uploadGpxForVideo, processWithAI, cancelUpload, resetVideoStatus, loading } = useUpload();
+
+  const [sortBy, setSortBy] = useState<SurveySortKey>(null);
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc" | null>(null);
+
+  const handleSortKeySelect = (key: SurveySortKey) => {
+    if (key === sortBy) {
+      setSortOrder(sortOrder === "asc" ? "desc" : "asc");
+    } else {
+      setSortBy(key);
+      setSortOrder("asc");
+    }
+  };
+
+  const SortIcon = ({ col }: { col: string }) => {
+    if (sortBy !== col) return <ArrowUpDown className="h-3 w-3 ml-1 inline opacity-40" />;
+    return sortOrder === "asc"
+      ? <ArrowUp className="h-3 w-3 ml-1 inline" />
+      : <ArrowDown className="h-3 w-3 ml-1 inline" />;
+  };
   const [roads, setRoads] = useState<any[]>([]);
   const [selectedRoute, setSelectedRoute] = useState<string>("");
   // videos state removed (using context)
@@ -132,6 +153,29 @@ export default function SurveyUpload() {
   const totalProcessed = videos.filter(v => v.status === "completed").length;
   const inQueue = videos.filter(v => v.status === "queue").length;
   const processing = videos.filter(v => v.status === "uploading" || v.status === "anonymizing" || v.status === "processing" || v.status === "asset_linking").length;
+
+  const sortedVideos = useMemo(() => {
+    if (!sortBy || !sortOrder) return videos;
+    return [...videos].sort((a, b) => {
+      const dir = sortOrder === "asc" ? 1 : -1;
+      if (sortBy === "surveyDisplayId") {
+        return dir * (a.surveyDisplayId || "").localeCompare(b.surveyDisplayId || "");
+      } else if (sortBy === "routeId") {
+        return dir * ((Number(a.routeId) || 0) - (Number(b.routeId) || 0));
+      } else if (sortBy === "surveyDate") {
+        return dir * (a.surveyDate || "").localeCompare(b.surveyDate || "");
+      } else if (sortBy === "surveyorName") {
+        return dir * (a.surveyorName || "").localeCompare(b.surveyorName || "");
+      } else if (sortBy === "gpxFile") {
+        const aVal = a.gpxFile ? 1 : 0;
+        const bVal = b.gpxFile ? 1 : 0;
+        return dir * (aVal - bVal);
+      } else if (sortBy === "status") {
+        return dir * (a.status || "").localeCompare(b.status || "");
+      }
+      return 0;
+    });
+  }, [videos, sortBy, sortOrder]);
 
   // Track uploads in progress for showing status
   const [uploadingItems, setUploadingItems] = useState<string[]>([]);
@@ -597,16 +641,33 @@ export default function SurveyUpload() {
                 <div className="flex flex-col w-full">
                   <div className="flex w-full items-center justify-between bg-gradient-to-r from-blue-50 via-indigo-50 to-purple-50 dark:from-blue-950/30 dark:via-indigo-950/30 dark:to-purple-950/30 border-b border-border">
                     <div className="text-left p-3 font-semibold text-sm flex-1">Preview</div>
-                    <div className="text-left p-3 font-semibold text-sm flex-1">Survey ID</div>
-                    <div className="text-left p-3 font-semibold text-sm flex-[2.5]">Route</div>
-                    <div className="text-left p-3 font-semibold text-sm flex-1">Date</div>
-                    <div className="text-left p-3 font-semibold text-sm flex-1">Surveyor</div>
-                    <div className="text-left p-3 font-semibold text-sm flex-1">GPS</div>
-                    <div className="text-left p-3 font-semibold text-sm flex-1">Status</div>
+                    <div
+                      className="text-left p-3 font-semibold text-sm flex-1 whitespace-nowrap cursor-pointer select-none transition-colors"
+                      onClick={() => handleSortKeySelect("surveyDisplayId")}
+                    >Survey ID<SortIcon col="surveyDisplayId" /></div>
+                    <div
+                      className="text-left p-3 font-semibold text-sm flex-[2.5] whitespace-nowrap cursor-pointer select-none transition-colors"
+                      onClick={() => handleSortKeySelect("routeId")}
+                    >Route<SortIcon col="routeId" /></div>
+                    <div
+                      className="text-left p-3 font-semibold text-sm flex-1 cursor-pointer select-none transition-colors"
+                      onClick={() => handleSortKeySelect("surveyDate")}
+                    >Survey Date<SortIcon col="surveyDate" /></div>
+                    <div
+                      className="text-left p-3 font-semibold text-sm flex-1 cursor-pointer select-none transition-colors"
+                      onClick={() => handleSortKeySelect("surveyorName")}
+                    >Surveyor<SortIcon col="surveyorName" /></div>
+                    <div
+                      className="text-left p-3 font-semibold text-sm flex-1 cursor-pointer select-none transition-colors"
+                    >GPS</div>
+                    <div
+                      className="text-left p-3 font-semibold text-sm flex-1 cursor-pointer select-none transition-colors"
+                      onClick={() => handleSortKeySelect("status")}
+                    >Status<SortIcon col="status" /></div>
                     <div className="text-center p-3 font-semibold text-sm flex-[2.5]">Actions</div>
                   </div>
                   <div className="flex flex-col w-full">
-                    {videos.map((video, index) => {
+                    {sortedVideos.map((video, index) => {
                       const road = roads.find(r => r.route_id === video.routeId);
                       const uniqueKey = video.backendId || video.id || `video-temp-${index}`;
 
@@ -693,12 +754,12 @@ export default function SurveyUpload() {
                           {/* GPS Mini Map */}
                           <div className="p-3 flex-1 flex justify-start">
                             {video.gpxFile ? (
-                              <Badge variant="secondary" className="gap-1.5 text-xs font-medium bg-green-50 dark:bg-green-950/30 text-green-700 dark:text-green-400 border-green-200 dark:border-green-800">
+                              <Badge variant="secondary" className="gap-1.5 text-xs hover:bg-green-50 dark:hover:bg-green-950/30 font-medium bg-green-50 dark:bg-green-950/30 text-green-700 dark:text-green-400 border-green-200 dark:border-green-800">
                                 <MapPin className="h-3 w-3" />
                                 Yes
                               </Badge>
                             ) : (
-                              <Badge variant="secondary" className="gap-1.5 text-xs font-medium bg-red-50 dark:bg-red-950/30 text-red-700 dark:text-red-400 border-red-200 dark:border-red-800">
+                              <Badge variant="secondary" className="gap-1.5 text-xs hover:bg-red-50 dark:hover:bg-red-950/30 font-medium bg-red-50 dark:bg-red-950/30 text-red-700 dark:text-red-400 border-red-200 dark:border-red-800">
                                 No
                               </Badge>
                             )}
@@ -713,15 +774,15 @@ export default function SurveyUpload() {
                                   variant="secondary"
                                   className={cn(
                                     "text-[10px] font-bold px-1.5 py-0.5 text-center",
-                                    video.status === "completed" && "bg-green-100 dark:bg-green-950/30 text-green-700 dark:text-green-400",
-                                    video.status === "processing" && "bg-blue-100 dark:bg-blue-950/30 text-blue-700 dark:text-blue-400",
-                                    video.status === "anonymizing" && "bg-pink-100 dark:bg-pink-950/30 text-pink-700 dark:text-pink-400",
-                                    video.status === "asset_linking" && "bg-teal-100 dark:bg-teal-950/30 text-teal-700 dark:text-teal-400",
-                                    video.status === "uploading" && "bg-purple-100 dark:bg-purple-950/30 text-purple-700 dark:text-purple-400",
-                                    video.status === "uploaded" && "bg-amber-100 dark:bg-amber-950/30 text-amber-700 dark:text-amber-400",
-                                    video.status === "queue" && "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400",
-                                    video.status === "error" && "bg-red-100 dark:bg-red-950/30 text-red-700 dark:text-red-400",
-                                    video.status === "failed" && "bg-orange-100 dark:bg-orange-950/30 text-orange-700 dark:text-orange-400"
+                                    video.status === "completed" && "bg-green-100 dark:bg-green-950/30 text-green-700 dark:text-green-400 hover:bg-green-100 dark:hover:bg-green-950/30",
+                                    video.status === "processing" && "bg-blue-100 dark:bg-blue-950/30 text-blue-700 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-950/30",
+                                    video.status === "anonymizing" && "bg-pink-100 dark:bg-pink-950/30 text-pink-700 dark:text-pink-400 hover:bg-pink-100 dark:hover:bg-pink-950/30",
+                                    video.status === "asset_linking" && "bg-teal-100 dark:bg-teal-950/30 text-teal-700 dark:text-teal-400 hover:bg-teal-100 dark:hover:bg-teal-950/30",
+                                    video.status === "uploading" && "bg-purple-100 dark:bg-purple-950/30 text-purple-700 dark:text-purple-400 hover:bg-purple-100 dark:hover:bg-purple-950/30",
+                                    video.status === "uploaded" && "bg-amber-100 dark:bg-amber-950/30 text-amber-700 dark:text-amber-400 hover:bg-amber-100 dark:hover:bg-amber-950/30",
+                                    video.status === "queue" && "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-950/30",
+                                    video.status === "error" && "bg-red-100 dark:bg-red-950/30 text-red-700 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-950/30",
+                                    video.status === "failed" && "bg-orange-100 dark:bg-orange-950/30 text-orange-700 dark:text-orange-400 hover:bg-orange-100 dark:hover:bg-orange-950/30"
                                   )}
                                 >
                                   {getStatusLabel(video.status)}
