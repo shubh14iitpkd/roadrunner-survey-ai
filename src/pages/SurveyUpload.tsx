@@ -510,7 +510,7 @@ export default function SurveyUpload() {
                             {selectedRoute && surveyorName ? "Click to select a video" : "Complete the fields above first"}
                           </p>
                           <p className="text-xs text-muted-foreground">
-                            MP4, WEBM up to 500MB
+                            MP4
                           </p>
                         </div>
                         <input

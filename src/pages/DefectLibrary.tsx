@@ -12,7 +12,7 @@ import { api } from "@/lib/api";
 import { exportToExcel } from "@/lib/excelExport";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Download, AlertTriangle, CheckCircle2, Loader2, Pencil } from "lucide-react";
+import { Download, AlertTriangle, CheckCircle2, Loader2, Pencil, RotateCcw } from "lucide-react";
 import {
   Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
@@ -34,6 +34,11 @@ import capitalize from "@/helpers/capitalize";
 //   if (rest.length === 0) return capitalize(first);
 //   return first.charAt(0).toUpperCase() + first.slice(1) + " " + rest.join(" ");
 // }
+
+// ── DAMAGED condition set (mirrors backend) ─────────────────
+const DAMAGED_CONDITIONS = new Set([
+  'overgrown', 'fadedpaint', 'dirty', 'missing', 'broken', 'bent', 'damaged',
+]);
 
 // ── Custom tooltip cell for Issue column ──────────────────
 const ISSUE_TRUNCATE_LEN = 18;
@@ -102,8 +107,8 @@ const BASE_DEFECT_COLUMNS: ColumnDef[] = [
   { key: "assetType", header: "Asset Type", className: "text-[10px] leading-tight py-1.5 px-1.5 min-w-[180px] max-w-[220px] text-center", render: (a) => <span className="line-clamp-2">{a.assetType}</span>, getValue: (a) => a.assetType },
   { key: "category", header: "Category", className: "py-1.5 px-1.5 text-center", render: (a) => <CategoryBadge category={a.assetCategory} categoryId={a.category_id} />, getValue: (a) => a.assetCategory },
   { key: "coords", header: "Coordinates", className: "font-mono text-[10px] py-1.5 px-1.5 whitespace-nowrap text-center", render: (a) => `${a.lat.toFixed(4)}, ${a.lng.toFixed(4)}` },
-  { key: "road", header: "Road", className: "text-[11px] py-1.5 px-1.5 whitespace-nowrap text-center", render: (a) => a.roadName, getValue: (a) => a.roadName },
-  { key: "side", header: "Road Side", className: "text-[11px] py-1.5 px-1.5 text-center", render: (a) => a.side, getValue: (a) => a.side },
+  { key: "road", header: "Route", className: "text-[11px] py-1.5 px-1.5 whitespace-nowrap text-center", render: (a) => a.roadName, getValue: (a) => a.roadName },
+  { key: "side", header: "Route Side", className: "text-[11px] py-1.5 px-1.5 text-center", render: (a) => a.side, getValue: (a) => a.side },
   { key: "zone", header: "Zone", className: "text-[11px] py-1.5 px-1.5 text-center capitalize", render: (a) => a.zone, getValue: (a) => a.zone },
   { key: "survey", header: "Survey", className: "text-[11px] py-1.5 px-1.5 whitespace-nowrap text-center", render: (a) => a.lastSurveyDate, getValue: (a) => a.lastSurveyDate },
   { key: "issue", header: "Issue", className: "py-1.5 px-1.5 min-w-[100px] text-center", getValue: (a) => a.issue, render: (a) => (
@@ -207,9 +212,12 @@ export default function DefectLibrary() {
     totalPoints: number;
   } | null>(null);
   const [showFullView, setShowFullView] = useState(false);
+  const [conditionLogs, setConditionLogs] = useState<any[]>([]);
 
   // Dynamic defect data from API
   const [defects, setDefects] = useState<AssetRecord[]>([]);
+
+  const [rollbackDefectId, setRollbackDefectId] = useState<string | null>(null);
 
   // ── Mark as Good state ──
   const [goodSet, setGoodSet] = useState<Set<string>>(new Set());
@@ -307,6 +315,7 @@ export default function DefectLibrary() {
               : undefined,
             frame_number: h.frame_number,
             box: h.box,
+            created_at: h.created_at,
           }));
 
           const condition = asset.condition || asset.latest_condition || 'damaged';
@@ -453,7 +462,7 @@ export default function DefectLibrary() {
 
     setMarkingGood((prev) => new Set(prev).add(assetKey));
     try {
-      await api.assets.markAsGood(mongoId, { name: surveyorName, user_id: surveyorId });
+      await api.assets.markAsGood(mongoId, { name: surveyorName, user_id: surveyorId, survey_id: asset.surveyId });
       setGoodSet((prev) => new Set(prev).add(assetKey));
       setMarkingGoodCount((prev) => prev + 1);
       toast.success(`Asset ${asset.assetDisplayId} marked as good`);
@@ -471,9 +480,12 @@ export default function DefectLibrary() {
       toast.error("Cannot update asset: missing ID");
       return;
     }
+    const surveyorName = user ? `${user.first_name} ${user.last_name}`.trim() || user.email : "";
+    const surveyorId = user?.id ?? "";
+    const surveyId = asset.surveyId;
     setMarkingGood((prev) => new Set(prev).add(assetKey));
     try {
-      await api.assets.unmarkGood(mongoId);
+      await api.assets.unmarkGood(mongoId, { name: surveyorName, user_id: surveyorId, survey_id: surveyId });
       setGoodSet((prev) => { const s = new Set(prev); s.delete(assetKey); return s; });
       setMarkingGoodCount((prev) => prev - 1);
       toast.success(`Asset ${asset.assetDisplayId} reverted to damaged`);
@@ -482,7 +494,30 @@ export default function DefectLibrary() {
     } finally {
       setMarkingGood((prev) => { const s = new Set(prev); s.delete(assetKey); return s; });
     }
-  }, []);
+  }, [user]);
+
+  const handleRollbackDefect = useCallback(async (asset: AssetRecord) => {
+    if (!asset?.id) return;
+    if (user?.role === "Viewer") {
+      toast.error("You do not have permission to revert assets.");
+      return;
+    }
+    const surveyorName = user ? `${user.first_name} ${user.last_name}`.trim() || user.email : "";
+    const surveyorId = user?.id ?? "";
+    const surveyId = asset.surveyId;
+    setRollbackDefectId(asset.id);
+    try {
+      await api.assets.unmarkGood(asset.id, { name: surveyorName, user_id: surveyorId, survey_id: surveyId });
+      toast.success(`Asset ${asset.assetDisplayId} reverted to damaged`);
+      setShowFullView(false);
+      setSelectedDefect(null);
+      loadData();
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to revert asset");
+    } finally {
+      setRollbackDefectId(null);
+    }
+  }, [user, loadData]);
 
   const handleOpenEditIssue = useCallback((asset: AssetRecord) => {
     if (user.role === "Viewer") {
@@ -521,7 +556,7 @@ export default function DefectLibrary() {
     try {
       const headers = [
         "Defect ID", "Asset ID", "Asset Type", "Category", "Latitude", "Longitude",
-        "Road Name", "Side", "Zone", "Last Survey Date", "Issue Type",
+        "Route Name", "Side", "Zone", "Last Survey Date", "Issue Type",
       ];
       const rows = filteredDefects.map((a) => [
         a.defectId, a.assetDisplayId, a.assetType, a.assetCategory,
@@ -543,10 +578,10 @@ export default function DefectLibrary() {
   };
 
   const assetTypeOptions = useMemo(() => {
-    const labels = Object.values(labelMapData.labels || {});
+    const labels = Object.values(labelMapData?.labels || {});
     if (!labels) return [];
     const category = categoryFilter !== "all"
-      ? Object.values(labelMapData.categories || {}).find(c => c.display_name === categoryFilter)
+      ? Object.values(labelMapData?.categories || {}).find(c => c.display_name === categoryFilter)
       : null;
     const uniqueGroupIds = new Set(
       labels
@@ -557,7 +592,7 @@ export default function DefectLibrary() {
   }, [labelMapData, categoryFilter]);
 
   const categoryOptions = useMemo(() => {
-    const categoryMap = labelMapData.categories;
+    const categoryMap = labelMapData?.categories;
     const opts = []
     for (const [cat, cinfo] of Object.entries(categoryMap)) {
       opts.push({ id: cat, name: cinfo.display_name });
@@ -676,7 +711,7 @@ export default function DefectLibrary() {
           onCloseAsset={() => setSelectedDefect(null)}
           getAssetDisplayName={getAssetDisplayName}
           onNavigate={navigateDefects}
-          onFullView={() => {
+          onFullView={async () => {
             if (selectedDefect) {
               setMarkerPopup({
                 frameData: { gpx_point: { lat: selectedDefect.lat, lon: selectedDefect.lng } },
@@ -684,6 +719,12 @@ export default function DefectLibrary() {
                 pointIndex: 0,
                 totalPoints: 1,
               });
+              try {
+                console.log(selectedDefect, "fetching condition logs for asset ID:", selectedDefect.id);
+                const resp = await api.assets.getConditionLogs(selectedDefect.id);
+                // console.log("Fetched condition logs:", resp);
+                setConditionLogs(resp?.items ?? []);
+              } catch { setConditionLogs([]); }
               setShowFullView(true);
             }
           }}
@@ -694,7 +735,9 @@ export default function DefectLibrary() {
       </div>
 
       {/* Full Road View Dialog */}
-      <Dialog open={showFullView} onOpenChange={(open) => !open && setShowFullView(false)}>
+      <Dialog open={showFullView} onOpenChange={async (open) => {
+        if (!open) { setShowFullView(false); setConditionLogs([]); }
+      }}>
         <DialogHeader className="hidden">
           <DialogTitle>Full Asset View</DialogTitle>
           <DialogDescription>
@@ -745,86 +788,167 @@ export default function DefectLibrary() {
 
               {/* Survey History Timeline */}
               {selectedDefect && (() => {
+                const condition = selectedDefect.condition?.toLowerCase() ?? '';
+                const isDamaged = DAMAGED_CONDITIONS.has(condition);
                 const history = selectedDefect.surveyHistory ?? [];
                 const reversed = [...history].reverse();
-                const latestIssue = selectedDefect.issue;
-
+                const isManuallyGood = condition === 'good' && conditionLogs.length > 0 && conditionLogs[0]?.action === 'marked_good';
+                const latestMarkGood = isManuallyGood ? conditionLogs[0] : null;
                 return (
                   <div className="px-5 py-3">
                     <div className="flex items-center justify-between mb-3">
                       <div className="flex items-center gap-2">
-                        <AlertTriangle className="h-3.5 w-3.5 text-destructive" />
-                        <span className="text-xs font-semibold text-destructive">
-                          Defect Detected: <span>{capitalize(latestIssue)}</span>
+                        <AlertTriangle className={cn("h-3.5 w-3.5", isDamaged ? "text-destructive" : "text-emerald-600")} />
+                        <span className={cn("text-xs font-semibold capitalize", isDamaged ? "text-destructive" : "text-emerald-600")}>
+                          Defect Detected: {capitalize(selectedDefect.issue)}
                         </span>
                       </div>
-                      <span className="text-[10px] text-muted-foreground">
-                        {selectedDefect.totalSurveysDetected ?? history.length} survey{(selectedDefect.totalSurveysDetected ?? history.length) !== 1 ? 's' : ''} detected
-                      </span>
+                      <div className="flex items-center gap-2">
+                        {isManuallyGood && user?.role !== "Viewer" && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 text-[10px] gap-1 px-2 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                            disabled={rollbackDefectId === selectedDefect.id}
+                            onClick={() => handleRollbackDefect(selectedDefect)}
+                          >
+                            {rollbackDefectId === selectedDefect.id
+                              ? <Loader2 className="h-3 w-3 animate-spin" />
+                              : <RotateCcw className="h-3 w-3" />}
+                            Rollback to Damaged
+                          </Button>
+                        )}
+                        <span className="text-[10px] text-muted-foreground">
+                          {selectedDefect.totalSurveysDetected ?? history.length} survey{(selectedDefect.totalSurveysDetected ?? history.length) !== 1 ? 's' : ''} detected
+                        </span>
+                      </div>
                     </div>
 
-                    {reversed.length === 0 ? (
-                      <p className="text-xs text-muted-foreground italic">No survey history available.</p>
-                    ) : (
-                      <div className="relative">
-                        <div className="absolute left-[9px] top-[6px] bottom-[6px] w-px bg-border z-0" />
-                        <div className="space-y-2 relative z-10">
-                          {reversed.map((entry, rIdx) => {
-                            const entryCondition = entry.condition?.toLowerCase() ?? '';
-                            const isDamaged = entryCondition !== 'good';
-                            const isLatest = rIdx === 0;
-                            const isSelected = selectedSurveyIdx === rIdx;
-                            const borderColor = isDamaged ? "border-destructive/20" : "border-emerald-500/30";
-                            const bgColor = isDamaged ? "bg-destructive/5" : "bg-emerald-500/5";
-                            const dotColor = isDamaged ? "bg-destructive" : "bg-emerald-500";
+                    {/* Merged Timeline */}
+                    {(() => {
+                      type SurveyItem = { kind: 'survey'; condition: string; entry: typeof reversed[0]; rIdx: number; date: string };
+                      type LogItem = { kind: 'log'; condition: string; log: typeof conditionLogs[0]; date: string };
+                      type TimelineItem = SurveyItem | LogItem;
 
-                            return (
-                              <div key={`${entry.survey_display_id}-${rIdx}`} className="flex items-start gap-3">
-                                <div className="flex flex-col items-center shrink-0 pt-4">
-                                  <div className={cn("h-[18px] w-[18px] rounded-full border-[3px] border-background shadow-sm", dotColor)} />
-                                </div>
-                                <button
-                                  onClick={() => setSelectedSurveyIdx(rIdx)}
-                                  className={cn(
-                                    "flex-1 text-left border rounded-lg px-5 py-3 transition-all",
-                                    bgColor, borderColor,
-                                    isSelected && "ring-2 ring-primary/30 shadow-sm"
-                                  )}
-                                >
-                                  <div className="flex items-center gap-2 mb-1">
-                                    {isLatest && (
-                                      <span className="text-[8px] font-bold uppercase tracking-wider text-primary bg-primary/10 dark:text-muted-secondary dark:bg-muted-secondary/10 rounded px-1.5 py-0.5">Latest</span>
+                      const surveyItems: SurveyItem[] = reversed.map((entry, rIdx) => ({
+                        kind: 'survey',
+                        entry,
+                        condition: entry.condition,
+                        rIdx,
+                        date: entry.created_at ?? entry.survey_date ?? '',
+                      }));
+                      const logItems: LogItem[] = conditionLogs.map((log) => ({
+                        kind: 'log',
+                        condition: log.action === 'marked_good' ? 'good' : 'damaged',
+                        log,
+                        date: log.changed_at ?? '',
+                      }));
+
+                      const merged: TimelineItem[] = [...surveyItems, ...logItems].sort((a, b) =>
+                        b.date.localeCompare(a.date)
+                      );
+
+                      if (merged.length === 0) {
+                        return <p className="text-xs text-muted-foreground italic">No survey history available.</p>;
+                      }
+
+                      let surveyCounter = -1;
+
+                      return (
+                        <div className="relative">
+                          <div className="absolute left-[9px] top-[6px] bottom-[6px] w-px bg-border z-0" />
+                          <div className="space-y-2 relative z-10">
+                            {merged.map((item, mIdx) => {
+                              const isGoodAction = item.condition === 'good';
+                              if (item.kind === 'log') {
+                                return (
+                                  <div key={`log-${mIdx}`} className="flex items-center gap-3">
+                                    <div className="shrink-0 flex items-center justify-center w-[18px]">
+                                      <div className={cn(
+                                        "h-2 w-2 rounded-full border-2 border-background",
+                                        isGoodAction ? "bg-emerald-500" : "bg-destructive"
+                                      )} />
+                                    </div>
+                                    <div className="items-center gap-2 py-1 text-xs text-muted-foreground">
+                                      <span className={cn("font-semibold", isGoodAction ? "text-emerald-600" : "text-destructive")}>
+                                        {isGoodAction ? 'Marked Good' : 'Marked Damaged'}
+                                      </span>
+                                      <span className="text-border">·</span>
+                                      <span>by <span className="text-foreground font-medium">{item.log.name || '-'}</span></span>
+                                      <span className="text-border">·</span>
+                                      <span>on {item.date ? new Date(item.date).toISOString().split('T')[0] : '-'}</span>
+                                    </div>
+                                  </div>
+                                );
+                              }
+
+                              surveyCounter++;
+                              const localSurveyIdx = surveyCounter;
+                              const { entry } = item;
+                              const entryCondition = entry.condition?.toLowerCase() ?? '';
+                              const entryIsDamaged = DAMAGED_CONDITIONS.has(entryCondition);
+                              const isLatest = item.rIdx === 0;
+                              const isSelected = selectedSurveyIdx === localSurveyIdx;
+                              const effectivelyGood = item.condition === 'good';
+                              const borderColor = (!effectivelyGood && entryIsDamaged) ? "border-destructive/20" : "border-emerald-500/30";
+                              const bgColor = (!effectivelyGood && entryIsDamaged) ? "bg-destructive/5" : "bg-emerald-500/5";
+                              const dotColor = (!effectivelyGood && entryIsDamaged) ? "bg-destructive" : "bg-emerald-500";
+
+                              return (
+                                <div key={`survey-${entry.survey_display_id}-${mIdx}`} className="flex items-start gap-3">
+                                  <div className="flex flex-col items-center shrink-0 pt-4">
+                                    <div className={cn("h-[18px] w-[18px] rounded-full border-[3px] border-background shadow-sm", dotColor)} />
+                                  </div>
+                                  <button
+                                    onClick={() => setSelectedSurveyIdx(localSurveyIdx)}
+                                    className={cn(
+                                      "flex-1 text-left border rounded-lg px-5 py-3 transition-all",
+                                      bgColor, borderColor,
+                                      isSelected && "ring-2 ring-primary/30 shadow-sm"
                                     )}
-                                  </div>
-                                  <div className="grid grid-cols-5 gap-3 text-xs">
-                                    <div>
-                                      <p className="text-muted-foreground text-[9px] uppercase tracking-wider">Survey</p>
-                                      <p className="font-mono font-semibold text-foreground">{entry.survey_display_id || '—'}</p>
+                                  >
+                                    <div className="flex items-center gap-2 mb-1">
+                                      {isLatest && (
+                                        <span className="text-[8px] font-bold uppercase tracking-wider text-primary bg-primary/10 dark:text-muted-secondary dark:bg-muted-secondary/10 rounded px-1.5 py-0.5">Latest</span>
+                                      )}
+                                      {effectivelyGood && (
+                                        <span className="text-[8px] font-bold uppercase tracking-wider text-emerald-600 bg-emerald-500/10 rounded px-1.5 py-0.5">
+                                          Marked Good by {latestMarkGood?.name}
+                                        </span>
+                                      )}
                                     </div>
-                                    <div>
-                                      <p className="text-muted-foreground text-[9px] uppercase tracking-wider">Condition</p>
-                                      <p className={cn("font-semibold capitalize", isDamaged ? "text-destructive" : "text-emerald-600")}>{isDamaged ? (entry.condition || '—') : "Good"}</p>
+                                    <div className="grid grid-cols-5 gap-3 text-xs">
+                                      <div>
+                                        <p className="text-muted-foreground text-[9px] uppercase tracking-wider">Survey</p>
+                                        <p className="font-mono font-semibold text-foreground">{entry.survey_display_id || '—'}</p>
+                                      </div>
+                                      <div>
+                                        <p className="text-muted-foreground text-[9px] uppercase tracking-wider">Condition</p>
+                                        <p className={cn("font-semibold capitalize", (!effectivelyGood && entryIsDamaged) ? "text-destructive" : "text-emerald-600")}>
+                                          {effectivelyGood ? 'Good' : (entry.condition || '-')}
+                                        </p>
+                                      </div>
+                                      <div>
+                                        <p className="text-muted-foreground text-[9px] uppercase tracking-wider">Asset Type</p>
+                                        <p className="font-semibold text-foreground">{selectedDefect.assetType}</p>
+                                      </div>
+                                      <div>
+                                        <p className="text-muted-foreground text-[9px] uppercase tracking-wider">Side / Zone</p>
+                                        <p className="font-semibold text-foreground capitalize">{selectedDefect.side} · {selectedDefect.zone}</p>
+                                      </div>
+                                      <div>
+                                        <p className="text-muted-foreground text-[9px] uppercase tracking-wider">Survey Date</p>
+                                        <p className="font-semibold text-foreground">{entry.survey_date || '-'}</p>
+                                      </div>
                                     </div>
-                                    <div>
-                                      <p className="text-muted-foreground text-[9px] uppercase tracking-wider">Asset Type</p>
-                                      <p className="font-semibold text-foreground">{selectedDefect.assetType}</p>
-                                    </div>
-                                    <div>
-                                      <p className="text-muted-foreground text-[9px] uppercase tracking-wider">Side / Zone</p>
-                                      <p className="font-semibold text-foreground">{selectedDefect.side} · {selectedDefect.zone?.toUpperCase()}</p>
-                                    </div>
-                                    <div>
-                                      <p className="text-muted-foreground text-[9px] uppercase tracking-wider">Survey Date</p>
-                                      <p className="font-semibold text-foreground">{entry.survey_date || '—'}</p>
-                                    </div>
-                                  </div>
-                                </button>
-                              </div>
-                            );
-                          })}
+                                  </button>
+                                </div>
+                              );
+                            })}
+                          </div>
                         </div>
-                      </div>
-                    )}
+                      );
+                    })()}
                   </div>
                 );
               })()}
@@ -862,7 +986,7 @@ export default function DefectLibrary() {
                 )}
                 {confirmMarkGoodAsset.roadName && (
                   <div className="flex justify-between">
-                    <span className="text-muted-foreground">Road</span>
+                    <span className="text-muted-foreground">Route</span>
                     <span className="font-semibold">{confirmMarkGoodAsset.roadName}</span>
                   </div>
                 )}

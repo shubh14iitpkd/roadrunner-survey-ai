@@ -1,6 +1,3 @@
-import { get } from "http";
-
-// Use environment variable, fallback to production URL
 const API_BASE = import.meta.env.VITE_API_URL ?? "https://roadsightai.roadvision.ai";
 
 // Export API_BASE so it can be used in other files
@@ -205,10 +202,12 @@ export const api = {
 		get: (asset_id: string) => apiFetch(`/api/assets/${asset_id}`),
 		bulkInsert: (assets: any[]) => apiFetch("/api/assets/bulk", { method: "POST", body: JSON.stringify({ assets }) }),
 		update: (asset_id: string, payload: any) => apiFetch(`/api/assets/${asset_id}`, { method: "PUT", body: JSON.stringify(payload) }),
-		markAsGood: (asset_id: string, modifier: { name: string; user_id: string }) =>
+		markAsGood: (asset_id: string, modifier: { name: string; user_id: string; survey_id?: string }) =>
 			apiFetch(`/api/assets/${asset_id}/mark-good`, { method: "PATCH", body: JSON.stringify(modifier) }),
-		unmarkGood: (asset_id: string) =>
-			apiFetch(`/api/assets/${asset_id}/unmark-good`, { method: "PATCH" }),
+		unmarkGood: (asset_id: string, modifier?: { name: string; user_id: string, survey_id: string }) =>
+			apiFetch(`/api/assets/${asset_id}/unmark-good`, { method: "PATCH", body: JSON.stringify(modifier || {}) }),
+		getConditionLogs: (asset_id: string) =>
+			apiFetch(`/api/assets/${asset_id}/condition-logs`),
 		updateIssue: (asset_id: string, issue: string) =>
 			apiFetch(`/api/assets/${asset_id}/issue`, { method: "PATCH", body: JSON.stringify({ issue }) }),
 		getAvailableIcons: () => apiFetch("/api/assets/available-icons"),

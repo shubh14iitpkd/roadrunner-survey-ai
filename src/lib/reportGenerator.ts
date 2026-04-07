@@ -11,7 +11,7 @@ import capitalize from "@/helpers/capitalize";
 async function fetchDamagedAssets(filterAssetType?: string): Promise<any[]> {
   const qs = new URLSearchParams({ condition: "damaged" });
   const resp = await apiFetch(`/api/assets/master?${qs.toString()}`, { method: "POST" });
-  console.log("pikachu", resp)
+  // console.log("pikachu", resp)
   // The master endpoint may return an array or { items: [] }
   const items: any[] = Array.isArray(resp) ? resp : (resp?.items ?? resp?.assets ?? []);
   if (filterAssetType) {
@@ -69,7 +69,7 @@ export async function exportDefectByAssetTypeReport(filterAssetType?: string, la
 
   const headers = [
     "Defect ID", "Asset ID", "Asset Type", "Asset Category", "Latitude", "Longitude",
-    "Road Name", "Side", "Zone", "Last Survey Date", "Issue Type",
+    "Route Name", "Side", "Zone", "Last Survey Date", "Issue Type",
   ];
 
   const data = rows.map(r => [
@@ -97,7 +97,7 @@ export async function exportDefectByRoadReport(filterRoad?: string, labelMap?: R
     : all;
 
   const headers = [
-    "Defect ID", "Asset ID", "Road Name", "Asset Type", "Asset Category",
+    "Defect ID", "Asset ID", "Route Name", "Asset Type", "Asset Category",
     "Latitude", "Longitude", "Side", "Zone",
     "Last Survey Date", "Issue Type",
   ];
@@ -108,12 +108,12 @@ export async function exportDefectByRoadReport(filterRoad?: string, labelMap?: R
     r.lastSurveyDate, capitalize(r.issueType),
   ]);
 
-  const suffix = filterRoad ? filterRoad.replace(/\s+/g, "_") : "All_Roads";
+  const suffix = filterRoad ? filterRoad.replace(/\s+/g, "_") : "All_Routes";
   exportToExcel({
-    filename: `Defect_Report_Road_${suffix}.xlsx`,
-    sheetName: "By Road",
-    title: "RoadSight AI — Defect Report by Road",
-    subtitle: `Filter: ${filterRoad || "All Roads"} | Generated: ${new Date().toLocaleDateString()} | ${data.length} records`,
+    filename: `Defect_Report_Route_${suffix}.xlsx`,
+    sheetName: "By Route",
+    title: "RoadSight AI — Defect Report by Routes",
+    subtitle: `Filter: ${filterRoad || "All Routes"} | Generated: ${new Date().toLocaleDateString()} | ${data.length} records`,
     headers,
     rows: data,
   });
@@ -130,7 +130,7 @@ export async function exportRoadWiseAssetTypeReport(labelMap?: ResolvedMap | nul
   });
 
   const headers = [
-    "Road Name", "Asset Type", "Asset Category", "Anomaly ID", "Asset ID",
+    "Route Name", "Asset Type", "Asset Category", "Anomaly ID", "Asset ID",
     "Latitude", "Longitude", "Side", "Zone",
     "Last Survey Date", "Issue Type",
   ];
@@ -142,10 +142,10 @@ export async function exportRoadWiseAssetTypeReport(labelMap?: ResolvedMap | nul
   ]);
 
   exportToExcel({
-    filename: "Defect_Report_RoadWise_AssetType.xlsx",
-    sheetName: "Road × Asset Type",
-    title: "RoadSight AI — Road-wise Asset Type Report",
-    subtitle: `Generated: ${new Date().toLocaleDateString()} | ${data.length} records | Sorted by Road → Asset Type`,
+    filename: "Defect_Report_RouteWise_AssetType.xlsx",
+    sheetName: "Route and Asset Type",
+    title: "RoadSight AI — Route-wise Asset Type Report",
+    subtitle: `Generated: ${new Date().toLocaleDateString()} | ${data.length} records | Sorted by Route → Asset Type`,
     headers,
     rows: data,
   });

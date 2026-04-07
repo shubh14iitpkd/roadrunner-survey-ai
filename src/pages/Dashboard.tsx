@@ -772,7 +772,7 @@ export default function Dashboard() {
                     className="text-sm font-semibold uppercase tracking-wider text-muted-foreground cursor-pointer select-none hover:text-foreground transition-colors"
                     onClick={() => handleRoadSort("road")}
                   >
-                    Road<SortIcon col="road" activeSortBy={roadSortBy} activeSortOrder={roadSortOrder} />
+                    Route<SortIcon col="road" activeSortBy={roadSortBy} activeSortOrder={roadSortOrder} />
                   </TableHead>
                   <TableHead
                     className="text-sm font-semibold uppercase tracking-wider text-muted-foreground text-right cursor-pointer select-none hover:text-foreground transition-colors"

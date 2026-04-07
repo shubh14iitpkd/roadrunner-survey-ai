@@ -473,6 +473,37 @@ def delete_survey(survey_id: str):
                 )
                 master_assets_updated += 1
         print(f"[DELETE] Master assets: {master_assets_deleted} deleted, {master_assets_updated} updated")
+
+        # 5c. Revert assets whose most recent mark-good was done in this survey.
+        # Use asset_condition_logs: find assets currently "good" whose latest
+        # "marked_good" log entry references the deleted survey.
+        reverted_count = 0
+        try:
+            # Get the latest log entry per master_asset for this survey's mark-goods
+            pipeline_logs = [
+                {"$match": {"survey_id": survey_oid, "action": "marked_good"}},
+                {"$sort": {"changed_at": DESCENDING}},
+                {"$group": {"_id": "$master_asset_id", "latest_log": {"$first": "$$ROOT"}}},
+            ]
+            latest_logs = list(db.asset_condition_logs.aggregate(pipeline_logs))
+            for entry in latest_logs:
+                ma_id = entry["_id"]
+                # Only revert if the asset is still in good condition
+                ma = db.master_assets.find_one(
+                    {"_id": ma_id, "latest_condition": "good"},
+                    {"survey_history": 1}
+                )
+                if ma:
+                    history = ma.get("survey_history", [])
+                    revert_condition = history[-1].get("condition", "damaged") if history else "damaged"
+                    db.master_assets.update_one(
+                        {"_id": ma_id},
+                        {"$set": {"latest_condition": revert_condition, "updated_at": get_now_iso()}}
+                    )
+                    reverted_count += 1
+        except Exception as e:
+            print(f"[DELETE] Warning: condition log revert failed: {e}")
+        print(f"[DELETE] Reverted {reverted_count} assets whose mark-good was in this survey")
     except Exception as e:
         print(f"[DELETE] Warning: master_assets cleanup failed: {e}")
     

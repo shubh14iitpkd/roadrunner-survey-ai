@@ -26,8 +26,6 @@ export interface AssetRecord {
   box?: { x: number; y: number; width: number; height: number };
   /** UI-only: true when this asset has been marked as good in this session */
   isGood?: boolean;
-  /** Set when a surveyor marks the asset as good */
-  modifiedBy?: { name: string; changed_at: string };
   /** Cross-survey timeline from master_assets.survey_history */
   surveyHistory?: {
     survey_display_id?: string;
@@ -40,6 +38,7 @@ export interface AssetRecord {
     video_id?: string;
     frame_number?: number;
     box?: { x: number; y: number; width: number; height: number };
+    created_at: string;
   }[];
   totalSurveysDetected?: number;
   masterDisplayId?: string;

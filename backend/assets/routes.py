@@ -323,19 +323,60 @@ def get_master_assets():
 				"as": "road_info"
 			}
 		},
+		# Fetch created_at for every survey referenced in survey_history
+		{
+			"$lookup": {
+				"from": "surveys",
+				"let": {"survey_ids": "$survey_history.survey_id"},
+				"pipeline": [
+					{"$match": {"$expr": {"$in": ["$_id", "$$survey_ids"]}}},
+					{"$project": {"_id": 1, "created_at": 1}},
+				],
+				"as": "survey_dates"
+			}
+		},
 		{
 			"$addFields": {
 				"route_name": {"$arrayElemAt": ["$road_info.road_name", 0]},
-				# Expose denormalised fields under names the frontend expects
 				"condition": "$latest_condition",
 				"confidence": "$latest_confidence",
 				"location": "$canonical_location",
+				"survey_history": {
+					"$map": {
+						"input": "$survey_history",
+						"as": "sh",
+						"in": {
+							"$mergeObjects": [
+								"$$sh",
+								{
+									"created_at": {
+										"$let": {
+											"vars": {
+												"matched": {
+													"$filter": {
+														"input": "$survey_dates",
+														"as": "sd",
+														"cond": {"$eq": ["$$sd._id", "$$sh.survey_id"]},
+													}
+												}
+											},
+											"in": {"$arrayElemAt": ["$$matched.created_at", 0]},
+										}
+									}
+								}
+							]
+						}
+					}
+				},
 			}
 		},
 		{
 			"$project": {
 				"road_info": 0,
-				"embedding": 0,   # no need to send 512-d vector to the browser
+				"survey_dates": 0,
+				"embedding": 0,        # no need to send 512-d vector to the browser
+				"modified_by": 0,      # legacy field, replaced by asset_condition_logs
+				"mark_good_history": 0, # legacy field, replaced by asset_condition_logs
 			}
 		},
 	]
@@ -456,96 +497,6 @@ def update_asset(asset_id: str):
 	return jsonify({"ok": True})
 
 
-@assets_bp.patch("/<asset_id>/mark-good", endpoint="assets_mark_good")
-@role_required(["super_admin","admin", "surveyor"])
-def mark_asset_good(asset_id: str):
-	"""
-	Mark a master asset's condition as good.
-	Updates both the master_assets record and the underlying
-	asset observation in db.assets.
-	---
-	tags:
-	  - Assets
-	security:
-	  - Bearer: []
-	parameters:
-	  - name: asset_id
-	    in: path
-	    type: string
-	    required: true
-	    description: The MongoDB _id of the master asset
-	  - name: body
-	    in: body
-	    required: true
-	    schema:
-	      type: object
-	      required:
-	        - name
-	        - user_id
-	      properties:
-	        name:
-	          type: string
-	          description: Full name of the surveyor marking the asset
-	        user_id:
-	          type: string
-	          description: ID of the surveyor
-	responses:
-	  200:
-	    description: Asset marked as good
-	  400:
-	    description: Missing required fields
-	  404:
-	    description: Asset not found
-	"""
-	body = request.get_json(silent=True) or {}
-	surveyor_name = (body.get("name") or "").strip()
-	surveyor_user_id = (body.get("user_id") or "").strip()
-	if not surveyor_name:
-		return jsonify({"error": "name is required"}), 400
-
-	db = get_db()
-	now = get_now_iso()
-	modifier_info = {
-		"user_id": surveyor_user_id,
-		"name": surveyor_name,
-		"changed_at": now,
-	}
-
-	# 1. Update the master_assets record
-	res = db.master_assets.find_one_and_update(
-		{"_id": ObjectId(asset_id)},
-		{
-			"$set": {
-				"latest_condition": "good",
-				"issue": None,
-				"modified_by": modifier_info,
-				"updated_at": now,
-			}
-		},
-	)
-	if not res:
-		# Fallback: try as a raw asset _id (backward compat)
-		res = db.assets.find_one_and_update(
-			{"_id": ObjectId(asset_id)},
-			{"$set": {"condition": "good", "modified_by": modifier_info}},
-		)
-		if not res:
-			return jsonify({"error": "not found"}), 404
-		return jsonify({"ok": True})
-
-	# 2. Also update the latest asset observation linked to this master
-	survey_history = res.get("survey_history", [])
-	if survey_history:
-		latest_obs_id = survey_history[-1].get("asset_observation_id")
-		if latest_obs_id:
-			db.assets.update_one(
-				{"_id": latest_obs_id},
-				{"$set": {"condition": "good", "modified_by": modifier_info}},
-			)
-
-	return jsonify({"ok": True})
-
-
 @assets_bp.patch("/<asset_id>/issue", endpoint="assets_update_issue")
 @role_required(["super_admin", "admin", "surveyor"])
 def update_asset_issue(asset_id: str):
@@ -604,13 +555,13 @@ def update_asset_issue(asset_id: str):
 
 	return jsonify({"ok": True})
 
-
-@assets_bp.patch("/<asset_id>/unmark-good", endpoint="assets_unmark_good")
+@assets_bp.patch("/<asset_id>/mark-good", endpoint="assets_mark_good")
 @role_required(["super_admin","admin", "surveyor"])
-def unmark_asset_good(asset_id: str):
+def mark_asset_good(asset_id: str):
 	"""
-	Revert a master asset's condition from good back to damaged.
-	Updates both the master_assets record and the underlying asset observation.
+	Mark a master asset's condition as good.
+	Updates both the master_assets record and the underlying
+	asset observation in db.assets.
 	---
 	tags:
 	  - Assets
@@ -622,27 +573,174 @@ def unmark_asset_good(asset_id: str):
 	    type: string
 	    required: true
 	    description: The MongoDB _id of the master asset
+	  - name: body
+	    in: body
+	    required: true
+	    schema:
+	      type: object
+	      required:
+	        - name
+	        - user_id
+	      properties:
+	        name:
+	          type: string
+	          description: Full name of the surveyor marking the asset
+	        user_id:
+	          type: string
+	          description: ID of the surveyor
+	responses:
+	  200:
+	    description: Asset marked as good
+	  400:
+	    description: Missing required fields
+	  404:
+	    description: Asset not found
+	"""
+	body = request.get_json(silent=True) or {}
+	surveyor_name = (body.get("name") or "").strip()
+	surveyor_user_id = (body.get("user_id") or "").strip()
+	if not surveyor_name:
+		return jsonify({"error": "name is required"}), 400
+
+	db = get_db()
+	now = get_now_iso()
+
+	# Resolve survey reference if provided
+	survey_id_raw = (body.get("survey_id") or "").strip()
+	survey_oid = None
+	survey_display_id = ""
+	if survey_id_raw:
+		try:
+			survey_oid = ObjectId(survey_id_raw)
+			survey_doc = db.surveys.find_one({"_id": survey_oid}, {"survey_display_id": 1})
+			if survey_doc:
+				survey_display_id = survey_doc.get("survey_display_id", "")
+		except Exception:
+			pass
+
+	master_oid = ObjectId(asset_id)
+
+	# 1. Update the master_assets record
+	res = db.master_assets.find_one_and_update(
+		{"_id": master_oid},
+		{
+			"$set": {
+				"latest_condition": "good",
+				"issue": None,
+				"updated_at": now,
+			},
+		},
+	)
+	if not res:
+		# Fallback: try as a raw asset _id (backward compat)
+		res = db.assets.find_one_and_update(
+			{"_id": master_oid},
+			{"$set": {"condition": "good"}},
+		)
+		if not res:
+			return jsonify({"error": "not found"}), 404
+		return jsonify({"ok": True})
+
+	# 2. Log the action to the audit collection
+	db.asset_condition_logs.insert_one({
+		"master_asset_id": master_oid,
+		"master_display_id": res.get("master_display_id", ""),
+		"action": "marked_good",
+		"previous_condition": res.get("latest_condition", "unknown"),
+		"new_condition": "good",
+		"name": surveyor_name,
+		"user_id": surveyor_user_id,
+		"survey_id": survey_oid,
+		"survey_display_id": survey_display_id,
+		"changed_at": now,
+	})
+
+	# 3. Also update the latest asset observation linked to this master
+	survey_history = res.get("survey_history", [])
+	if survey_history:
+		latest_obs_id = survey_history[-1].get("asset_observation_id")
+		if latest_obs_id:
+			db.assets.update_one(
+				{"_id": latest_obs_id},
+				{"$set": {"condition": "good"}},
+			)
+
+	return jsonify({"ok": True})
+
+@assets_bp.patch("/<asset_id>/unmark-good", endpoint="assets_unmark_good")
+@role_required(["super_admin","admin", "surveyor"])
+def unmark_asset_good(asset_id: str):
+	"""
+	Revert a master asset's condition from good back to damaged.
+	Logs the action to asset_condition_logs.
+	---
+	tags:
+	  - Assets
+	security:
+	  - Bearer: []
+	parameters:
+	  - name: asset_id
+	    in: path
+	    type: string
+	    required: true
+	    description: The MongoDB _id of the master asset
+	  - name: body
+	    in: body
+	    required: false
+	    schema:
+	      type: object
+	      properties:
+	        name:
+	          type: string
+	        user_id:
+	          type: string
 	responses:
 	  200:
 	    description: Asset unmarked (reverted to damaged)
 	  404:
 	    description: Asset not found
 	"""
+	body = request.get_json(silent=True) or {}
+	
+	sid = body.get("survey_id")
+	sdid = ""
+	surveyor_name = (body.get("name") or "").strip()
+	surveyor_user_id = (body.get("user_id") or "").strip()
+
 	db = get_db()
 	now = get_now_iso()
+	master_oid = ObjectId(asset_id)
+
+	if sid:
+		try:
+			sid = ObjectId(sid)
+			survey_doc = db.surveys.find_one({"_id": sid}, {"survey_display_id": 1})
+			print(survey_doc, sid)
+			if survey_doc:
+				sdid = survey_doc.get("survey_display_id", "")
+		except Exception as e:
+			print("[UMARK] Unmarking Error",e)
 
 	res = db.master_assets.find_one_and_update(
-		{"_id": ObjectId(asset_id)},
-		{
-			"$set": {
-				"latest_condition": "damaged",
-				"updated_at": now,
-			},
-			"$unset": {"modified_by": ""},
-		},
+		{"_id": master_oid},
+		{"$set": {"latest_condition": "damaged", "updated_at": now}},
 	)
 	if not res:
 		return jsonify({"error": "not found"}), 404
+
+	# Log the mark-damaged action
+	db.asset_condition_logs.insert_one({
+		"master_asset_id": master_oid,
+		"master_display_id": res.get("master_display_id", ""),
+		"action": "marked_damaged",
+		"previous_condition": "good",
+		"new_condition": "damaged",
+		"name": surveyor_name,
+		"user_id": surveyor_user_id,
+		"survey_id": sid,
+		"survey_display_id": sdid,
+		"changed_at": now,
+	})
 
 	# Also revert the latest asset observation
 	survey_history = res.get("survey_history", [])
@@ -651,10 +749,40 @@ def unmark_asset_good(asset_id: str):
 		if latest_obs_id:
 			db.assets.update_one(
 				{"_id": latest_obs_id},
-				{"$set": {"condition": "damaged"}, "$unset": {"modified_by": ""}},
+				{"$set": {"condition": "damaged"}},
 			)
 
 	return jsonify({"ok": True})
+
+
+@assets_bp.get("/<asset_id>/condition-logs", endpoint="assets_condition_logs")
+@role_required(["super_admin", "admin", "surveyor", "viewer"])
+def get_condition_logs(asset_id: str):
+	"""
+	Get condition change audit log for a master asset.
+	Returns all mark-good / mark-damaged events, newest first.
+	---
+	tags:
+	  - Assets
+	security:
+	  - Bearer: []
+	parameters:
+	  - name: asset_id
+	    in: path
+	    type: string
+	    required: true
+	responses:
+	  200:
+	    description: Condition logs retrieved
+	"""
+	db = get_db()
+	logs = list(
+		db.asset_condition_logs.find(
+			{"master_asset_id": ObjectId(asset_id)},
+			{"_id": 0, "master_asset_id": 0},
+		).sort("changed_at", DESCENDING)
+	)
+	return mongo_response({"items": logs, "count": len(logs)})
 
 
 @assets_bp.put("/icon-config", endpoint="update_icon_config")
