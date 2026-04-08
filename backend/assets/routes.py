@@ -338,6 +338,7 @@ def get_master_assets():
 		{
 			"$addFields": {
 				"route_name": {"$arrayElemAt": ["$road_info.road_name", 0]},
+				"road_side": {"$arrayElemAt": ["$road_info.road_side", 0]},
 				"condition": "$latest_condition",
 				"confidence": "$latest_confidence",
 				"location": "$canonical_location",

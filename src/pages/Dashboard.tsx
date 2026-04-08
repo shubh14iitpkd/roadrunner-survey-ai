@@ -774,6 +774,9 @@ export default function Dashboard() {
                   >
                     Route<SortIcon col="road" activeSortBy={roadSortBy} activeSortOrder={roadSortOrder} />
                   </TableHead>
+                  <TableHead className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+                    Route Side
+                  </TableHead>
                   <TableHead
                     className="text-sm font-semibold uppercase tracking-wider text-muted-foreground text-right cursor-pointer select-none hover:text-foreground transition-colors"
                     onClick={() => handleRoadSort("total")}
@@ -799,6 +802,7 @@ export default function Dashboard() {
                 {topDefectRoads.map((row, idx) => (
                   <TableRow key={`${row.road}-${idx}`} className="hover:bg-muted/40 border-b border-border/50" style={{ height: 36 }}>
                     <TableCell className="text-xs font-medium py-2.5">{row.road}</TableCell>
+                    <TableCell className="text-xs text-muted-foreground py-2.5">{row.road_side ?? "—"}</TableCell>
                     <TableCell className="text-right font-semibold text-xs tabular-nums py-2.5">{row.total_count ?? "—"}</TableCell>
                     <TableCell className="text-right py-2.5">
                       <span className="inline-flex items-center justify-center rounded-md bg-destructive/10 text-destructive px-2 py-0.5 text-xs font-bold tabular-nums min-w-[2rem]">

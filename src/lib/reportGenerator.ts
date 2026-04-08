@@ -56,6 +56,7 @@ function assetToRow(asset: any, labelMap?: ResolvedMap | null) {
     lat: asset?.location?.coordinates[1] ?? "—",
     lon: asset?.location?.coordinates[0] ?? "—",
     roadName: asset.road_name ?? asset.road ?? asset.route_name ?? "—",
+    roadSide: asset.road_side ?? "—",
     side: asset.side ?? "—",
     zone: asset.zone ?? "—",
     lastSurveyDate: asset.last_seen_date ?? asset.survey_date ?? asset.last_survey_date ?? asset.date ?? "—",
@@ -69,12 +70,12 @@ export async function exportDefectByAssetTypeReport(filterAssetType?: string, la
 
   const headers = [
     "Defect ID", "Asset ID", "Asset Type", "Asset Category", "Latitude", "Longitude",
-    "Route Name", "Side", "Zone", "Last Survey Date", "Issue Type",
+    "Route Name", "Route Side", "Asset Side", "Asset Zone", "Last Survey Date", "Issue",
   ];
 
   const data = rows.map(r => [
     r.anomalyId, r.displayId, r.assetType, r.assetCategory, r.lat, r.lon,
-    r.roadName, capitalize(r.side), capitalize(r.zone), r.lastSurveyDate, capitalize(r.issueType),
+    r.roadName, r.roadSide, capitalize(r.side), capitalize(r.zone), r.lastSurveyDate, capitalize(r.issueType),
   ]);
 
   const suffix = labelMap?.labels?.[filterAssetType]?.display_name || "All_Types";
@@ -97,13 +98,13 @@ export async function exportDefectByRoadReport(filterRoad?: string, labelMap?: R
     : all;
 
   const headers = [
-    "Defect ID", "Asset ID", "Route Name", "Asset Type", "Asset Category",
-    "Latitude", "Longitude", "Side", "Zone",
-    "Last Survey Date", "Issue Type",
+    "Defect ID", "Asset ID", "Route Name", "Route Side", "Asset Type", "Asset Category",
+    "Latitude", "Longitude", "Asset Side", "Asset Zone",
+    "Last Survey Date", "Issue",
   ];
 
   const data = filtered.map(r => [
-    r.anomalyId, r.displayId, r.roadName, r.assetType, r.assetCategory,
+    r.anomalyId, r.displayId, r.roadName, r.roadSide, r.assetType, r.assetCategory,
     r.lat, r.lon, capitalize(r.side), capitalize(r.zone),
     r.lastSurveyDate, capitalize(r.issueType),
   ]);
@@ -130,13 +131,13 @@ export async function exportRoadWiseAssetTypeReport(labelMap?: ResolvedMap | nul
   });
 
   const headers = [
-    "Route Name", "Asset Type", "Asset Category", "Anomaly ID", "Asset ID",
-    "Latitude", "Longitude", "Side", "Zone",
-    "Last Survey Date", "Issue Type",
+    "Route Name", "Route Side", "Asset Type", "Asset Category", "Anomaly ID", "Asset ID",
+    "Latitude", "Longitude", "Asset Side", "Zone",
+    "Last Survey Date", "Issue",
   ];
 
   const data = rows.map(r => [
-    r.roadName, r.assetType, r.assetCategory, r.anomalyId, r.displayId,
+    r.roadName, r.roadSide, r.assetType, r.assetCategory, r.anomalyId, r.displayId,
     r.lat, r.lon, capitalize(r.side), capitalize(r.zone),
     r.lastSurveyDate, capitalize(r.issueType),
   ]);

@@ -305,7 +305,7 @@ def top_anomaly_roads():
 	total_map = {d["_id"]: d["total_count"] for d in total_agg}
 
 	# Step 3: Fetch all roads and enrich
-	all_roads = list(db.roads.find({}, {"route_id": 1, "road_name": 1}))
+	all_roads = list(db.roads.find({}, {"route_id": 1, "road_name": 1, "road_side": 1}))
 
 	items_raw = []
 	for road in all_roads:
@@ -322,6 +322,7 @@ def top_anomaly_roads():
 		items_raw.append({
 			"road": road_name,
 			"route_id": route_id,
+			"road_side": road.get("road_side"),
 			"count": defects,
 			"total_count": total,
 			"lastSurvey": survey_date,

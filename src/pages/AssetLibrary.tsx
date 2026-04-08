@@ -88,6 +88,7 @@ export default function AssetLibrary() {
     totalPoints: number;
   } | null>(null);
   const [showFullView, setShowFullView] = useState(false);
+  const [fullViewLoading, setFullViewLoading] = useState(false);
 
   const [assets, setAssets] = useState<AssetRecord[]>([]);
 
@@ -197,6 +198,7 @@ export default function AssetLibrary() {
             lng,
             surveyId,
             roadName: asset.route_name || '',
+            roadSide: asset.road_side || undefined,
             routeId: asset.route_id != null ? Number(asset.route_id) : undefined,
             groupId: asset.group_id ?? undefined,
             side: asset.side || 'Unknown',
@@ -309,11 +311,11 @@ export default function AssetLibrary() {
     try {
       const headers = [
         "Asset ID", "Asset Type", "Category", "Condition",
-        "Latitude", "Longitude", "Route Name", "Side", "Zone", "Survey Date",
+        "Latitude", "Longitude", "Route Name", "Route Side", "Asset Side", "Asset Zone", "Survey Date",
       ];
       const rows = filteredAssets.map((a) => [
         a.assetDisplayId, a.assetType, a.assetCategory, capitalize(a.condition),
-        a.lat, a.lng, a.roadName, capitalize(a.side), capitalize(a.zone), a.lastSurveyDate,
+        a.lat, a.lng, a.roadName, a.roadSide ?? "—", capitalize(a.side), capitalize(a.zone), a.lastSurveyDate,
       ]);
       exportToExcel({
         filename: "Asset_Library_Report.xlsx",
@@ -484,12 +486,14 @@ export default function AssetLibrary() {
                 pointIndex: 0,
                 totalPoints: 1,
               });
+              setShowFullView(true);
+              setFullViewLoading(true);
               try {
                 const resp = await api.assets.getConditionLogs(selectedAsset.id);
                 // console.log("Fetched condition logs:", resp);
                 setConditionLogs(resp?.items ?? []);
               } catch { setConditionLogs([]); }
-              setShowFullView(true);
+              finally { setFullViewLoading(false); }
             }
           }}
           onCloseMarker={() => setMarkerPopup(null)}
@@ -500,14 +504,19 @@ export default function AssetLibrary() {
 
       {/* Full View Dialog */}
       <Dialog open={showFullView} onOpenChange={async (open) => {
-        if (!open) { setShowFullView(false); setConditionLogs([]); }
+        if (!open) { setShowFullView(false); setConditionLogs([]); setFullViewLoading(false); }
       }}>
         <DialogHeader className="hidden">
           <DialogTitle>Full Asset View</DialogTitle>
           <DialogDescription>Full description of an asset</DialogDescription>
         </DialogHeader>
         <DialogContent className="max-w-[80vw] w-[70vw] h-[85vh] max-h-[90vh] overflow-auto p-0" style={{ zIndex: 9999 }}>
-          {selectedAsset && (() => {
+          {fullViewLoading && (
+            <div className="flex items-center justify-center h-full w-full">
+              <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+            </div>
+          )}
+          {!fullViewLoading && selectedAsset && (() => {
             const assetFrameData = {
               videoId: selectedAsset.videoId || "",
               frame_number: selectedAsset.frameNumber ?? 0,
@@ -548,7 +557,7 @@ export default function AssetLibrary() {
           })()}
 
           {/* Survey History Timeline */}
-          {selectedAsset && (() => {
+          {!fullViewLoading && selectedAsset && (() => {
             const condition = selectedAsset.condition?.toLowerCase() ?? '';
             const isDamaged = DAMAGED_CONDITIONS.has(condition);
             const history = selectedAsset.surveyHistory ?? [];
@@ -610,7 +619,7 @@ export default function AssetLibrary() {
                   }));
 
                   const merged: TimelineItem[] = [...surveyItems, ...logItems].sort((a, b) =>
-                    b.date.localeCompare(a.date)
+                    String(b.date).localeCompare(String(a.date))
                   );
                   // console.log("Merged Timeline Items:", merged);
                   if (merged.length === 0) {

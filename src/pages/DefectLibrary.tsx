@@ -212,6 +212,7 @@ export default function DefectLibrary() {
     totalPoints: number;
   } | null>(null);
   const [showFullView, setShowFullView] = useState(false);
+  const [fullViewLoading, setFullViewLoading] = useState(false);
   const [conditionLogs, setConditionLogs] = useState<any[]>([]);
 
   // Dynamic defect data from API
@@ -335,6 +336,7 @@ export default function DefectLibrary() {
             lng,
             surveyId,
             roadName: asset.route_name || '',
+            roadSide: asset.road_side || undefined,
             routeId: asset.route_id != null ? Number(asset.route_id) : undefined,
             side: asset.side || 'Unknown',
             zone: asset.zone || 'Unknown',
@@ -556,11 +558,11 @@ export default function DefectLibrary() {
     try {
       const headers = [
         "Defect ID", "Asset ID", "Asset Type", "Category", "Latitude", "Longitude",
-        "Route Name", "Side", "Zone", "Last Survey Date", "Issue Type",
+        "Route Name", "Route Side", "Asset Side", "Asset Zone", "Last Survey Date", "Issue",
       ];
       const rows = filteredDefects.map((a) => [
         a.defectId, a.assetDisplayId, a.assetType, a.assetCategory,
-        a.lat, a.lng, a.roadName, capitalize(a.side),
+        a.lat, a.lng, a.roadName, a.roadSide ?? "—", capitalize(a.side),
         capitalize(a.zone), a.lastSurveyDate, capitalize(a.issue),
       ]);
       exportToExcel({
@@ -719,13 +721,15 @@ export default function DefectLibrary() {
                 pointIndex: 0,
                 totalPoints: 1,
               });
+              setShowFullView(true);
+              setFullViewLoading(true);
               try {
                 console.log(selectedDefect, "fetching condition logs for asset ID:", selectedDefect.id);
                 const resp = await api.assets.getConditionLogs(selectedDefect.id);
                 // console.log("Fetched condition logs:", resp);
                 setConditionLogs(resp?.items ?? []);
               } catch { setConditionLogs([]); }
-              setShowFullView(true);
+              finally { setFullViewLoading(false); }
             }
           }}
           onCloseMarker={() => setMarkerPopup(null)}
@@ -736,7 +740,7 @@ export default function DefectLibrary() {
 
       {/* Full Road View Dialog */}
       <Dialog open={showFullView} onOpenChange={async (open) => {
-        if (!open) { setShowFullView(false); setConditionLogs([]); }
+        if (!open) { setShowFullView(false); setConditionLogs([]); setFullViewLoading(false); }
       }}>
         <DialogHeader className="hidden">
           <DialogTitle>Full Asset View</DialogTitle>
@@ -745,7 +749,12 @@ export default function DefectLibrary() {
           </DialogDescription>
         </DialogHeader>
         <DialogContent className="max-w-[80vw] w-[70vw] h-[85vh] max-h-[90vh] overflow-auto p-0" style={{ zIndex: 9999 }}>
-              {selectedDefect && (() => {
+          {fullViewLoading && (
+            <div className="flex items-center justify-center h-full w-full">
+              <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+            </div>
+          )}
+              {!fullViewLoading && selectedDefect && (() => {
                 const assetFrameData = {
                   videoId: selectedDefect.videoId || "",
                   frame_number: selectedDefect.frameNumber ?? 0,
@@ -787,7 +796,7 @@ export default function DefectLibrary() {
               })()}
 
               {/* Survey History Timeline */}
-              {selectedDefect && (() => {
+              {!fullViewLoading && selectedDefect && (() => {
                 const condition = selectedDefect.condition?.toLowerCase() ?? '';
                 const isDamaged = DAMAGED_CONDITIONS.has(condition);
                 const history = selectedDefect.surveyHistory ?? [];
@@ -845,7 +854,7 @@ export default function DefectLibrary() {
                       }));
 
                       const merged: TimelineItem[] = [...surveyItems, ...logItems].sort((a, b) =>
-                        b.date.localeCompare(a.date)
+                        String(b.date).localeCompare(String(a.date))
                       );
 
                       if (merged.length === 0) {
