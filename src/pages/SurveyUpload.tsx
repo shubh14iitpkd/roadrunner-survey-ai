@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Upload, Play, CheckCircle, Clock, AlertCircle, Video, AlertTriangle, FileVideo, Database, TrendingUp, Calendar, MapPin, Loader2, Trash2, X, Map, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
+import { Upload, Play, CheckCircle, Clock, AlertCircle, Video, AlertTriangle, FileVideo, Database, TrendingUp, Calendar, MapPin, Loader2, Trash2, X, Map, ArrowUpDown, ArrowUp, ArrowDown, ChevronLeft, ChevronRight } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -39,7 +39,6 @@ import { useAuth } from "@/contexts/AuthContext";
 import VideoLibraryUpload from "@/components/VideoLibraryUpload";
 import { set } from "date-fns";
 import { LibraryVideoItem } from "@/contexts/UploadContext";
-import { platform } from "os";
 
 
 
@@ -149,10 +148,16 @@ export default function SurveyUpload() {
   // Load videos and polling effects removed (handled in context)
 
   // Calculate KPIs
-  const totalUploaded = videos.filter(v => v.status === "uploaded" || v.status === "processing" || v.status === "completed").length;
+  const totalUploaded = videos.length;
   const totalProcessed = videos.filter(v => v.status === "completed").length;
-  const inQueue = videos.filter(v => v.status === "queue").length;
+  const inQueue = videos.filter(v => v.status === "queue" || v.status === "queued").length;
   const processing = videos.filter(v => v.status === "uploading" || v.status === "anonymizing" || v.status === "processing" || v.status === "asset_linking").length;
+
+  const PAGE_SIZE = 20;
+  const [currentPage, setCurrentPage] = useState(1);
+
+  // Reset to page 1 whenever sort changes
+  useEffect(() => { setCurrentPage(1); }, [sortBy, sortOrder]);
 
   const sortedVideos = useMemo(() => {
     if (!sortBy || !sortOrder) return videos;
@@ -176,6 +181,9 @@ export default function SurveyUpload() {
       return 0;
     });
   }, [videos, sortBy, sortOrder]);
+
+  const totalPages = Math.max(1, Math.ceil(sortedVideos.length / PAGE_SIZE));
+  const paginatedVideos = sortedVideos.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
 
   // Track uploads in progress for showing status
   const [uploadingItems, setUploadingItems] = useState<string[]>([]);
@@ -637,6 +645,7 @@ export default function SurveyUpload() {
                 </Button>
               </div>
             ) : (
+              <>
               <div className="rounded-xl border border-border overflow-hidden">
                 <div className="flex flex-col w-full">
                   <div className="flex w-full items-center justify-between bg-gradient-to-r from-blue-50 via-indigo-50 to-purple-50 dark:from-blue-950/30 dark:via-indigo-950/30 dark:to-purple-950/30 border-b border-border">
@@ -667,7 +676,7 @@ export default function SurveyUpload() {
                     <div className="text-center p-3 font-semibold text-sm flex-[2.5]">Actions</div>
                   </div>
                   <div className="flex flex-col w-full">
-                    {sortedVideos.map((video, index) => {
+                    {paginatedVideos.map((video, index) => {
                       const road = roads.find(r => r.route_id === video.routeId);
                       const uniqueKey = video.backendId || video.id || `video-temp-${index}`;
 
@@ -912,6 +921,37 @@ export default function SurveyUpload() {
                   </div>
                 </div>
               </div>
+
+              {/* Pagination controls */}
+              {totalPages > 1 && (
+                <div className="flex items-center justify-between px-4 py-3">
+                  <div className="text-sm text-muted-foreground">
+                    Showing {(currentPage - 1) * PAGE_SIZE + 1} - {Math.min(currentPage * PAGE_SIZE, sortedVideos.length)} of {sortedVideos.length} videos
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline" size="sm"
+                      onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                      disabled={currentPage === 1}
+                      className="h-8 w-8"
+                    >
+                      <ChevronLeft className="h-4 w-4 mr-1" />
+                    </Button>
+                    {/* <span className="text-sm font-medium px-3">
+                      Page {currentPage} of {totalPages}
+                    </span> */}
+                    <Button
+                      variant="outline" size="sm"
+                      onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                      disabled={currentPage === totalPages}
+                      className="h-8 w-8"
+                    >
+                      <ChevronRight className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              )}
+              </>
             )}
           </Card>
         )}

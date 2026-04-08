@@ -83,13 +83,19 @@ export const api = {
 		delete: (survey_id: string) => apiFetch(`/api/surveys/${survey_id}`, { method: "DELETE" }),
 	},
 	videos: {
-		list: (params?: { route_id?: number; survey_id?: string; status?: string }) => {
+		list: (params?: { route_id?: number; survey_id?: string; status?: string; page?: number; per_page?: number }) => {
 			const qs = new URLSearchParams();
 			if (params?.route_id != null) qs.set("route_id", String(params.route_id));
 			if (params?.survey_id) qs.set("survey_id", params.survey_id);
 			if (params?.status) qs.set("status", params.status);
+			if (params?.page != null) qs.set("page", String(params.page));
+			if (params?.per_page != null) qs.set("per_page", String(params.per_page));
 			const q = qs.toString();
 			return apiFetch(`/api/videos/${q ? `?${q}` : ""}`);
+		},
+		statusBatch: (ids: string[]) => {
+			if (ids.length === 0) return Promise.resolve({ statuses: {} });
+			return apiFetch(`/api/videos/status-batch?ids=${ids.join(",")}`);
 		},
 		get: (video_id: string) => apiFetch(`/api/videos/${video_id}`),
 		create: (payload: { survey_id: string; route_id: number; title: string; storage_url?: string; thumbnail_url?: string; size_bytes?: number; duration_seconds?: number; status?: string; progress?: number; eta?: string; }) =>

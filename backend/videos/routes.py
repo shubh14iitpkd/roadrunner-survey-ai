@@ -439,11 +439,58 @@ def _run_asset_linking(app, video_id: str, payload: dict):
             )
 
 
+@videos_bp.get("/status-batch")
+@role_required(["super_admin", "admin", "surveyor", "viewer"])
+def status_batch():
+    """
+    Get status/progress/eta for multiple videos in one request
+    ---
+    tags:
+      - Videos
+    security:
+      - Bearer: []
+    parameters:
+      - name: ids
+        in: query
+        type: string
+        required: true
+        description: Comma-separated list of video IDs
+    responses:
+      200:
+        description: Map of video_id -> {status, progress, eta}
+    """
+    ids_str = request.args.get("ids", "")
+    if not ids_str:
+        return jsonify({"statuses": {}}), 200
+
+    ids = [i.strip() for i in ids_str.split(",") if i.strip()]
+    try:
+        object_ids = [ObjectId(i) for i in ids]
+    except Exception:
+        return jsonify({"error": "Invalid video ID format"}), 400
+
+    db = get_db()
+    rows = list(db.videos.find(
+        {"_id": {"$in": object_ids}},
+        {"status": 1, "progress": 1, "eta": 1},
+    ))
+
+    statuses = {
+        str(r["_id"]): {
+            "status": r.get("status"),
+            "progress": r.get("progress", 0),
+            "eta": r.get("eta"),
+        }
+        for r in rows
+    }
+    return jsonify({"statuses": statuses}), 200
+
+
 @videos_bp.get("/")
 @role_required(["super_admin","admin", "surveyor", "viewer"])
 def list_videos():
     """
-    List all videos
+    List all videos with pagination and embedded survey data
     ---
     tags:
       - Videos
@@ -462,9 +509,17 @@ def list_videos():
         in: query
         type: string
         description: Filter by video status
+      - name: page
+        in: query
+        type: integer
+        description: Page number (1-based, default 1)
+      - name: per_page
+        in: query
+        type: integer
+        description: Items per page (default 20, max 100)
     responses:
       200:
-        description: List of videos retrieved successfully
+        description: Paginated list of videos with survey data
         schema:
           type: object
           properties:
@@ -472,13 +527,21 @@ def list_videos():
               type: array
               items:
                 type: object
-            count:
+            total:
+              type: integer
+            page:
+              type: integer
+            per_page:
+              type: integer
+            total_pages:
               type: integer
     """
     query = {}
     route_id = request.args.get("route_id", type=int)
     survey_id = request.args.get("survey_id")
     status = request.args.get("status")
+    page = max(1, request.args.get("page", 1, type=int))
+    per_page = min(100, max(1, request.args.get("per_page", 20, type=int)))
 
     if route_id is not None:
         query["route_id"] = route_id
@@ -488,11 +551,48 @@ def list_videos():
         query["status"] = status
 
     db = get_db()
-    items = list(db.videos.find(query).sort("created_at", DESCENDING))
+    total = db.videos.count_documents(query)
+    total_pages = max(1, (total + per_page - 1) // per_page)
+    skip = (page - 1) * per_page
 
-    # Use bson.json_util to safely handle ObjectId, datetime, etc.
+    pipeline = [
+        {"$match": query},
+        {"$sort": {"created_at": DESCENDING}},
+        {"$skip": skip},
+        {"$limit": per_page},
+        {
+            "$lookup": {
+                "from": "surveys",
+                "localField": "survey_id",
+                "foreignField": "_id",
+                "as": "_survey",
+            }
+        },
+        {
+            "$addFields": {
+                "survey_date": {"$arrayElemAt": ["$_survey.survey_date", 0]},
+                "surveyor_name": {"$arrayElemAt": ["$_survey.surveyor_name", 0]},
+                "survey_display_id": {
+                    "$ifNull": [
+                        "$survey_display_id",
+                        {"$arrayElemAt": ["$_survey.survey_display_id", 0]},
+                    ]
+                },
+            }
+        },
+        {"$project": {"_survey": 0}},
+    ]
+
+    items = list(db.videos.aggregate(pipeline))
+
     return Response(
-        json_util.dumps({"items": items, "count": len(items)}),
+        json_util.dumps({
+            "items": items,
+            "total": total,
+            "page": page,
+            "per_page": per_page,
+            "total_pages": total_pages,
+        }),
         mimetype="application/json",
     )
 

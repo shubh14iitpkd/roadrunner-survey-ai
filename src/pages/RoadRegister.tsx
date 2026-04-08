@@ -739,16 +739,16 @@ export default function RoadRegister() {
                 }}
               >
                 <DialogHeader>
-                  <DialogTitle>Add New Road</DialogTitle>
+                  <DialogTitle>Add New Route</DialogTitle>
                   <DialogDescription>
-                    Enter the details for the new road entry. The map will show the route between selected points.
+                    Enter the details for the new Route entry
                   </DialogDescription>
                 </DialogHeader>
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                   {/* Left column - Form */}
                   <form onSubmit={handleAddRoad} className="grid gap-4 py-4" id="add-road-form">
                     <div className="grid gap-2">
-                      <Label htmlFor="road_name">Road Name *</Label>
+                      <Label htmlFor="road_name">Route Name *</Label>
                       <Input id="road_name" name="road_name" placeholder="e.g., Al Corniche Street" required />
                     </div>
 
@@ -895,7 +895,7 @@ export default function RoadRegister() {
                         )}
                       </div>
                       <div className="grid gap-2">
-                        <Label htmlFor="road_side">Road Side *</Label>
+                        <Label htmlFor="road_side">Route Side *</Label>
                         <Select name="road_side" required>
                           <SelectTrigger>
                             <SelectValue placeholder="Select side" />
@@ -931,7 +931,7 @@ export default function RoadRegister() {
                       <Button type="button" variant="outline" onClick={() => setIsAddDialogOpen(false)}>
                         Cancel
                       </Button>
-                      <Button type="submit">Add Road</Button>
+                      <Button type="submit">Add Route</Button>
                     </div>
                   </form>
 

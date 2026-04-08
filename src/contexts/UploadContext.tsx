@@ -121,21 +121,18 @@ export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     // Ref to store active XHR instances keyed by video id, so they can be aborted
     const xhrRefs = useRef<Map<string, XMLHttpRequest>>(new Map());
 
-    // Load initial videos from API
+    // Load initial videos from API (survey data is embedded via backend join)
     useEffect(() => {
         let cancelled = false;
         (async () => {
             try {
-                const [videosResp, surveysResp] = await Promise.all([
-                    api.videos.list(),
-                    api.Surveys.list({ latest_only: false }),
-                ]);
+                // Fetch all videos in one call; backend joins survey_date/surveyor_name/survey_display_id
+                const videosResp = await api.videos.list({ per_page: 100 });
 
                 if (cancelled) return;
 
                 const videoItems = videosResp.items as any[];
-                const surveyItems = surveysResp.items as any[];
-                // Helper to extract string from MongoDB ObjectId
+
                 const getIdString = (id: any): string => {
                     if (!id) return '';
                     if (typeof id === 'string') return id;
@@ -143,18 +140,9 @@ export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                     return String(id);
                 };
 
-                // Create a map of surveys by ID for easy lookup
-                const surveyMap = new Map<string, any>();
-                surveyItems.forEach(s => {
-                    const surveyIdStr = getIdString(s._id);
-                    surveyMap.set(surveyIdStr, s);
-                });
-
-                // Map backend videos to frontend format
                 const mappedVideos: VideoFile[] = videoItems.map(v => {
                     const videoIdStr = getIdString(v._id);
                     const surveyIdStr = getIdString(v.survey_id);
-                    const survey = surveyMap.get(surveyIdStr);
 
                     return {
                         id: videoIdStr,
@@ -167,11 +155,11 @@ export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                         url: buildUrl(v.storage_url),
                         eta: v.eta,
                         routeId: v.route_id,
-                        surveyDate: survey?.survey_date || '',
-                        surveyorName: survey?.surveyor_name || '',
+                        surveyDate: v.survey_date || '',
+                        surveyorName: v.surveyor_name || '',
                         gpxFile: v.gpx_file_url ? v.gpx_file_url.split('/').pop() : undefined,
                         surveyId: surveyIdStr,
-                        surveyDisplayId: v.survey_display_id || survey?.survey_display_id,
+                        surveyDisplayId: v.survey_display_id,
                         thumbnailUrl: v.thumbnail_url,
                     };
                 });
@@ -186,55 +174,40 @@ export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         return () => { cancelled = true; };
     }, []);
 
-    // Auto-poll videos that are in processing or uploading state
+    // Batch-poll active videos — one request per interval instead of one per video
     useEffect(() => {
         const pollInterval = setInterval(async () => {
-            // Find videos that need polling (processing or uploading)
-            // Note: We might want to be careful about polling "uploading" if we are the ones uploading it locally.
-            // But if it's uploading from another session or stuck, it might be good.
-            // However, for local uploads, we update state directly. 
-            // Let's only poll "processing" or "uploading" if we don't have an active local upload for it?
-            // For simplicity, we'll poll everything that looks active on backend.
-
             const activeVideos = videos.filter(v =>
-                (v.status === "processing" || v.status === "queued" || v.status === "uploading" || v.status === "anonymizing" || v.status === "asset_linking") && v.backendId
+                (v.status === "processing" || v.status === "queued" || v.status === "uploading" ||
+                    v.status === "anonymizing" || v.status === "asset_linking") &&
+                v.backendId &&
+                !activeUploads.current.has(v.id)
             );
-            // console.log(activeVideos)
+
             if (activeVideos.length === 0) return;
 
-            // Poll all active videos
-            for (const video of activeVideos) {
-                // Skip polling if we are currently uploading this video locally
-                if (activeUploads.current.has(video.id)) continue;
+            const ids = activeVideos.map(v => v.backendId!);
+            try {
+                const result = await api.videos.statusBatch(ids);
+                const statuses: Record<string, { status: string; progress: number; eta?: string }> = result.statuses;
 
-                try {
-                    // console.log('[POLL] Checking video:', video.backendId, 'Status:', video.status);
-                    // console.log('[POLL] Updating video:', video);
-                    const videoData = await api.videos.get(video.backendId!);
+                setVideos(prev => prev.map(v => {
+                    if (!v.backendId) return v;
+                    const s = statuses[v.backendId];
+                    if (!s) return v;
 
-                    setVideos((prev) =>
-                        prev.map((v) =>
-                            v.id === video.id
-                                ? {
-                                    ...v,
-                                    status: videoData.status as VideoStatus,
-                                    progress: videoData.progress || 0,
-                                    eta: videoData.eta,
-                                }
-                                : v
-                        )
-                    );
-
-                    if (videoData.status === "completed" && video.status !== "completed") {
-                        toast.success(`AI processing completed for ${video.name}!`);
-                    } else if (videoData.status === "failed" && video.status !== "failed") {
-                        toast.error(`Processing failed: ${videoData.error || "Unknown error"}`);
+                    if (s.status === "completed" && v.status !== "completed") {
+                        toast.success(`AI processing completed for ${v.name}!`);
+                    } else if (s.status === "failed" && v.status !== "failed") {
+                        toast.error(`Processing failed for ${v.name}`);
                     }
-                } catch (pollError) {
-                    console.error("Error polling video status:", pollError);
-                }
+
+                    return { ...v, status: s.status as VideoStatus, progress: s.progress || 0, eta: s.eta };
+                }));
+            } catch (pollError) {
+                console.error("Error batch-polling video status:", pollError);
             }
-        }, 2000); // Poll every 2 seconds
+        }, 5000); // 5s — one request covers all active videos
 
         return () => clearInterval(pollInterval);
     }, [videos]);
