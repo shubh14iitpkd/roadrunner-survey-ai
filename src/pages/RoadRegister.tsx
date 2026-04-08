@@ -718,7 +718,7 @@ export default function RoadRegister() {
               <DialogTrigger asChild>
                 <Button variant="default" size="sm" className="h-7 text-[11px] gap-1.5">
                   <Plus className="h-3 w-3" />
-                  Add Road
+                  Add Route
                 </Button>
               </DialogTrigger>
               <DialogContent

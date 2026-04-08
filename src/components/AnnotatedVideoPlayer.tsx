@@ -109,16 +109,10 @@ export default function AnnotatedVideoPlayer({
     };
   }, [videoId]);
 
-  /* ── 2. Derive unique categories from the detections ── */
+  /* ── 2. Categories from label map ─────────────────────── */
   const detectedCategories = useMemo(() => {
-    const catSet = new Set<string>();
-    for (const dets of frameMap.values()) {
-      for (const d of dets) {
-        if (d.category_id) catSet.add(d.category_id);
-      }
-    }
-    return Array.from(catSet).sort();
-  }, [frameMap]);
+    return Object.keys(labelMapData?.categories ?? {}).sort();
+  }, [labelMapData]);
 
   /* ── 3. Label helpers ──────────────────────────────────── */
   const getCategoryDisplayName = useCallback(
