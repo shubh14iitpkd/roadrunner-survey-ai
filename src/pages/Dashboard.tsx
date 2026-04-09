@@ -752,15 +752,6 @@ export default function Dashboard() {
                 {exportingKeys.has("defect-road-all") ? <Loader2 className="h-3 w-3 animate-spin" /> : <Download className="h-3 w-3" />}
                 Export Report
               </Button>
-              {/* <Button
-                variant="outline"
-                size="sm"
-                className="h-7 text-[10px] gap-1.5"
-                onClick={() => { exportRoadWiseAssetTypeReport(labelMapData).catch(console.error); }}
-              >
-                <Download className="h-3 w-3" />
-                Road × Asset Type
-              </Button> */}
             </div>
           </div>
           <div className="gradient-table-line" />
@@ -770,12 +761,21 @@ export default function Dashboard() {
                 <TableRow className="border-b border-border hover:bg-transparent">
                   <TableHead
                     className="text-sm font-semibold uppercase tracking-wider text-muted-foreground cursor-pointer select-none hover:text-foreground transition-colors"
+                    onClick={() => handleRoadSort("route_id")}
+                  >
+                    Route ID<SortIcon col="route_id" activeSortBy={roadSortBy} activeSortOrder={roadSortOrder} />
+                  </TableHead>
+                  <TableHead
+                    className="text-sm font-semibold uppercase tracking-wider text-muted-foreground cursor-pointer select-none hover:text-foreground transition-colors"
                     onClick={() => handleRoadSort("road")}
                   >
                     Route<SortIcon col="road" activeSortBy={roadSortBy} activeSortOrder={roadSortOrder} />
                   </TableHead>
-                  <TableHead className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-                    Route Side
+                  <TableHead
+                    className="text-sm font-semibold uppercase tracking-wider text-muted-foreground cursor-pointer select-none hover:text-foreground transition-colors"
+                    onClick={() => handleRoadSort("road_side")}
+                  >
+                    Route Side<SortIcon col="road_side" activeSortBy={roadSortBy} activeSortOrder={roadSortOrder} />
                   </TableHead>
                   <TableHead
                     className="text-sm font-semibold uppercase tracking-wider text-muted-foreground text-right cursor-pointer select-none hover:text-foreground transition-colors"
@@ -801,6 +801,7 @@ export default function Dashboard() {
               <TableBody>
                 {topDefectRoads.map((row, idx) => (
                   <TableRow key={`${row.road}-${idx}`} className="hover:bg-muted/40 border-b border-border/50" style={{ height: 36 }}>
+                    <TableCell className="text-xs font-medium py-2.5 text-muted-foreground">{row.route_id ? `#${row.route_id}`:"—"}</TableCell>
                     <TableCell className="text-xs font-medium py-2.5">{row.road}</TableCell>
                     <TableCell className="text-xs text-muted-foreground py-2.5">{row.road_side ?? "—"}</TableCell>
                     <TableCell className="text-right font-semibold text-xs tabular-nums py-2.5">{row.total_count ?? "—"}</TableCell>
@@ -916,19 +917,7 @@ function KPICard({ label, value, unit, icon, accent, trend, lastSurvey }: {
           <div className="flex items-baseline gap-1.5 mt-1">
             <span className={`text-3xl font-bold tabular-nums tracking-tight ${s.valueTint}`}>{value}</span>
             {unit && <span className="text-sm text-muted-foreground font-medium">{unit}</span>}
-            {/* {trend && (
-              <span className={cn(
-                "inline-flex items-center gap-0.5 text-[10px] font-bold ml-1 px-1.5 py-0.5 rounded-full",
-                trend.direction === "up" ? "bg-emerald-500/10 text-emerald-600" : "bg-destructive/10 text-destructive"
-              )}>
-                {trend.direction === "up" ? <TrendingUp className="h-3 w-3" /> : <TrendingUp className="h-3 w-3 rotate-180" />}
-                {trend.direction === "up" ? "+" : "-"}{Math.abs(trend.value)}%
-              </span>
-            )} */}
           </div>
-          {/* {lastSurvey && (
-            <p className="text-[9px] text-muted-foreground mt-1">Last Survey: {lastSurvey}</p>
-          )} */}
         </div>
       </div>
     </Card>
