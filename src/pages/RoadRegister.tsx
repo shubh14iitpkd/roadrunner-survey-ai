@@ -28,7 +28,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useNavigate } from 'react-router-dom';
 
 const ROAD_SIDES = ["LHS", "RHS"];
-type RoadSortKey = "route_id" | "road_name" | "distance" | "road_side" | null
+type RoadSortKey = "route_id" | "road_name" | "distance" | "road_side" | "start_point_name" | "end_point_name" | null
 export default function RoadRegister() {
   const [roads, setRoads] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -50,7 +50,7 @@ export default function RoadRegister() {
     }
   }
 
-  // Form state for Add Road dialog
+  // Form state for Add Route dialog
   const [startLat, setStartLat] = useState("");
   const [startLng, setStartLng] = useState("");
   const [endLat, setEndLat] = useState("");
@@ -86,6 +86,14 @@ export default function RoadRegister() {
           return sortOrder === "asc" ? a.road_side.localeCompare(b.road_side) : b.road_side.localeCompare(a.road_side);
         } else if (sortBy === "route_id"){
           return sortOrder === "asc" ? a.route_id - b.route_id : b.route_id - a.route_id;
+        } else if (sortBy === "start_point_name"){
+          return sortOrder === "asc"
+            ? (a.start_point_name || "").localeCompare(b.start_point_name || "")
+            : (b.start_point_name || "").localeCompare(a.start_point_name || "");
+        } else if (sortBy === "end_point_name"){
+          return sortOrder === "asc"
+            ? (a.end_point_name || "").localeCompare(b.end_point_name || "")
+            : (b.end_point_name || "").localeCompare(a.end_point_name || "");
         }
       })
 
@@ -577,10 +585,10 @@ export default function RoadRegister() {
 
       setIsAddDialogOpen(false);
 
-      toast.success("Road added successfully!");
+      toast.success("Route added successfully!");
       await loadRoads(); // Reload from backend
     } catch (err: any) {
-      toast.error(err?.message || "Failed to add road");
+      toast.error(err?.message || "Failed to add route");
     }
   };
 
@@ -599,7 +607,7 @@ export default function RoadRegister() {
       await api.roads.update(routeId, { road_name: editingRoadName });
       setEditingRoadId(null);
       setEditingRoadName("");
-      toast.success("Road name updated!");
+      toast.success("Route name updated!");
       await loadRoads(); // Reload from backend
     } catch (err: any) {
       toast.error(err?.message || "Failed to update road");
@@ -627,63 +635,11 @@ export default function RoadRegister() {
           <div className="flex items-center gap-2">
             <Map className="h-4 w-4 text-primary dark:text-muted-secondary" />
             <div>
-              <p className="text-[9px] font-semibold text-muted-foreground uppercase tracking-[0.15em]">Project Management</p>
+              <p className="text-[9px] font-semibold text-muted-foreground uppercase tracking-[0.15em]">Management</p>
               <h1 className="text-sm font-bold text-foreground tracking-tight">Route Register</h1>
             </div>
           </div>
           <div className="flex gap-2">
-            {/* <Dialog open={isImportDialogOpen} onOpenChange={setIsImportDialogOpen}>
-              <DialogTrigger asChild>
-                <Button variant="outline" size="sm" className="h-7 text-[11px] gap-1.5">
-                  <Upload className="h-4 w-4" />
-                  Import Data
-                </Button>
-              </DialogTrigger>
-              <DialogContent className="sm:max-w-md">
-                <DialogHeader>
-                  <DialogTitle>Import Road Data</DialogTitle>
-                  <DialogDescription>
-                    Choose your import format. Backend integration coming soon.
-                  </DialogDescription>
-                </DialogHeader>
-                <div className="grid gap-4 py-4">
-                  <Button
-                    variant="outline"
-                    className="gap-2 h-20"
-                    onClick={() => handleImportFile("CSV")}
-                  >
-                    <FileSpreadsheet className="h-5 w-5" />
-                    <div className="text-left">
-                      <div className="font-semibold">Import CSV</div>
-                      <div className="text-xs text-muted-foreground">Spreadsheet format</div>
-                    </div>
-                  </Button>
-                  <Button
-                    variant="outline"
-                    className="gap-2 h-20"
-                    onClick={() => handleImportFile("JSON")}
-                  >
-                    <FileJson className="h-5 w-5" />
-                    <div className="text-left">
-                      <div className="font-semibold">Import JSON</div>
-                      <div className="text-xs text-muted-foreground">JavaScript Object Notation</div>
-                    </div>
-                  </Button>
-                  <Button
-                    variant="outline"
-                    className="gap-2 h-20"
-                    onClick={() => handleImportFile("XML")}
-                  >
-                    <FileJson className="h-5 w-5" />
-                    <div className="text-left">
-                      <div className="font-semibold">Import XML</div>
-                      <div className="text-xs text-muted-foreground">Extensible Markup Language</div>
-                    </div>
-                  </Button>
-                </div>
-              </DialogContent>
-            </Dialog> */}
-
             {['Admin', 'Super Admin'].includes(user.role) && <Dialog open={isAddDialogOpen} onOpenChange={(open) => {
               // Prevent closing when clicking on Google Places autocomplete
               const pacContainer = document.querySelector('.pac-container') as HTMLElement | null;
@@ -1032,7 +988,7 @@ export default function RoadRegister() {
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
           <Input
-            placeholder="Search by road name or route ID..."
+            placeholder="Search by route name or route ID..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="pl-11 h-12"
@@ -1044,11 +1000,11 @@ export default function RoadRegister() {
       <Card className="shadow-elevated border-0 gradient-card overflow-hidden animate-fade-in">
         {loading ? (
           <div className="p-12 text-center text-muted-foreground">
-            Loading roads...
+            Loading Routes...
           </div>
         ) : roads.length === 0 ? (
           <div className="p-12 text-center text-muted-foreground">
-            No roads found. Add your first road to get started!
+            No routes found. Add your first route to get started!
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -1062,11 +1018,17 @@ export default function RoadRegister() {
                       <SortIcon col="route_id" activeSortBy={sortBy} activeSortOrder={sortOrder} />
                   </th>
                   <th className="text-left p-4 font-semibold cursor-pointer text-sm whitespace-nowrap" onClick={()=>handleSortKeySelect("road_name")}>
-                    Road Name
+                    Route Name
                     <SortIcon col="road_name" activeSortBy={sortBy} activeSortOrder={sortOrder} />
                   </th>
-                  <th className="text-left p-4 font-semibold text-sm whitespace-nowrap">Start Point</th>
-                  <th className="text-left p-4 font-semibold text-sm whitespace-nowrap">End Point</th>
+                  <th className="text-left p-4 font-semibold cursor-pointer text-sm whitespace-nowrap" onClick={()=>handleSortKeySelect("start_point_name")}>
+                    Start Point
+                    <SortIcon col="start_point_name" activeSortBy={sortBy} activeSortOrder={sortOrder} />
+                  </th>
+                  <th className="text-left p-4 font-semibold cursor-pointer text-sm whitespace-nowrap" onClick={()=>handleSortKeySelect("end_point_name")}>
+                    End Point
+                    <SortIcon col="end_point_name" activeSortBy={sortBy} activeSortOrder={sortOrder} />
+                  </th>
                   <th 
                     className="text-left p-4 font-semibold cursor-pointer text-sm whitespace-nowrap" 
                     onClick={()=>handleSortKeySelect("distance")}>

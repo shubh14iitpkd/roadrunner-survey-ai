@@ -163,16 +163,7 @@ export default function AssetDetailSidebar({
   useEffect(() => {
     if (!imageUrl || !selectedAsset?.box) return;
     const handleResize = () => {
-      // Trigger a re-render to redraw canvas
-      if (canvasRef.current && imgRef.current) {
-        const canvas = canvasRef.current;
-        const img = imgRef.current;
-        canvas.width = img.clientWidth;
-        canvas.height = img.clientHeight;
-        // Re-trigger the drawing effect
-        const event = new Event("resize-redraw");
-        window.dispatchEvent(event);
-      }
+      setDrawTrigger((n) => n + 1);
     };
     const observer = new ResizeObserver(handleResize);
     if (imgRef.current) observer.observe(imgRef.current);

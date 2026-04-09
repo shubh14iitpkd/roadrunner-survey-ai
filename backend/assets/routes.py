@@ -335,6 +335,28 @@ def get_master_assets():
 				"as": "survey_dates"
 			}
 		},
+		# Fetch description + issue from the latest per-survey asset record
+		{
+			"$lookup": {
+				"from": "assets",
+				"let": {"ma_id": "$_id", "latest_sid": "$latest_survey_id"},
+				"pipeline": [
+					{
+						"$match": {
+							"$expr": {
+								"$and": [
+									{"$eq": ["$master_asset_id", "$$ma_id"]},
+									{"$eq": ["$survey_id", "$$latest_sid"]},
+								]
+							}
+						}
+					},
+					{"$project": {"description": 1, "issue": 1}},
+					{"$limit": 1},
+				],
+				"as": "latest_asset_data"
+			}
+		},
 		{
 			"$addFields": {
 				"route_name": {"$arrayElemAt": ["$road_info.road_name", 0]},
@@ -342,6 +364,15 @@ def get_master_assets():
 				"condition": "$latest_condition",
 				"confidence": "$latest_confidence",
 				"location": "$canonical_location",
+				# description from the latest per-survey asset record
+				"description": {"$arrayElemAt": ["$latest_asset_data.description", 0]},
+				# issue: prefer the per-survey asset's value, fall back to master's
+				"issue": {
+					"$ifNull": [
+						{"$arrayElemAt": ["$latest_asset_data.issue", 0]},
+						"$issue",
+					]
+				},
 				"survey_history": {
 					"$map": {
 						"input": "$survey_history",
@@ -375,6 +406,7 @@ def get_master_assets():
 			"$project": {
 				"road_info": 0,
 				"survey_dates": 0,
+				"latest_asset_data": 0,
 				"embedding": 0,        # no need to send 512-d vector to the browser
 				"modified_by": 0,      # legacy field, replaced by asset_condition_logs
 				"mark_good_history": 0, # legacy field, replaced by asset_condition_logs

@@ -247,8 +247,8 @@ export default function RoadReportPDF({ road, assets, generatedDate }: RoadRepor
     ["Route Type", road.road_type || "—"],
     ["Start Point", `${road.start_point_name || "—"}  (${formatCoord(road.start_lat, road.start_lng)})`],
     ["End Point", `${road.end_point_name || "—"}  (${formatCoord(road.end_lat, road.end_lng)})`],
-    ["Approx. Road Length", road.estimated_distance_km != null ? `${road.estimated_distance_km} km` : "—"],
-    ["Road Side", road.road_side || "—"],
+    ["Approx. Route Length", road.estimated_distance_km != null ? `${road.estimated_distance_km} km` : "—"],
+    ["Route Side", road.road_side || "—"],
     ["Total Assets", String(road.total_assets)],
     ["Assets in Good Condition", String(road.good_assets)],
     ["Assets in Bad Condition", String(road.damaged_assets)],
@@ -273,7 +273,7 @@ export default function RoadReportPDF({ road, assets, generatedDate }: RoadRepor
 
         {/* Road Information */}
         <View style={styles.sectionHeader} wrap={false}>
-          <Text style={styles.sectionTitle}>Road Information &amp; Summary</Text>
+          <Text style={styles.sectionTitle}>Route Information &amp; Summary</Text>
         </View>
         <View style={styles.infoTable} wrap={false}>
           {infoRows.map(([label, value], i) => (

@@ -12,7 +12,7 @@ import { api } from "@/lib/api";
 import { exportToExcel } from "@/lib/excelExport";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Download, AlertTriangle, CheckCircle2, Loader2, Pencil, RotateCcw } from "lucide-react";
+import { Download, AlertTriangle, CheckCircle2, Loader2, Pencil, RotateCcw, Tag } from "lucide-react";
 import {
   Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
@@ -34,6 +34,11 @@ import capitalize from "@/helpers/capitalize";
 //   if (rest.length === 0) return capitalize(first);
 //   return first.charAt(0).toUpperCase() + first.slice(1) + " " + rest.join(" ");
 // }
+
+// ── Description keys to exclude from the full view ──────────
+const DESCRIPTION_KEY_FILTER = new Set([
+  'Asset condition',
+]);
 
 // ── DAMAGED condition set (mirrors backend) ─────────────────
 const DAMAGED_CONDITIONS = new Set([
@@ -349,6 +354,7 @@ export default function DefectLibrary() {
             zone: asset.zone || 'Unknown',
             lastSurveyDate: lastDate,
             issue: asset.issue ? capitalize(asset.issue) : "Defective",
+            description: asset.description && typeof asset.description === 'object' ? asset.description : undefined,
             severity: asset.severity || (idx % 3 === 0 ? 'High' : idx % 3 === 1 ? 'Medium' : 'Low'),
             videoId: rawVideoId ? String(rawVideoId) : undefined,
             frameNumber: latestEntry?.frame_number,
@@ -798,6 +804,32 @@ export default function DefectLibrary() {
                       totalPoints={1}
                       onClose={() => setShowFullView(false)}
                     />
+                  </div>
+                );
+              })()}
+
+              {/* Attributes */}
+              {!fullViewLoading && selectedDefect && (() => {
+                const filteredDesc = selectedDefect.description
+                  ? Object.entries(selectedDefect.description).filter(([k]) => !DESCRIPTION_KEY_FILTER.has(k))
+                  : [];
+                if (filteredDesc.length === 0) return null;
+                return (
+                  <div className="px-5 pt-4 pb-2">
+                    <div className="rounded-lg border border-border bg-muted/30 px-4 py-3">
+                      <div className="flex items-center gap-1.5 mb-3">
+                        <Tag className="h-3 w-3 text-muted-foreground" />
+                        <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Attributes</p>
+                      </div>
+                      <div className="grid grid-cols-3 gap-x-8 gap-y-3">
+                        {filteredDesc.map(([key, val]) => (
+                          <div key={key}>
+                            <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-0.5">{key}</p>
+                            <p className="text-xs font-semibold text-foreground capitalize">{val}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
                   </div>
                 );
               })()}

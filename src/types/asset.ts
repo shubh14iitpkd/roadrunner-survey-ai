@@ -18,6 +18,7 @@ export interface AssetRecord {
   zone?: string;
   lastSurveyDate: string;
   issue: string;
+  description?: Record<string, string>;
   severity: string;
   videoId?: string;
   frameNumber?: number;
