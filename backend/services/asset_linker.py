@@ -167,7 +167,7 @@ def _build_survey_history_entry(asset_doc: dict, survey_id, survey_display_id: s
         "condition":             asset_doc.get("condition"),
         "confidence":            asset_doc.get("confidence"),
         "issue":                 None if asset_doc.get("condition") == "good"
-                                 else asset_doc.get("condition"),
+                                 else "Defective",
         "defect_id":             asset_doc.get("defect_id"),
         "location":              asset_doc.get("location"),
         "video_id":              video_id,
@@ -207,7 +207,7 @@ def _update_master_asset(db, master_doc: dict, asset_doc: dict,
                 "latest_confidence":       asset_doc.get("confidence"),
                 "embedding":               embedding.tolist(),  # update to latest observation
                 "issue":                   None if asset_doc.get("condition") == "good"
-                                           else asset_doc.get("condition"),
+                                           else "Defective",
                 "updated_at":              datetime.now(timezone.utc),
             },
             "$inc": {"total_surveys_detected": 1},
@@ -244,7 +244,7 @@ def _create_master_asset(db, asset_doc: dict, embedding: np.ndarray,
         "latest_confidence":       asset_doc.get("confidence"),
         "survey_history":          [entry],
         "issue":                   None if asset_doc.get("condition") == "good"
-                                   else asset_doc.get("condition"),
+                                   else "Defective",
         "created_at":              datetime.now(timezone.utc),
         "updated_at":              datetime.now(timezone.utc),
     }

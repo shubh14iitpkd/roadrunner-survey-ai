@@ -27,6 +27,13 @@ const DAMAGED_CONDITIONS = new Set([
   'overgrown', 'fadedpaint', 'dirty', 'missing', 'broken', 'bent', 'damaged',
 ]);
 
+const displayCondition = (condition: string | undefined | null): string => {
+  if (!condition) return '—';
+  const c = condition.toLowerCase();
+  if (DAMAGED_CONDITIONS.has(c)) return 'defective';
+  return condition;
+};
+
 const conditionToColor = (condition: string): string => {
   const c = condition?.toLowerCase() ?? '';
   if (DAMAGED_CONDITIONS.has(c)) return '#ef4444'; // red-500
@@ -46,7 +53,7 @@ const ASSET_COLUMNS: ColumnDef[] = [
         : a.condition?.toLowerCase() === 'good'
           ? 'bg-emerald-500/10 text-emerald-600'
           : 'bg-amber-500/10 text-amber-600'
-        }`}>{a.condition ?? '—'}</span>
+        }`}>{displayCondition(a.condition)}</span>
     )
   },
   { key: "coords", header: "Coordinates", className: "font-mono text-[10px] py-1.5 px-1.5 whitespace-nowrap text-center", render: (a) => `${a.lat.toFixed(4)}, ${a.lng.toFixed(4)}` },
@@ -314,7 +321,7 @@ export default function AssetLibrary() {
         "Latitude", "Longitude", "Route Name", "Route Side", "Asset Side", "Asset Zone", "Survey Date",
       ];
       const rows = filteredAssets.map((a) => [
-        a.assetDisplayId, a.assetType, a.assetCategory, capitalize(a.condition),
+        a.assetDisplayId, a.assetType, a.assetCategory, capitalize(displayCondition(a.condition)),
         a.lat, a.lng, a.roadName, a.roadSide ?? "—", capitalize(a.side), capitalize(a.zone), a.lastSurveyDate,
       ]);
       exportToExcel({
@@ -343,7 +350,7 @@ export default function AssetLibrary() {
     setRollbackAssetId(asset.id);
     try {
       await api.assets.unmarkGood(asset.id, { name: surveyorName, user_id: surveyorId, survey_id: surveyId });
-      toast.success(`Asset ${asset.assetDisplayId} reverted to damaged`);
+      toast.success(`Asset ${asset.assetDisplayId} reverted to defective`);
       setShowFullView(false);
       setSelectedAsset(null);
       loadData();
@@ -573,7 +580,7 @@ export default function AssetLibrary() {
                   <div className="flex items-center gap-2">
                     <Database className={cn("h-3.5 w-3.5", isDamaged ? "text-destructive" : "text-emerald-600")} />
                     <span className={cn("text-xs font-semibold capitalize", isDamaged ? "text-destructive" : "text-emerald-600")}>
-                      Condition: {selectedAsset.condition}
+                      Condition: {displayCondition(selectedAsset.condition)}
                     </span>
                   </div>
                   <div className="flex items-center gap-2">
@@ -588,7 +595,7 @@ export default function AssetLibrary() {
                         {rollbackAssetId === selectedAsset.id
                           ? <Loader2 className="h-3 w-3 animate-spin" />
                           : <RotateCcw className="h-3 w-3" />}
-                        Rollback to Damaged
+                        Rollback to Defective
                       </Button>
                     )}
                     <span className="text-[10px] text-muted-foreground">
@@ -646,7 +653,7 @@ export default function AssetLibrary() {
                                 </div>
                                 <div className="items-center gap-2 py-1 text-xs text-muted-foreground">
                                   <span className={cn("font-semibold", isGoodAction ? "text-emerald-600" : "text-destructive")}>
-                                    {isGoodAction ? 'Marked Good' : 'Marked Damaged'}
+                                    {isGoodAction ? 'Marked Good' : 'Marked Defective'}
                                   </span>
                                   <span className="text-border">·</span>
                                   <span>by <span className="text-foreground font-medium">{item.log.name || '-'}</span></span>
@@ -707,7 +714,7 @@ export default function AssetLibrary() {
                                   <div>
                                     <p className="text-muted-foreground text-[9px] uppercase tracking-wider">Condition</p>
                                     <p className={cn("font-semibold capitalize", (!effectivelyGood && entryIsDamaged) ? "text-destructive" : "text-emerald-600")}>
-                                      {effectivelyGood ? 'Good' : (entry.condition || '-')}
+                                      {effectivelyGood ? 'Good' : displayCondition(entry.condition)}
                                     </p>
                                   </div>
                                   <div>

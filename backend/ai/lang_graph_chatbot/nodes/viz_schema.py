@@ -20,8 +20,8 @@ class SeriesDataItem(BaseModel):
 
 
 class StackedBarSeries(BaseModel):
-    """One series (e.g. 'Good' or 'Damaged') in a stacked bar chart."""
-    name: str = Field(description="Series name, e.g. 'Good' or 'Damaged'")
+    """One series (e.g. 'Good' or 'Defective') in a stacked bar chart."""
+    name: str = Field(description="Series name, e.g. 'Good' or 'Defective'")
     data: List[SeriesDataItem] = Field(description="Data points for this series")
 
 

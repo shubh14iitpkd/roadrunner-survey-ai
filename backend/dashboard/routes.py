@@ -285,7 +285,7 @@ def top_anomaly_roads():
 	"""
 	page = request.args.get("page", 1, type=int)
 	limit = request.args.get("limit", 10, type=int)
-	sort_by = request.args.get("sort_by", "defects")  # road, total, defects, last_survey
+	sort_by = request.args.get("sort_by", "defects")  # road, route_id, road_side, total, defects, last_survey
 	sort_order = request.args.get("sort_order", "desc")  # asc | desc
 	skip = (page - 1) * limit
 
@@ -332,6 +332,10 @@ def top_anomaly_roads():
 	reverse = sort_order != "asc"
 	if sort_by == "road":
 		items_raw.sort(key=lambda x: (x["road"] or "").lower(), reverse=reverse)
+	elif sort_by == "route_id":
+		items_raw.sort(key=lambda x: x["route_id"] or 0, reverse=reverse)
+	elif sort_by == "road_side":
+		items_raw.sort(key=lambda x: (x["road_side"] or "").lower(), reverse=reverse)
 	elif sort_by == "total":
 		items_raw.sort(key=lambda x: x["total_count"] or 0, reverse=reverse)
 	elif sort_by == "last_survey":

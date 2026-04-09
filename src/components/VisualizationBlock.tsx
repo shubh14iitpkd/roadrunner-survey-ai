@@ -53,12 +53,12 @@ const COLORS = [
   "#14b8a6", // teal
 ];
 
-// Stacked bar uses semantic colors: Good=emerald, Damaged=rose, rest cycle
+// Stacked bar uses semantic colors: Good=emerald, Defective=rose, rest cycle
 const STACKED_SERIES_COLORS: Record<string, string> = {
   good: "#10b981",
   Good: "#10b981",
   damaged: "#f43f5e",
-  Damaged: "#f43f5e",
+  Defective: "#f43f5e",
 };
 
 const RADIAN = Math.PI / 180;

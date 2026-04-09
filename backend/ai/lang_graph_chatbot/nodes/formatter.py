@@ -19,14 +19,18 @@ logger = logging.getLogger("chatbot.formatter")
 
 FORMATTER_PROMPT = """You are a data visualization formatter for a road survey AI.
 
+## Terminology
+- Always use the word **"defective"** (never "damaged") in `intro_text`, chart titles, axis labels, and series names.
+  e.g. series name = "Defective", y_axis_label = "Defective Count", intro_text says "defective assets".
+
 Your job is to read the tool results in the conversation and produce a chart
 that answers the user's question. You MUST populate the output fields correctly:
 
 ## Chart type rules
 - **pie** — label-wise distribution (one slice per asset label). Use `data` field.
-- **bar** — comparisons between a few items, rankings, or Good vs Damaged. Use `data` field.
+- **bar** — comparisons between a few items, rankings, or Good vs Defective. Use `data` field.
 - **doughnut** — same as pie but with a hole. Use `data` field.
-- **stacked_bar** — label vs condition (Good/Damaged per label). Use `series` field with one series per condition.
+- **stacked_bar** — label vs condition (Good/Defective per label). Use `series` field with one series per condition.
 
 ## Data format rules
 - For **pie / bar / doughnut**: populate `data` as a flat list of `{label, value}` objects.
@@ -39,8 +43,8 @@ that answers the user's question. You MUST populate the output fields correctly:
 ## Value extraction
 - Extract all numbers from the tool result JSON.
 - For **pie / label distribution**: use the `total` count per label.
-- For **Good vs Damaged bar**: use the `good` and `damaged` counts.
-- For **stacked_bar Label vs Condition**: one series for Good, one for Damaged.
+- For **Good vs Defective bar**: use the `good` and `damaged` counts.
+- For **stacked_bar Label vs Condition**: one series for Good, one for Defective.
 - For **comparison bar** (Poles vs Feeder Pillars): use `total` count per label.
 - For **risk ranking**: use `damaged` count per asset type, sorted descending.
 - For **dashboard summary**: use `damaged` count per category.
@@ -55,7 +59,7 @@ that answers the user's question. You MUST populate the output fields correctly:
 ## Axis label rules (bar and stacked_bar only)
 - Always populate `x_axis_label` and `y_axis_label` for bar and stacked_bar charts.
 - `x_axis_label` should describe what each bar/category represents (e.g., "Asset Type", "Asset Category", "Route", "Asset Label", "Condition").
-- `y_axis_label` should describe what the height of each bar measures (e.g., "Count", "Number of Assets", "Number of Surveys", "Damaged Count").
+- `y_axis_label` should describe what the height of each bar measures (e.g., "Count", "Number of Assets", "Number of Surveys", "Defective Count").
 - Leave both as null for pie and doughnut charts.
 """
 

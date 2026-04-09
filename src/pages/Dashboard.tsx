@@ -35,7 +35,7 @@ import {
 
 const CONDITION_COLORS = {
   Good: "#16a34a",
-  Damaged: "#ef4444",
+  Defective: "#ef4444",
 };
 
 const CATEGORY_COLORS = [
@@ -119,7 +119,7 @@ export default function Dashboard() {
 
   const conditionSummaryData = useMemo(() => [
     { condition: "Good", count: categoryChartData.reduce((s, d) => s + (d.good_count || 0), 0) },
-    { condition: "Damaged", count: categoryChartData.reduce((s, d) => s + (d.damaged_count || 0), 0) },
+    { condition: "Defective", count: categoryChartData.reduce((s, d) => s + (d.damaged_count || 0), 0) },
   ].filter(d => d.count > 0), [categoryChartData]);
 
   // Compute the selected category's donut index
@@ -605,7 +605,7 @@ export default function Dashboard() {
                   />
                   <Legend wrapperStyle={{ fontSize: 11 }} />
                   <Bar dataKey="good_count" name="Good" fill="#16a34a" radius={[3, 3, 0, 0]} />
-                  <Bar dataKey="damaged_count" name="Damaged" fill="#ef4444" radius={[3, 3, 0, 0]} />
+                  <Bar dataKey="damaged_count" name="Defective" fill="#ef4444" radius={[3, 3, 0, 0]} />
                 </RechartsBarChart>
               </ResponsiveContainer>
             </div>

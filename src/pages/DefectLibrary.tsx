@@ -40,6 +40,13 @@ const DAMAGED_CONDITIONS = new Set([
   'overgrown', 'fadedpaint', 'dirty', 'missing', 'broken', 'bent', 'damaged',
 ]);
 
+const displayCondition = (condition: string | undefined | null): string => {
+  if (!condition) return '—';
+  const c = condition.toLowerCase();
+  if (DAMAGED_CONDITIONS.has(c)) return 'defective';
+  return condition;
+};
+
 // ── Custom tooltip cell for Issue column ──────────────────
 const ISSUE_TRUNCATE_LEN = 18;
 
@@ -160,7 +167,7 @@ function buildDefectColumns(
               else onMarkGood(a);
             }}
             disabled={isSaving}
-            title={isMarked ? "Revert to damaged" : "Mark this asset as good"}
+            title={isMarked ? "Revert to defective" : "Mark this asset as good"}
             className={cn(
               "inline-flex items-center justify-center w-6 h-6 rounded-full transition-all",
               isMarked
@@ -319,8 +326,8 @@ export default function DefectLibrary() {
             created_at: h.created_at,
           }));
 
-          const condition = asset.condition || asset.latest_condition || 'damaged';
-
+          const condition = asset.condition || asset.latest_condition || 'defective';
+          console.log(asset.issue)
           return {
             id: mongoId,
             defectId: latestEntry?.defect_id ?? `DEF-${String(idx).padStart(6, '0')}`,
@@ -341,7 +348,7 @@ export default function DefectLibrary() {
             side: asset.side || 'Unknown',
             zone: asset.zone || 'Unknown',
             lastSurveyDate: lastDate,
-            issue: asset.issue ? capitalize(asset.issue) : "Damaged",
+            issue: asset.issue ? capitalize(asset.issue) : "Defective",
             severity: asset.severity || (idx % 3 === 0 ? 'High' : idx % 3 === 1 ? 'Medium' : 'Low'),
             videoId: rawVideoId ? String(rawVideoId) : undefined,
             frameNumber: latestEntry?.frame_number,
@@ -490,7 +497,7 @@ export default function DefectLibrary() {
       await api.assets.unmarkGood(mongoId, { name: surveyorName, user_id: surveyorId, survey_id: surveyId });
       setGoodSet((prev) => { const s = new Set(prev); s.delete(assetKey); return s; });
       setMarkingGoodCount((prev) => prev - 1);
-      toast.success(`Asset ${asset.assetDisplayId} reverted to damaged`);
+      toast.success(`Asset ${asset.assetDisplayId} reverted to defective`);
     } catch (err: any) {
       toast.error(err?.message || "Failed to revert asset");
     } finally {
@@ -510,7 +517,7 @@ export default function DefectLibrary() {
     setRollbackDefectId(asset.id);
     try {
       await api.assets.unmarkGood(asset.id, { name: surveyorName, user_id: surveyorId, survey_id: surveyId });
-      toast.success(`Asset ${asset.assetDisplayId} reverted to damaged`);
+      toast.success(`Asset ${asset.assetDisplayId} reverted to defective`);
       setShowFullView(false);
       setSelectedDefect(null);
       loadData();
@@ -824,7 +831,7 @@ export default function DefectLibrary() {
                             {rollbackDefectId === selectedDefect.id
                               ? <Loader2 className="h-3 w-3 animate-spin" />
                               : <RotateCcw className="h-3 w-3" />}
-                            Rollback to Damaged
+                            Rollback to Defective
                           </Button>
                         )}
                         <span className="text-[10px] text-muted-foreground">
@@ -880,7 +887,7 @@ export default function DefectLibrary() {
                                     </div>
                                     <div className="items-center gap-2 py-1 text-xs text-muted-foreground">
                                       <span className={cn("font-semibold", isGoodAction ? "text-emerald-600" : "text-destructive")}>
-                                        {isGoodAction ? 'Marked Good' : 'Marked Damaged'}
+                                        {isGoodAction ? 'Marked Good' : 'Marked Defective'}
                                       </span>
                                       <span className="text-border">·</span>
                                       <span>by <span className="text-foreground font-medium">{item.log.name || '-'}</span></span>
@@ -934,7 +941,7 @@ export default function DefectLibrary() {
                                       <div>
                                         <p className="text-muted-foreground text-[9px] uppercase tracking-wider">Condition</p>
                                         <p className={cn("font-semibold capitalize", (!effectivelyGood && entryIsDamaged) ? "text-destructive" : "text-emerald-600")}>
-                                          {effectivelyGood ? 'Good' : (entry.condition || '-')}
+                                          {effectivelyGood ? 'Good' : displayCondition(entry.condition)}
                                         </p>
                                       </div>
                                       <div>

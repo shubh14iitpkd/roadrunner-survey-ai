@@ -60,7 +60,7 @@ function assetToRow(asset: any, labelMap?: ResolvedMap | null) {
     side: asset.side ?? "—",
     zone: asset.zone ?? "—",
     lastSurveyDate: asset.last_seen_date ?? asset.survey_date ?? asset.last_survey_date ?? asset.date ?? "—",
-    issueType: asset.issue ?? asset.condition_detail ?? asset.condition ?? "damaged",
+    issueType: asset.issue ?? asset.condition_detail ?? asset.condition ?? "defective",
   };
 }
 

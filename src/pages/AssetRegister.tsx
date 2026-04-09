@@ -403,7 +403,7 @@ export default function AssetRegister() {
           <Card className="p-6 shadow-elevated border-0 bg-gradient-to-br from-red-50 to-white dark:from-red-950/20 dark:to-card animate-fade-in hover:shadow-glow transition-all duration-300">
             <div className="flex items-start justify-between">
               <div className="space-y-2">
-                <p className="text-sm font-semibold text-red-600 dark:text-red-400 uppercase tracking-wide">Damaged Condition</p>
+                <p className="text-sm font-semibold text-red-600 dark:text-red-400 uppercase tracking-wide">Defective Condition</p>
                 <p className="text-5xl font-bold bg-gradient-to-br from-red-600 to-red-400 bg-clip-text text-transparent">{totalDamaged.toLocaleString("en-US")}</p>
               </div>
               <div className="p-4 rounded-2xl bg-gradient-to-br from-red-500 to-red-600 shadow-lg">
@@ -709,7 +709,7 @@ export default function AssetRegister() {
                         </Card>
 
                         <Card className="p-4 bg-gradient-to-br from-red-50 to-white dark:from-red-950/20 dark:to-card border-red-200">
-                          <p className="text-xs font-semibold text-red-600 dark:text-red-400 uppercase tracking-wide">Damaged</p>
+                          <p className="text-xs font-semibold text-red-600 dark:text-red-400 uppercase tracking-wide">Defective</p>
                           <p className="text-3xl font-bold bg-gradient-to-br from-red-600 to-red-400 bg-clip-text text-transparent">
                             {catTotalDamaged}
                           </p>
@@ -756,7 +756,7 @@ export default function AssetRegister() {
                                     <div
                                       className="bg-red-500 transition-all"
                                       style={{ width: `${(stat.damaged / stat.total) * 100}%` }}
-                                      title={`Damaged: ${stat.damaged}`}
+                                      title={`Defective: ${stat.damaged}`}
                                     />
                                   )}
                                 </div>
@@ -798,7 +798,7 @@ export default function AssetRegister() {
                             <SelectContent>
                               <SelectItem value="all">All Conditions</SelectItem>
                               <SelectItem value="good">Good</SelectItem>
-                              <SelectItem value="damaged">Damaged</SelectItem>
+                              <SelectItem value="damaged">Defective</SelectItem>
                             </SelectContent>
                           </Select>
                         </div>

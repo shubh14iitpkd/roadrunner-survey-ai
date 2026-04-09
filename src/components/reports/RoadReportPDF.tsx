@@ -299,7 +299,7 @@ export default function RoadReportPDF({ road, assets, generatedDate }: RoadRepor
           </View>
           <View style={[styles.kpiBox, { backgroundColor: COLORS.damagedBg }]}>
             <Text style={[styles.kpiCount, { color: COLORS.damagedText }]}>{road.damaged_assets}</Text>
-            <Text style={[styles.kpiLabel, { color: COLORS.damagedText }]}>Damaged</Text>
+            <Text style={[styles.kpiLabel, { color: COLORS.damagedText }]}>Defective</Text>
           </View>
         </View>
 
