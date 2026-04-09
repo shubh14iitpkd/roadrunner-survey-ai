@@ -1193,7 +1193,7 @@ def update_global_label():
 	print("UPDATING", old_group_id,"->", new_group_id)
 	db.system_asset_labels.update_many(
 		{"group_id": old_group_id},
-		{"$set": {"group_id": new_group_id}}
+		{"$set": {"group_id": new_group_id, "display_name": new_group_id}}
 	)
 
 	return jsonify({"ok": True})

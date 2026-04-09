@@ -8,6 +8,7 @@ import os
 from datetime import datetime, timedelta
 from typing import Optional
 from langchain.tools import tool
+from rapidfuzz import process, fuzz
 
 from ai.lang_graph_chatbot.get_resolved_map import get_resolved_map
 from db import get_db
@@ -34,28 +35,55 @@ def _resolve_group_id(group_name: str) -> str | None:
             return info["group_id"]
     return None
 
+FUZZY_THRESHOLD = 90
+
 def _resolve_asset_ids(asset_name: str) -> list[str]:
     """
-    Resolve an asset display name to ALL matching asset_ids.
+    Resolve an asset display name / group_id to ALL matching asset_ids.
     E.g. "Guardrail" → [type_asset_102, type_asset_103, type_asset_104]
-    This handles the case where label names include condition suffixes.
+    Tries exact/prefix match first, then falls back to fuzzy matching so that
+    near-matches like "Traffic Light" → "Traffic Lights" still resolve correctly.
     """
     rm = get_resolved_map()
     name_lower = asset_name.strip().lower()
 
-    # First try exact match
     exact = []
     prefix_matches = []
     for aid, info in rm["labels"].items():
         dn = info["display_name"].lower()
         defn = info["default_name"].lower()
-        if dn == name_lower or defn == name_lower:
+        gid = (info.get("group_id") or "").lower()
+        if dn == name_lower or defn == name_lower or gid == name_lower:
             exact.append(aid)
-        elif dn.startswith(name_lower + " ") or defn.startswith(name_lower.replace(" ", "_") + "_"):
+        elif (dn.startswith(name_lower + " ")
+              or defn.startswith(name_lower.replace(" ", "_") + "_")
+              or gid.startswith(name_lower.replace(" ", "_") + "_")):
             prefix_matches.append(aid)
 
-    return exact + prefix_matches if (exact or prefix_matches) else []
+    if exact or prefix_matches:
+        return exact + prefix_matches
 
+    # Fuzzy fallback: find the best-matching group_id, then return all asset_ids in that group
+    group_id_to_aids: dict[str, list[str]] = {}
+    for aid, info in rm["labels"].items():
+        gid = (info.get("group_id") or info["display_name"]).lower()
+        group_id_to_aids.setdefault(gid, []).append(aid)
+
+    best = process.extractOne(name_lower, group_id_to_aids.keys(), scorer=fuzz.WRatio)
+    if best and best[1] >= FUZZY_THRESHOLD:
+        return group_id_to_aids[best[0]]
+
+    return []
+
+
+
+def _get_category_id_for_group(group_id: str) -> str:
+    """Resolve a group_id to its category_id, scanning group_id field if direct lookup fails."""
+    rm = get_resolved_map()
+    for info in rm["labels"].values():
+        if (info.get("group_id") or "").lower() == (group_id or "").lower():
+            return info.get("category_id", "")
+    return ""
 
 
 def _cat_name(category_id: str) -> str:
@@ -67,7 +95,15 @@ def _cat_name(category_id: str) -> str:
 def _label_name(asset_id: str) -> str:
     rm = get_resolved_map()
     info = rm["labels"].get(asset_id)
-    return info["display_name"] if info else asset_id
+    if info:
+        return info["display_name"]
+    # Fallback: asset_id might actually be a group_id value (e.g. from aggregations
+    # that group by $group_id). The group_id IS the current display name after a rename,
+    # so return it directly rather than the stale display_name field.
+    for label in rm["labels"].values():
+        if (label.get("group_id") or "").lower() == asset_id.lower():
+            return label["group_id"]
+    return asset_id
 
 
 def _classify_condition(condition: str) -> str:
@@ -315,7 +351,7 @@ def list_asset_categories(with_labels: bool = False) -> str:
     rm = get_resolved_map()
 
     cat_labels: dict[str, list[str]] = {}
-    for aid, info in rm["labels"].items():
+    for info in rm["labels"].values():
         cid = info.get("category_id", "unknown")
         cat_labels.setdefault(cid, []).append(info["display_name"])
 
@@ -811,7 +847,7 @@ def get_most_damaged_types(route_id: Optional[int] = None, limit: int = 10) -> s
         if r["damaged"] > 0:
             ranked.append({
                 "asset": _label_name(r["_id"]),
-                "category": _cat_name(get_resolved_map()["labels"].get(r["_id"], {}).get("category_id", "")),
+                "category": _cat_name(_get_category_id_for_group(r["_id"])),
                 "damaged": r["damaged"],
                 "good": r["good"],
                 "total": r["count"],
@@ -1241,10 +1277,11 @@ def find_asset_category(asset_name: str) -> str:
     name_lower = asset_name.strip().lower()
 
     matches = []
-    for aid, info in rm["labels"].items():
+    for info in rm["labels"].values():
         dn = info["display_name"].lower()
         defn = info["default_name"].lower()
-        if name_lower in dn or name_lower in defn or dn.startswith(name_lower):
+        gid = (info.get("group_id") or "").lower()
+        if name_lower in dn or name_lower in defn or name_lower in gid or dn.startswith(name_lower):
             cid = info.get("category_id", "")
             matches.append({
                 "asset": info["display_name"],
