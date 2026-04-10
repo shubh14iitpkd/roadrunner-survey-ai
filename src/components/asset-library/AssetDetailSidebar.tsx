@@ -1,11 +1,217 @@
+import { useNavigate } from "react-router-dom";
 import { useState, useEffect, useRef, useCallback } from "react";
+import { createPortal } from "react-dom";
 import { Button } from "@/components/ui/button";
-import { MapPin, X, Eye, Maximize2, ChevronLeft, ChevronRight, Download } from "lucide-react";
+import { Layers, MapPin, X, Eye, Maximize2, ChevronLeft, ChevronRight, Download, ZoomIn, ZoomOut, RotateCcw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import type { AssetRecord } from "@/types/asset";
 import { getCategoryColorCode } from "@/components/CategoryBadge";
+
+/* ── Fullscreen Image Viewer with zoom/pan ── */
+function FullscreenViewer({
+  imageUrl,
+  asset,
+  frameWidth,
+  frameHeight,
+  getAssetDisplayName,
+  onClose,
+  onDownload,
+}: {
+  imageUrl: string;
+  asset: AssetRecord;
+  frameWidth: number;
+  frameHeight: number;
+  getAssetDisplayName: (a: any) => string;
+  onClose: () => void;
+  onDownload: () => void;
+}) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const imgRef = useRef<HTMLImageElement>(null);
+
+  const [scale, setScale] = useState(1);
+  const [translate, setTranslate] = useState({ x: 0, y: 0 });
+  const [dragging, setDragging] = useState(false);
+  const dragStart = useRef({ x: 0, y: 0 });
+  const translateStart = useRef({ x: 0, y: 0 });
+
+  // Close on Escape
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [onClose]);
+
+  // Draw annotation on canvas
+  const drawAnnotation = useCallback(() => {
+    if (!canvasRef.current || !imgRef.current || !asset.box) return;
+    const canvas = canvasRef.current;
+    const img = imgRef.current;
+    const ctx = canvas.getContext("2d");
+    if (!ctx || img.clientWidth === 0) return;
+
+    const containerW = img.clientWidth;
+    const containerH = img.clientHeight;
+    canvas.width = containerW;
+    canvas.height = containerH;
+    ctx.clearRect(0, 0, containerW, containerH);
+
+    const imgAspect = frameWidth / frameHeight;
+    const containerAspect = containerW / containerH;
+    let renderedW: number, renderedH: number, offsetX: number, offsetY: number;
+    if (imgAspect > containerAspect) {
+      renderedW = containerW;
+      renderedH = containerW / imgAspect;
+      offsetX = 0;
+      offsetY = (containerH - renderedH) / 2;
+    } else {
+      renderedH = containerH;
+      renderedW = containerH * imgAspect;
+      offsetX = (containerW - renderedW) / 2;
+      offsetY = 0;
+    }
+
+    const box = asset.box;
+    const scaleX = renderedW / frameWidth;
+    const scaleY = renderedH / frameHeight;
+    const x = box.x * scaleX + offsetX;
+    const y = box.y * scaleY + offsetY;
+    const w = box.width * scaleX;
+    const h = box.height * scaleY;
+    const color = getCategoryColorCode(asset.category_id || "Other");
+
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(x, y, w, h);
+
+    const label = getAssetDisplayName(asset);
+    const fontSize = Math.max(10, Math.round(renderedW / 50));
+    ctx.font = `bold ${fontSize}px sans-serif`;
+    const tm = ctx.measureText(label);
+    const labelH = fontSize + 6;
+    const labelY = y > labelH + 2 ? y - labelH - 2 : y + h + 2;
+    ctx.fillStyle = color;
+    ctx.fillRect(x, labelY, tm.width + 8, labelH);
+    ctx.fillStyle = "#ffffff";
+    ctx.textBaseline = "middle";
+    ctx.fillText(label, x + 4, labelY + labelH / 2);
+  }, [asset, frameWidth, frameHeight, getAssetDisplayName]);
+
+  const [ready, setReady] = useState(false);
+  useEffect(() => {
+    if (ready) drawAnnotation();
+  }, [ready, drawAnnotation, scale]);
+
+  useEffect(() => {
+    const obs = new ResizeObserver(() => drawAnnotation());
+    if (imgRef.current) obs.observe(imgRef.current);
+    return () => obs.disconnect();
+  }, [drawAnnotation]);
+
+  // Wheel zoom
+  const handleWheel = useCallback((e: React.WheelEvent) => {
+    e.preventDefault();
+    setScale((s) => Math.min(10, Math.max(0.5, s - e.deltaY * 0.001)));
+  }, []);
+
+  // Mouse drag
+  const handlePointerDown = useCallback((e: React.PointerEvent) => {
+    if (e.button !== 0) return;
+    setDragging(true);
+    dragStart.current = { x: e.clientX, y: e.clientY };
+    translateStart.current = { ...translate };
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+  }, [translate]);
+
+  const handlePointerMove = useCallback((e: React.PointerEvent) => {
+    if (!dragging) return;
+    setTranslate({
+      x: translateStart.current.x + (e.clientX - dragStart.current.x),
+      y: translateStart.current.y + (e.clientY - dragStart.current.y),
+    });
+  }, [dragging]);
+
+  const handlePointerUp = useCallback(() => setDragging(false), []);
+
+  const resetView = useCallback(() => {
+    setScale(1);
+    setTranslate({ x: 0, y: 0 });
+  }, []);
+
+  return createPortal(
+    <div
+      ref={containerRef}
+      className="fixed inset-0 z-[9999] bg-black/90 flex items-center justify-center"
+      onClick={(e) => { if (e.target === containerRef.current) onClose(); }}
+    >
+      {/* Controls */}
+      <div className="absolute top-4 right-4 flex items-center gap-2 z-10">
+        <button onClick={() => setScale((s) => Math.min(10, s + 0.3))} className="bg-white/10 hover:bg-white/20 text-white rounded-full p-2 transition-colors" title="Zoom in">
+          <ZoomIn className="h-5 w-5" />
+        </button>
+        <button onClick={() => setScale((s) => Math.max(0.5, s - 0.3))} className="bg-white/10 hover:bg-white/20 text-white rounded-full p-2 transition-colors" title="Zoom out">
+          <ZoomOut className="h-5 w-5" />
+        </button>
+        <button onClick={resetView} className="bg-white/10 hover:bg-white/20 text-white rounded-full p-2 transition-colors" title="Reset view">
+          <RotateCcw className="h-5 w-5" />
+        </button>
+        <button onClick={onDownload} className="bg-white/10 hover:bg-white/20 text-white rounded-full p-2 transition-colors" title="Download">
+          <Download className="h-5 w-5" />
+        </button>
+        <button onClick={onClose} className="bg-white/10 hover:bg-white/20 text-white rounded-full p-2 transition-colors" title="Close">
+          <X className="h-5 w-5" />
+        </button>
+      </div>
+
+      {/* Zoom level indicator */}
+      <div className="absolute bottom-4 left-4 text-white/60 text-xs z-10">
+        {Math.round(scale * 100)}%
+      </div>
+
+      {/* Image + annotation */}
+      <div
+        className="w-full h-full flex items-center justify-center overflow-hidden select-none"
+        style={{ cursor: dragging ? "grabbing" : "grab" }}
+        onWheel={handleWheel}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+      >
+        <div
+          className="relative"
+          style={{
+            transform: `translate(${translate.x}px, ${translate.y}px) scale(${scale})`,
+            transformOrigin: "center center",
+            transition: dragging ? "none" : "transform 0.15s ease-out",
+            maxWidth: "90vw",
+            maxHeight: "90vh",
+          }}
+        >
+          <img
+            ref={imgRef}
+            src={imageUrl}
+            alt="Asset fullscreen"
+            className="max-w-[90vw] max-h-[90vh] object-contain pointer-events-none"
+            draggable={false}
+            onLoad={() => {
+              setReady(true);
+              drawAnnotation();
+            }}
+          />
+          <canvas
+            ref={canvasRef}
+            className="absolute top-0 left-0 w-full h-full pointer-events-none"
+          />
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
 
 interface MarkerPopupData {
   frameData: any;
@@ -52,10 +258,12 @@ export default function AssetDetailSidebar({
   emptyLabel = "defect",
 }: AssetDetailSidebarProps) {
   const expanded = !!(markerPopup || selectedAsset);
+  const navigate = useNavigate();
   const imgRef = useRef<HTMLImageElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   // Counter incremented on image onLoad to trigger canvas re-draw
   const [drawTrigger, setDrawTrigger] = useState(0);
+  const [showFullscreen, setShowFullscreen] = useState(false);
 
   // Ensure the canvas is redrawn whenever the selected asset or image changes.
   // Problem: when imageUrl comes from the module-level cache it is resolved
@@ -253,12 +461,28 @@ export default function AssetDetailSidebar({
     }
   }, [imageUrl, selectedAsset, frameWidth, frameHeight]);
 
+  // Close fullscreen when asset changes
+  useEffect(() => {
+    setShowFullscreen(false);
+  }, [selectedAsset?.id]);
+
   return (
     <div
       className={cn(
         "border-l border-border bg-card flex flex-col shrink-0 transition-all duration-300 w-1/2 lg:w-2/5 ",
       )}
     >
+      {showFullscreen && imageUrl && selectedAsset && (
+        <FullscreenViewer
+          imageUrl={imageUrl}
+          asset={selectedAsset}
+          frameWidth={frameWidth}
+          frameHeight={frameHeight}
+          getAssetDisplayName={getAssetDisplayName}
+          onClose={() => setShowFullscreen(false)}
+          onDownload={handleDownload}
+        />
+      )}
       {selectedAsset ? (
         /* ── Selected Asset Detail ── */
         <div className="flex flex-col h-full">
@@ -273,7 +497,7 @@ export default function AssetDetailSidebar({
                 <span className="text-[9px] text-muted-foreground">Loading frame…</span>
               </div>
             ) : imageUrl ? (
-              <div className="relative w-full h-full cursor-pointer group" onClick={handleDownload}>
+              <div className="relative w-full h-full cursor-pointer group" onClick={() => setShowFullscreen(true)}>
                 <img
                   ref={imgRef}
                   src={imageUrl}
@@ -288,10 +512,10 @@ export default function AssetDetailSidebar({
                   ref={canvasRef}
                   className="absolute top-0 left-0 w-full h-full pointer-events-none"
                 />
-                {/* Download hint on hover */}
+                {/* Expand hint on hover */}
                 <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100">
                   <div className="bg-black/60 text-white rounded-full p-2">
-                    <Download className="h-4 w-4" />
+                    <Maximize2 className="h-4 w-4" />
                   </div>
                 </div>
               </div>
@@ -357,6 +581,15 @@ export default function AssetDetailSidebar({
                 onClick={() => onNavigate("next")}
               >
                 <ChevronRight className="h-3 w-3" />
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-6 text-[10px] gap-1 px-2 font-semibold border-secondary text-secondary bg-secondary/10 hover:bg-secondary/20 hover:text-secondary"
+                onClick={() => navigate(`/${selectedAsset.masterDisplayId}/edit`) }
+              >
+                <Layers className="h-3 w-3" />
+                QC
               </Button>
             </div>
           </div>

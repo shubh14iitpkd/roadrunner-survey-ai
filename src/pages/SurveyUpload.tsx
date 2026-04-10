@@ -327,7 +327,7 @@ export default function SurveyUpload() {
             <Upload className="h-4 w-4 text-primary dark:text-muted-secondary" />
             <div>
               <p className="text-[9px] font-semibold text-muted-foreground uppercase tracking-[0.15em]">Management</p>
-              <h1 className="text-sm font-bold text-foreground tracking-tight">Survey Upload & Processing</h1>
+              <h1 className="text-sm font-bold text-foreground tracking-tight">Survey Upload</h1>
             </div>
           </div>
           <div className="flex gap-2">
@@ -395,7 +395,7 @@ export default function SurveyUpload() {
                         <Label htmlFor="route">Route ID *</Label>
                         <Select value={selectedRoute} onValueChange={setSelectedRoute} disabled={isUploading}>
                           <SelectTrigger>
-                            <SelectValue placeholder="Choose road..." />
+                            <SelectValue placeholder="Choose route..." />
                           </SelectTrigger>
                           <SelectContent>
                             {roads.map((road) => (

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import AnnotatedVideoPlayer from "@/components/AnnotatedVideoPlayer";
 import VideoPlayer from "@/components/VideoPlayer";
 import { Card } from "@/components/ui/card";
@@ -33,7 +33,7 @@ interface VideoData {
   gpxFileUrl?: string;
   categoryVideos?: Record<string, string>;
 }
-
+const VIDEOS_PER_PAGE = 9;
 export default function VideoLibrary() {
   const [videos, setVideos] = useState<VideoData[]>([]);
   const [roads, setRoads] = useState<any[]>([]);
@@ -41,6 +41,10 @@ export default function VideoLibrary() {
   const [showPlayer, setShowPlayer] = useState(false);
   const [playerSrc, setPlayerSrc] = useState<string>("");
   const [playerVideoId, setPlayerVideoId] = useState<string>("");
+
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [loadingMore, setLoadingMore] = useState(false);
 
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedRoute, setSelectedRoute] = useState<string>("all");
@@ -51,101 +55,112 @@ export default function VideoLibrary() {
   const [showCompareView, setShowCompareView] = useState(false);
   const [compareCats, setCompareCats] = useState<string[]>(["", ""]);
 
+  // Helper to extract string from MongoDB ObjectId
+  const getIdString = (id: any): string => {
+    if (!id) return '';
+    if (typeof id === 'string') return id;
+    if (id.$oid) return id.$oid;
+    return String(id);
+  };
+
+  // Helper function to build full URL
+  const buildUrl = (path: string | undefined) => {
+    if (!path) return undefined;
+    if (path.startsWith('http://') || path.startsWith('https://')) return path;
+    return `${API_BASE}${path}`;
+  };
+
+  const mapVideoItems = (items: any[], roadsList: any[]): VideoData[] =>
+    items.map(v => {
+      const videoIdStr = getIdString(v._id);
+      const durationSeconds = v.duration_seconds || 0;
+      const durMin = Math.floor(durationSeconds / 60);
+      const durSec = String(durationSeconds % 60).padStart(2, "0");
+      const sizeBytes = v.size_bytes || 0;
+      const sizeMb = `${(sizeBytes / 1024 / 1024).toFixed(0)} MB`;
+      const road = roadsList.find((r: any) => r.route_id === v.route_id);
+
+      const catVideos: Record<string, string> = {};
+      if (v.category_videos) {
+        Object.entries(v.category_videos).forEach(([k, val]) => {
+          catVideos[k] = buildUrl(val as string)!;
+        });
+      }
+      return {
+        id: videoIdStr,
+        title: v.title || `Video ${videoIdStr}`,
+        routeId: v.route_id,
+        roadName: road?.road_name || `Route #${v.route_id}`,
+        surveyDate: v.survey_date || "",
+        surveyorName: v.surveyor_name || "",
+        surveyDisplayId: v.survey_display_id || "",
+        duration: `${durMin}:${durSec}`,
+        size: sizeMb,
+        status: (v.status || "").toString(),
+        thumbnail: "",
+        thumbnailUrl: buildUrl(v.thumbnail_url),
+        storageUrl: buildUrl(v.storage_url),
+        gpxFileUrl: buildUrl(v.gpx_file_url),
+        categoryVideos: catVideos,
+      } as VideoData;
+    });
+
+  const roadsRef = useRef<any[]>([]);
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        // Helper to extract string from MongoDB ObjectId
-        const getIdString = (id: any): string => {
-          if (!id) return '';
-          if (typeof id === 'string') return id;
-          if (id.$oid) return id.$oid;
-          return String(id);
-        };
-
         const [roadsResp, videosResp] = await Promise.all([
           api.roads.list(),
-          api.videos.list()
+          api.videos.list({ page: 1, per_page: VIDEOS_PER_PAGE })
         ]);
-        
+
         const fetchedRoads = roadsResp.items || [];
-        if (!cancelled) setRoads(fetchedRoads);
-
-        const items = videosResp.items as any[];
-        const baseMapped: VideoData[] = items.map(v => {
-          const videoIdStr = getIdString(v._id);
-          const durationSeconds = v.duration_seconds || 0;
-          const durMin = Math.floor(durationSeconds / 60);
-          const durSec = String(durationSeconds % 60).padStart(2, "0");
-          const sizeBytes = v.size_bytes || 0;
-          const sizeMb = `${(sizeBytes / 1024 / 1024).toFixed(0)} MB`;
-          const road = fetchedRoads.find((r: any) => r.route_id === v.route_id);
-
-          // Helper function to build full URL
-          const buildUrl = (path: string | undefined) => {
-            if (!path) return undefined;
-            // If path already starts with http:// or https://, return as-is
-            if (path.startsWith('http://') || path.startsWith('https://')) return path;
-            // Otherwise prepend API_BASE
-            return `${API_BASE}${path}`;
-          };
-
-          // Build category videos map
-          const catVideos: Record<string, string> = {};
-          if (v.category_videos) {
-            Object.entries(v.category_videos).forEach(([k, val]) => {
-              catVideos[k] = buildUrl(val as string)!;
-            });
-          }
-          console.log(v)
-          return {
-            id: videoIdStr,
-            title: v.title || `Video ${videoIdStr}`,
-            routeId: v.route_id,
-            roadName: road?.road_name || `Route #${v.route_id}`,
-            surveyDate: "",
-            surveyorName: "",
-            surveyDisplayId: v.survey_display_id,
-            duration: `${durMin}:${durSec}`,
-            size: sizeMb,
-            status: (v.status || "").toString(),
-            thumbnail: "",
-            thumbnailUrl: buildUrl(v.thumbnail_url),
-            storageUrl: buildUrl(v.storage_url),
-            gpxFileUrl: buildUrl(v.gpx_file_url),
-            categoryVideos: catVideos,
-          } as VideoData;
-        });
-        if (!cancelled) setVideos(baseMapped);
-
-        // Best-effort enrichment with surveys
-        try {
-          const surveysResp = await api.Surveys.list({ latest_only: false });
-          const surveyMap = new Map<string, any>();
-          (surveysResp.items as any[]).forEach(s => {
-            const surveyIdStr = getIdString(s._id);
-            surveyMap.set(surveyIdStr, s);
-          });
-          if (!cancelled) {
-            setVideos(prev => prev.map(v => {
-              const raw = items.find(it => getIdString(it._id) === v.id);
-              const surveyIdStr = raw ? getIdString(raw.survey_id) : undefined;
-              const s = surveyIdStr ? surveyMap.get(surveyIdStr) : undefined;
-              return {
-                ...v,
-                surveyDate: s?.survey_date || v.surveyDate,
-                surveyorName: s?.surveyor_name || v.surveyorName,
-                surveyDisplayId: s?.display_id || v.surveyDisplayId,
-              };
-            }));
-          }
-        } catch { }
+        roadsRef.current = fetchedRoads;
+        if (!cancelled) {
+          setRoads(fetchedRoads);
+          setPage(videosResp.page ?? 1);
+          setTotalPages(videosResp.total_pages ?? 1);
+          setVideos(mapVideoItems(videosResp.items as any[], fetchedRoads));
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
     })();
     return () => { cancelled = true; };
   }, []);
+
+  const loadMore = useCallback(async () => {
+    if (loadingMore || page >= totalPages) return;
+    setLoadingMore(true);
+    try {
+      const nextPage = page + 1;
+      const resp = await api.videos.list({ page: nextPage, per_page: VIDEOS_PER_PAGE });
+      setVideos(prev => [...prev, ...mapVideoItems(resp.items as any[], roadsRef.current)]);
+      setPage(resp.page ?? nextPage);
+      setTotalPages(resp.total_pages ?? totalPages);
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [page, totalPages, loadingMore]);
+
+  // Infinite scroll sentinel
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const sentinel = sentinelRef.current;
+    if (!sentinel) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) {
+          loadMore();
+        }
+      },
+      { rootMargin: "200px" }
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [loadMore]);
 
   const filteredVideos = videos.filter((video) => {
     if (video.status !== "completed") return false;
@@ -199,17 +214,6 @@ export default function VideoLibrary() {
     setSelectedForCompare([]);
   };
 
-  const CATEGORY_LABELS: Record<string, string> = {
-    "corridor_fence": "Corridor Fence",
-    "corridor_pavement": "Pavement",
-    "corridor_structure": "Structures",
-    "directional_signage": "Signage",
-    "its": "ITS",
-    "roadway_lighting": "Lighting",
-    "oia": "OIA",
-    "default": "Default"
-  };
-
   return (
     <div className="space-y-4 p-5">
       {/* Compact Header */}
@@ -218,7 +222,7 @@ export default function VideoLibrary() {
           <div className="flex items-center gap-2">
             <VideoIcon className="h-4 w-4 text-primary dark:text-muted-secondary" />
             <div>
-              <p className="text-[9px] font-semibold text-muted-foreground uppercase tracking-[0.15em]">Project Management</p>
+              <p className="text-[9px] font-semibold text-muted-foreground uppercase tracking-[0.15em]">Management</p>
               <h1 className="text-sm font-bold text-foreground tracking-tight">Video Library</h1>
             </div>
           </div>
@@ -350,7 +354,7 @@ export default function VideoLibrary() {
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {filteredVideos.map((video) => (
+            {filteredVideos.map((video, _idx) => (
               <Card
                 key={video.id}
                 className={cn(
@@ -460,6 +464,18 @@ export default function VideoLibrary() {
                 </div>
               </Card>
             ))}
+          </div>
+        )}
+
+        {/* Infinite scroll sentinel & loader */}
+        {!loading && page < totalPages && (
+          <div ref={sentinelRef} className="flex items-center justify-center py-8">
+            {loadingMore && (
+              <div className="flex items-center gap-3 text-muted-foreground">
+                <Loader2 className="h-5 w-5 animate-spin" />
+                <span className="text-sm font-medium">Loading more videos...</span>
+              </div>
+            )}
           </div>
         )}
 

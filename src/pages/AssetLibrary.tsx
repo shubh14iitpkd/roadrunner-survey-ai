@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { api } from "@/lib/api";
 import { exportToExcel } from "@/lib/excelExport";
-import { Download, Database, Loader2, RotateCcw, Tag, AlertCircle } from "lucide-react";
+import { Download, Database, Loader2, RotateCcw, Tag, AlertCircle, CheckCircle2, AlertTriangle } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import {
   Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator,
@@ -47,7 +47,7 @@ const conditionToColor = (condition: string): string => {
 };
 
 // ── Table columns for Asset Library (no Issue / Defect ID) ──
-const ASSET_COLUMNS: ColumnDef[] = [
+const BASE_ASSET_COLUMNS: ColumnDef[] = [
   { key: "assetDisplayId", header: "Asset ID", className: "font-mono text-[11px] py-1.5 px-1.5 whitespace-nowrap text-center", render: (a) => a.assetDisplayId, getValue: (a) => a.assetDisplayId },
   { key: "assetType", header: "Asset Type", className: "text-[10px] leading-tight py-1.5 px-1.5 min-w-[180px] max-w-[220px] text-center", render: (a) => <span className="line-clamp-2">{a.assetType}</span>, getValue: (a) => a.assetType },
   { key: "category", header: "Category", className: "py-1.5 px-1.5 text-center", render: (a) => <CategoryBadge category={a.assetCategory} categoryId={a.category_id} />, getValue: (a) => a.assetCategory },
@@ -68,6 +68,56 @@ const ASSET_COLUMNS: ColumnDef[] = [
   { key: "survey", header: "Survey", className: "text-[11px] py-1.5 px-1.5 whitespace-nowrap text-center", render: (a) => a.lastSurveyDate, getValue: (a) => a.lastSurveyDate },
 ];
 
+/** Builds column definitions including the interactive "Mark Condition" column. */
+function buildAssetColumns(
+  savingSet: Set<string>,
+  onMarkGood: (a: AssetRecord) => void,
+  onMarkDefective: (a: AssetRecord) => void,
+): ColumnDef[] {
+  return [
+    ...BASE_ASSET_COLUMNS,
+    {
+      key: "markCondition",
+      header: "Mark",
+      className: "py-1.5 px-2 text-center",
+      render: (a) => {
+        const assetKey = a.assetDisplayId ?? a.id;
+        const isSaving = savingSet.has(assetKey);
+        const isDamaged = DAMAGED_CONDITIONS.has((a.condition ?? '').toLowerCase());
+        const isGood = a.condition?.toLowerCase() === 'good';
+        return (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              if (isSaving) return;
+              if (isDamaged) onMarkGood(a);
+              else if (isGood) onMarkDefective(a);
+            }}
+            disabled={isSaving || (!isDamaged && !isGood)}
+            title={isDamaged ? "Mark this asset as good" : isGood ? "Mark this asset as defective" : ""}
+            className={cn(
+              "inline-flex items-center justify-center w-6 h-6 rounded-full transition-all",
+              isSaving
+                ? "text-muted-foreground cursor-not-allowed"
+                : isDamaged
+                ? "text-muted-foreground/40 hover:text-emerald-600 hover:bg-emerald-500/10 cursor-pointer"
+                : isGood
+                ? "text-emerald-600 bg-emerald-500/10 hover:text-destructive hover:bg-destructive/10 cursor-pointer"
+                : "text-muted-foreground/20 cursor-not-allowed"
+            )}
+          >
+            {isSaving ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <CheckCircle2 className="h-3.5 w-3.5" />
+            )}
+          </button>
+        );
+      },
+    },
+  ];
+}
+
 export default function AssetLibrary() {
   const { user } = useAuth();
   const [searchParams] = useSearchParams();
@@ -78,7 +128,7 @@ export default function AssetLibrary() {
   const [searchQuery, setSearchQuery] = useState("");
   const { data: labelMapData } = useLabelMap();
 
-  const [roads, setRoads] = useState<{ route_id: number; name: string }[]>([]);
+  const [roads, setRoads] = useState<{ route_id: number; name: string; side?: string }[]>([]);
   const [selectedRouteId, setSelectedRouteId] = useState<number | null>(null);
   const [selectedAssetType, setSelectedAssetType] = useState<string>("all");
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
@@ -103,6 +153,11 @@ export default function AssetLibrary() {
   const [fullViewLoading, setFullViewLoading] = useState(false);
 
   const [assets, setAssets] = useState<AssetRecord[]>([]);
+
+  // ── Mark condition state ──
+  const [markingSaving, setMarkingSaving] = useState<Set<string>>(new Set());
+  const [confirmMarkGoodAsset, setConfirmMarkGoodAsset] = useState<AssetRecord | null>(null);
+  const [confirmMarkDefectiveAsset, setConfirmMarkDefectiveAsset] = useState<AssetRecord | null>(null);
 
   const { imageUrl, frameWidth, frameHeight, loading: imageLoading } = useFrameImage({
     videoId: selectedAsset?.videoId,
@@ -133,7 +188,7 @@ export default function AssetLibrary() {
       ]);
 
       if (roadsResp?.items) {
-        setRoads(roadsResp.items.map((r: any) => ({ route_id: r.route_id, name: r.road_name })));
+        setRoads(roadsResp.items.map((r: any) => ({ route_id: r.route_id, name: r.road_name, side: r.road_side })));
       }
 
       if (masterResp?.items) {
@@ -281,7 +336,7 @@ export default function AssetLibrary() {
   // ── Sorting filtered assets ──
   const sortedAndFilteredAssets = useMemo(() => {
     if (!sortKey) return filteredAssets;
-    const col = ASSET_COLUMNS.find((c) => c.key === sortKey);
+    const col = BASE_ASSET_COLUMNS.find((c) => c.key === sortKey);
     if (!col?.getValue) return filteredAssets;
     const getter = col.getValue;
     return [...filteredAssets].sort((a, b) => {
@@ -366,6 +421,76 @@ export default function AssetLibrary() {
       setRollbackAssetId(null);
     }
   }, [user, loadData]);
+
+  // ── Mark as Good (defective → good) ──
+  const handleMarkGood = useCallback((asset: AssetRecord) => {
+    if (user?.role === "Viewer") {
+      toast.error("You do not have permission to mark assets as good.");
+      return;
+    }
+    setConfirmMarkGoodAsset(asset);
+  }, [user]);
+
+  const handleConfirmMarkGood = useCallback(async () => {
+    const asset = confirmMarkGoodAsset;
+    if (!asset) return;
+    setConfirmMarkGoodAsset(null);
+
+    const assetKey = asset.assetDisplayId ?? asset.id;
+    const mongoId = asset.id;
+    if (!mongoId) { toast.error("Cannot update asset: missing ID"); return; }
+    const surveyorName = user ? `${user.first_name} ${user.last_name}`.trim() || user.email : "Unknown";
+    const surveyorId = user?.id ?? "";
+
+    setMarkingSaving((prev) => new Set(prev).add(assetKey));
+    try {
+      await api.assets.markAsGood(mongoId, { name: surveyorName, user_id: surveyorId, survey_id: asset.surveyId });
+      toast.success(`Asset ${asset.assetDisplayId} marked as good`);
+      loadData();
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to mark asset as good");
+    } finally {
+      setMarkingSaving((prev) => { const s = new Set(prev); s.delete(assetKey); return s; });
+    }
+  }, [confirmMarkGoodAsset, user, loadData]);
+
+  // ── Mark as Defective (good → defective) ──
+  const handleMarkDefective = useCallback((asset: AssetRecord) => {
+    if (user?.role === "Viewer") {
+      toast.error("You do not have permission to mark assets as defective.");
+      return;
+    }
+    setConfirmMarkDefectiveAsset(asset);
+  }, [user]);
+
+  const handleConfirmMarkDefective = useCallback(async () => {
+    const asset = confirmMarkDefectiveAsset;
+    if (!asset) return;
+    setConfirmMarkDefectiveAsset(null);
+
+    const assetKey = asset.assetDisplayId ?? asset.id;
+    const mongoId = asset.id;
+    if (!mongoId) { toast.error("Cannot update asset: missing ID"); return; }
+    const surveyorName = user ? `${user.first_name} ${user.last_name}`.trim() || user.email : "Unknown";
+    const surveyorId = user?.id ?? "";
+    const surveyId = asset.surveyId;
+
+    setMarkingSaving((prev) => new Set(prev).add(assetKey));
+    try {
+      await api.assets.unmarkGood(mongoId, { name: surveyorName, user_id: surveyorId, survey_id: surveyId });
+      toast.success(`Asset ${asset.assetDisplayId} marked as defective`);
+      loadData();
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to mark asset as defective");
+    } finally {
+      setMarkingSaving((prev) => { const s = new Set(prev); s.delete(assetKey); return s; });
+    }
+  }, [confirmMarkDefectiveAsset, user, loadData]);
+
+  const assetColumns = useMemo(
+    () => buildAssetColumns(markingSaving, handleMarkGood, handleMarkDefective),
+    [markingSaving, handleMarkGood, handleMarkDefective]
+  );
 
   const handleAssetTypeSelect = useCallback((assetType: string)=> {
     console.log(labelMapData)
@@ -624,24 +749,10 @@ export default function AssetLibrary() {
                   <div className="flex items-center gap-2">
                     <Database className={cn("h-3.5 w-3.5", isDamaged ? "text-destructive" : "text-emerald-600")} />
                     <span className={cn("text-xs font-semibold", isDamaged ? "text-destructive" : "text-emerald-600")}>
-                      {isDamaged? `Issue: ${capitalize(selectedAsset.issue)}`:`Condition: ${displayCondition(selectedAsset.condition)}`}
+                      {isDamaged? `Issue: ${capitalize(selectedAsset.issue)}`:`Condition: ${capitalize(displayCondition(selectedAsset.condition))}`}
                     </span>
                   </div>
                   <div className="flex items-center gap-2">
-                    {isManuallyGood && user?.role !== "Viewer" && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-6 text-[10px] gap-1 px-2 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-                        disabled={rollbackAssetId === selectedAsset.id}
-                        onClick={() => handleRollback(selectedAsset)}
-                      >
-                        {rollbackAssetId === selectedAsset.id
-                          ? <Loader2 className="h-3 w-3 animate-spin" />
-                          : <RotateCcw className="h-3 w-3" />}
-                        Rollback to Defective
-                      </Button>
-                    )}
                     <span className="text-[10px] text-muted-foreground">
                       {selectedAsset.totalSurveysDetected ?? history.length} survey{(selectedAsset.totalSurveysDetected ?? history.length) !== 1 ? 's' : ''} detected
                     </span>
@@ -788,6 +899,110 @@ export default function AssetLibrary() {
         </DialogContent>
       </Dialog>
 
+      {/* Confirm Mark as Good Dialog */}
+      <Dialog open={!!confirmMarkGoodAsset} onOpenChange={(open) => !open && setConfirmMarkGoodAsset(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+              Mark Asset as Good?
+            </DialogTitle>
+            <DialogDescription>
+              Please confirm you want to mark the following asset as good condition.
+            </DialogDescription>
+          </DialogHeader>
+          {confirmMarkGoodAsset && (
+            <div className="flex flex-col gap-2 py-2">
+              <div className="rounded-lg border bg-muted/40 px-4 py-3 text-xs space-y-2">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Asset ID</span>
+                  <span className="font-mono font-semibold">{confirmMarkGoodAsset.assetDisplayId}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Type</span>
+                  <span className="font-semibold">{confirmMarkGoodAsset.assetType}</span>
+                </div>
+                {confirmMarkGoodAsset.assetCategory && (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Category</span>
+                    <span className="font-semibold">{confirmMarkGoodAsset.assetCategory}</span>
+                  </div>
+                )}
+                {confirmMarkGoodAsset.roadName && (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Route</span>
+                    <span className="font-semibold">{confirmMarkGoodAsset.roadName}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+          <div className="flex justify-end gap-2 pt-1">
+            <Button variant="outline" size="sm" onClick={() => setConfirmMarkGoodAsset(null)}>
+              Cancel
+            </Button>
+            <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700 text-white" onClick={handleConfirmMarkGood}>
+              <CheckCircle2 className="h-3.5 w-3.5 mr-1" />
+              Confirm
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Confirm Mark as Defective Warning Dialog */}
+      <Dialog open={!!confirmMarkDefectiveAsset} onOpenChange={(open) => !open && setConfirmMarkDefectiveAsset(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4 text-destructive" />
+              Mark Asset as Defective?
+            </DialogTitle>
+            <DialogDescription>
+              This will change the asset's condition from good to defective. This action is logged and visible to all team members.
+            </DialogDescription>
+          </DialogHeader>
+          {confirmMarkDefectiveAsset && (
+            <div className="flex flex-col gap-2 py-2">
+              <div className="rounded-lg border border-destructive/20 bg-destructive/5 px-4 py-3 text-xs space-y-2">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Asset ID</span>
+                  <span className="font-mono font-semibold">{confirmMarkDefectiveAsset.assetDisplayId}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Type</span>
+                  <span className="font-semibold">{confirmMarkDefectiveAsset.assetType}</span>
+                </div>
+                {confirmMarkDefectiveAsset.assetCategory && (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Category</span>
+                    <span className="font-semibold">{confirmMarkDefectiveAsset.assetCategory}</span>
+                  </div>
+                )}
+                {confirmMarkDefectiveAsset.roadName && (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Route</span>
+                    <span className="font-semibold">{confirmMarkDefectiveAsset.roadName}</span>
+                  </div>
+                )}
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Current Condition</span>
+                  <span className="font-semibold text-emerald-600">Good</span>
+                </div>
+              </div>
+            </div>
+          )}
+          <div className="flex justify-end gap-2 pt-1">
+            <Button variant="outline" size="sm" onClick={() => setConfirmMarkDefectiveAsset(null)}>
+              Cancel
+            </Button>
+            <Button size="sm" variant="destructive" onClick={handleConfirmMarkDefective}>
+              <AlertTriangle className="h-3.5 w-3.5 mr-1" />
+              Mark Defective
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       {/* Bottom Table */}
       <AssetTable
         items={sortedAndFilteredAssets}
@@ -800,7 +1015,7 @@ export default function AssetLibrary() {
         onRetry={loadData}
         idField="assetDisplayId"
         onClearFilters={clearFilters}
-        columns={ASSET_COLUMNS}
+        columns={assetColumns}
         sortKey={sortKey}
         sortDir={sortDir}
         onSort={(colKey: string) => {

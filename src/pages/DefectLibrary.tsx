@@ -274,7 +274,7 @@ export default function DefectLibrary() {
         api.roads.list(),
         api.assets.getMaster({ condition: "damaged" }),
       ]);
-      if (roadsResp?.items) setRoads(roadsResp.items.map((r: any) => ({ route_id: r.route_id, name: r.road_name })));
+      if (roadsResp?.items) setRoads(roadsResp.items.map((r: any) => ({ route_id: r.route_id, name: r.road_name, side: r.road_side })));
 
       if (masterResp?.items) {
         const mapped: AssetRecord[] = masterResp.items.map((asset: any, idx: number) => {

@@ -12,6 +12,7 @@ type condFilter = "all" | "good" | "damaged";
 interface Road {
   route_id: number;
   name: string;
+  side?: string;
 }
 
 interface AssetFilterStripProps {
@@ -197,16 +198,21 @@ export default function AssetFilterStrip({
           <SelectTrigger className="w-[140px] h-6 text-[10px] border-border bg-background rounded-md shrink-0 shadow-sm overflow-hidden">
             <div className="truncate block flex items-center gap-1">
               {selectedRouteId !== null && <MapIcon className="h-2.5 w-2.5 text-muted-secondary shrink-0" />}
-              <SelectValue placeholder="All Roads" />
+              <SelectValue placeholder="All Routes" />
             </div>
           </SelectTrigger>
           <SelectContent className="bg-card z-50 max-h-64">
-            <SelectItem value="all">All Roads</SelectItem>
+            <SelectItem value="all">All Routes</SelectItem>
             {roads.map((r) => (
-              <SelectItem key={r.route_id} value={String(r.route_id)} className="text-xs">
-                <span className="flex items-center gap-1.5">
-                  {r.name}
-                </span>
+              <SelectItem key={r.route_id} value={String(r.route_id)} className="text-xs w-full">
+                <div className="flex justify-between items-center gap-10 w-full">
+                  <span>{r.name}</span>
+                  {r.side && (
+                    <span className="ml-auto inline-flex items-center rounded-full border border-transparent bg-secondary text-secondary-foreground hover:bg-secondary/80 px-1.5 py-0.5 text-[10px] font-semibold whitespace-nowrap">
+                      {r.side}
+                    </span>
+                  )}
+                </div>
               </SelectItem>
             ))}
           </SelectContent>

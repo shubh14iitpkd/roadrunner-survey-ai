@@ -206,6 +206,7 @@ export const api = {
 			return apiFetch(`/api/assets/master${q ? `?${q}` : ""}`, { method: "POST" });
 		},
 		get: (asset_id: string) => apiFetch(`/api/assets/${asset_id}`),
+		getMasterByDisplayId: (masterDisplayId: string) => apiFetch(`/api/assets/master/${masterDisplayId}`),
 		bulkInsert: (assets: any[]) => apiFetch("/api/assets/bulk", { method: "POST", body: JSON.stringify({ assets }) }),
 		update: (asset_id: string, payload: any) => apiFetch(`/api/assets/${asset_id}`, { method: "PUT", body: JSON.stringify(payload) }),
 		markAsGood: (asset_id: string, modifier: { name: string; user_id: string; survey_id?: string }) =>
