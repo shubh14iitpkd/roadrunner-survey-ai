@@ -29,6 +29,7 @@ const NotFound = lazy(() => import("./pages/NotFound"));
 const ModelTest = lazy(() => import("./pages/ModelTest"));
 const AnomalyLibrary = lazy(() => import("./pages/DefectLibrary"));
 const AssetLibrary = lazy(() => import("./pages/AssetLibrary"));
+const QCLayer = lazy(() => import("./pages/QCLayer"));
 
 const queryClient = new QueryClient();
 
@@ -70,6 +71,7 @@ const App = () => (
                             <Route path="/asset-library" element={<AssetLibrary />} />
                             <Route path="/roadgpt" element={<AskAI />} />
                             <Route path="/settings" element={<Settings />} />
+                            <Route path="/:masterDisplayId/edit" element={<QCLayer />} />
                             <Route path="*" element={<NotFound />} />
                           </Routes>
                         </Layout>

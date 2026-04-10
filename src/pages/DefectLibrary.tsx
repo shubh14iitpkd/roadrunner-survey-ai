@@ -332,7 +332,6 @@ export default function DefectLibrary() {
           }));
 
           const condition = asset.condition || asset.latest_condition || 'defective';
-          console.log(asset.issue)
           return {
             id: mongoId,
             defectId: latestEntry?.defect_id ?? `DEF-${String(idx).padStart(6, '0')}`,
