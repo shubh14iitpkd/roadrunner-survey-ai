@@ -17,9 +17,8 @@ assets_bp = Blueprint("assets", __name__)
 
 def _propagate_group_rename(db, old_group_id: str, new_group_id: str):
 	"""
-	Propagate a group_id rename across all 4 collections that store it.
+	Propagate a group_id rename across all collections that store it.
 	Called after system_asset_labels has already been updated.
-	display_name is kept in sync for script compatibility.
 	"""
 	if not old_group_id or not new_group_id or old_group_id == new_group_id:
 		return
@@ -28,6 +27,30 @@ def _propagate_group_rename(db, old_group_id: str, new_group_id: str):
 	db.assets.update_many(filt, update)
 	db.master_assets.update_many(filt, update)
 	db.video_lib_assets.update_many(filt, update)
+
+
+def _propagate_category_move(db, asset_ids: list[str], new_category_id: str):
+	"""
+	Propagate a category_id change across all 6 collections.
+	system_asset_labels is assumed to be updated already by the caller.
+	For frames / frames_lib the category_id lives inside the detections array.
+	"""
+	if not asset_ids or not new_category_id:
+		return
+	filt = {"asset_id": {"$in": asset_ids}}
+	update = {"$set": {"category_id": new_category_id}}
+
+	# Top-level category_id collections
+	db.assets.update_many(filt, update)
+	db.master_assets.update_many(filt, update)
+	db.video_lib_assets.update_many(filt, update)
+
+	# Nested detections[].category_id in frames / frames_lib
+	frame_filt = {"detections.asset_id": {"$in": asset_ids}}
+	frame_update = {"$set": {"detections.$[elem].category_id": new_category_id}}
+	array_filters = [{"elem.asset_id": {"$in": asset_ids}}]
+	db.frames.update_many(frame_filt, frame_update, array_filters=array_filters)
+	db.frames_lib.update_many(frame_filt, frame_update, array_filters=array_filters)
 
 
 @assets_bp.get("/", endpoint="assets_list_paginated")
@@ -923,26 +946,46 @@ def update_icon_config():
 	old_group_id = first_doc.get("group_id", "") if first_doc else ""
 
 	if reset:
-		# Reset group_id to default_group_id and remove icon fields
+		# Reset group_id → default_group_id, category_id → default_category_id,
+		# and remove icon fields
 		default_gid = first_doc.get("default_group_id", "") if first_doc else ""
-		# Uniqueness: if the default name was taken by another group, reject
+		default_cid = first_doc.get("default_category_id") if first_doc else None
+		# Uniqueness: if the default group name was taken by another group, reject
 		if default_gid and default_gid != old_group_id:
 			conflict = db.system_asset_labels.find_one({"group_id": default_gid})
 			if conflict:
 				return jsonify({"error": f"Cannot reset: \"{default_gid}\" is already used by another group"}), 409
-		for aid in asset_ids:
+
+		# Resolve all asset_ids in this group (not just the ones sent)
+		all_aids = asset_ids
+		if first_doc and first_doc.get("group_id"):
+			group_labels = db.system_asset_labels.find(
+				{"group_id": first_doc["group_id"]}, {"asset_id": 1}
+			)
+			all_aids = list({l["asset_id"] for l in group_labels})
+
+		for aid in all_aids:
 			doc = db.system_asset_labels.find_one({"asset_id": aid})
 			if doc:
 				dgid = doc.get("default_group_id", "")
+				reset_set = {"display_name": dgid, "group_id": dgid}
+				dcid = doc.get("default_category_id")
+				if dcid:
+					reset_set["category_id"] = dcid
 				db.system_asset_labels.update_one(
 					{"asset_id": aid},
 					{
 						"$unset": {"icon_url": "", "icon_size": "", "icon_anchor": ""},
-						"$set": {"display_name": dgid, "group_id": dgid}
+						"$set": reset_set,
 					}
 				)
-		# Propagate reset to stored asset data
+
+		# Propagate group_id reset
 		_propagate_group_rename(db, old_group_id, default_gid)
+		# Propagate category_id reset (if it was ever moved)
+		if default_cid:
+			_propagate_category_move(db, all_aids, default_cid)
+
 		return jsonify({"ok": True, "message": "icon config reset"})
 
 	update_fields = {}
@@ -1027,25 +1070,31 @@ def move_asset_category():
 	if not cat:
 		return jsonify({"error": "category not found"}), 404
 
-	# Update system_asset_labels
+	# Resolve ALL asset_ids sharing the same group as the provided ones
+	first_label = db.system_asset_labels.find_one({"asset_id": asset_ids[0]})
+	if first_label and first_label.get("group_id"):
+		group_labels = db.system_asset_labels.find(
+			{"group_id": first_label["group_id"]},
+			{"asset_id": 1}
+		)
+		all_asset_ids = list({l["asset_id"] for l in group_labels})
+	else:
+		all_asset_ids = asset_ids
+
+	# 1. Preserve original category as default_category_id (only on first move)
 	db.system_asset_labels.update_many(
-		{"asset_id": {"$in": asset_ids}},
+		{"asset_id": {"$in": all_asset_ids}, "default_category_id": {"$exists": False}},
+		[{"$set": {"default_category_id": "$category_id"}}]
+	)
+
+	# 2. Update the label registry (source of truth)
+	db.system_asset_labels.update_many(
+		{"asset_id": {"$in": all_asset_ids}},
 		{"$set": {"category_id": new_category_id}}
 	)
 
-	# Update master_assets
-	db.master_assets.update_many(
-		{"asset_id": {"$in": asset_ids}},
-		{"$set": {"category_id": new_category_id}}
-	)
-
-	# Update individual asset observations
-	db.assets.update_many(
-		{"asset_id": {"$in": asset_ids}},
-		{"$set": {"category_id": new_category_id}}
-	)
-
-	# TODO: update asset category in frames as well
+	# 3. Propagate to assets, master_assets, video_lib_assets, frames, frames_lib
+	_propagate_category_move(db, all_asset_ids, new_category_id)
 
 	return jsonify({"ok": True, "updated_category": new_category_id})
 
@@ -1187,6 +1236,7 @@ def get_resolved_map():
 			"default_name": l["default_name"],
 			"group_id": gid,
 			"default_group_id": l.get("default_group_id", ""),
+			"default_category_id": l.get("default_category_id", ""),
 			"display_name": gid,
 		}
 

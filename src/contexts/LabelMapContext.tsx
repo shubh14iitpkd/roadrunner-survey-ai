@@ -13,6 +13,7 @@ interface ResolvedItem {
   asset_id?: string;
   group_id?: string;
   default_group_id?: string;
+  default_category_id?: string;
   icon_url?: string;
   icon_size?: [number, number];
   icon_anchor?: [number, number];
@@ -118,7 +119,8 @@ export function LabelMapProvider({ children }: { children: ReactNode }) {
           if (iconConfig.reset) {
             const { icon_url: _a, icon_size: _b, icon_anchor: _c, ...rest } = updatedLabels[aid];
             const resetName = rest.default_group_id || rest.default_name;
-            updatedLabels[aid] = { ...rest, group_id: resetName, display_name: resetName };
+            const resetCat = rest.default_category_id || rest.category_id;
+            updatedLabels[aid] = { ...rest, group_id: resetName, display_name: resetName, category_id: resetCat };
           } else {
             const updates: Partial<ResolvedItem> = {};
             if (iconConfig.icon_url !== undefined) updates.icon_url = iconConfig.icon_url;

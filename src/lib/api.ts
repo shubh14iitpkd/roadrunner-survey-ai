@@ -262,7 +262,7 @@ export const api = {
 			apiFetch(`/api/users/${userId}/role`, { method: "PUT", body: JSON.stringify({ role }) }),
 		revoke: (userId: string) =>
 			apiFetch(`/api/users/${userId}`, { method: "DELETE" }),
-		updateAssetIconConfig: (assetIds: string[], config: { icon_url?: string; icon_size?: [number, number]; icon_anchor?: [number, number]; display_name?: string; reset?: boolean }) =>
+		updateAssetIconConfig: (assetIds: string[], config: { icon_url?: string; icon_size?: [number, number]; icon_anchor?: [number, number]; group_id?: string; reset?: boolean }) =>
 			apiFetch(`/api/assets/icon-config`, { method: "PUT", body: JSON.stringify({ asset_ids: assetIds, ...config }) }),
 		moveAssetCategory: (assetIds: string[], newCategoryId: string) =>
 			apiFetch(`/api/assets/move-category`, { method: "PUT", body: JSON.stringify({ asset_ids: assetIds, new_category_id: newCategoryId }) }),
