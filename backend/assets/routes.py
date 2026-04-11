@@ -246,6 +246,36 @@ def get_asset(asset_id: str):
 		return mongo_response({"error": "not found"}, 404)
 	return mongo_response({"item": it})
 
+@assets_bp.get("/master/<master_display_id>", endpoint="assets_master_single")
+@role_required(["super_admin","admin", "surveyor", "viewer"])
+def get_master_asset_by_display_id(master_display_id: str):
+	"""
+	Get a single master asset by its master_display_id.
+	Returns the master asset document with the latest survey observation details.
+	---
+	tags:
+	  - Assets
+	security:
+	  - Bearer: []
+	parameters:
+	  - name: master_display_id
+	    in: path
+	    type: string
+	    required: true
+	    description: The master display ID (e.g. MAST-000001)
+	responses:
+	  200:
+	    description: Master asset document
+	  404:
+	    description: Not found
+	"""
+	db = get_db()
+	master = db["master_assets"].find_one({"master_display_id": master_display_id})
+	if not master:
+		return mongo_response({"error": "Master asset not found"}, 404)
+	return mongo_response({"item": master})
+
+
 @assets_bp.post("/master", endpoint="assets_master_lib")
 @role_required(["super_admin","admin", "surveyor", "viewer"])
 def get_master_assets():
