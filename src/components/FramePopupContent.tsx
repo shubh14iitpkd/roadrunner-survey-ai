@@ -106,13 +106,10 @@ export default function FramePopupContent({
   const idRef = useRef<string>(crypto.randomUUID());
 
 
-  // Helper function to get display name from context or fallback to normalized name
+  // Helper: get display name via group_id (authoritative), fallback to normalized class name
   const getDisplayName = (assetId: string, className: string): string => {
-    // Try to get custom display name from context
-    if (labelMapData?.labels?.[assetId]) {
-      return labelMapData.labels[assetId].display_name;
-    }
-    // Fallback to normalized class name
+    const label = labelMapData?.labels?.[assetId];
+    if (label) return label.group_id || label.display_name;
     return normalizeClassName(className);
   };
 

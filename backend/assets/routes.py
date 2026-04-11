@@ -14,6 +14,22 @@ from utils.response import mongo_response
 
 assets_bp = Blueprint("assets", __name__)
 
+
+def _propagate_group_rename(db, old_group_id: str, new_group_id: str):
+	"""
+	Propagate a group_id rename across all 4 collections that store it.
+	Called after system_asset_labels has already been updated.
+	display_name is kept in sync for script compatibility.
+	"""
+	if not old_group_id or not new_group_id or old_group_id == new_group_id:
+		return
+	update = {"$set": {"group_id": new_group_id}}
+	filt = {"group_id": old_group_id}
+	db.assets.update_many(filt, update)
+	db.master_assets.update_many(filt, update)
+	db.video_lib_assets.update_many(filt, update)
+
+
 @assets_bp.get("/", endpoint="assets_list_paginated")
 @role_required(["super_admin","admin", "surveyor", "viewer"])
 def list_assets_paginated():
@@ -442,6 +458,7 @@ def get_master_assets():
 				"mark_good_history": 0, # legacy field, replaced by asset_condition_logs
 			}
 		},
+		{ "$limit": 100 } # TODO remove in prod
 	]
 	all_assets = list(db.master_assets.aggregate(pipeline))
 
@@ -901,20 +918,31 @@ def update_icon_config():
 	db = get_db()
 	reset = data.get("reset", False)
 
+	# Snapshot the current group_id before any mutation so we can propagate
+	first_doc = db.system_asset_labels.find_one({"asset_id": asset_ids[0]})
+	old_group_id = first_doc.get("group_id", "") if first_doc else ""
+
 	if reset:
-		# Remove icon fields and reset display_name to default_name
+		# Reset group_id to default_group_id and remove icon fields
+		default_gid = first_doc.get("default_group_id", "") if first_doc else ""
+		# Uniqueness: if the default name was taken by another group, reject
+		if default_gid and default_gid != old_group_id:
+			conflict = db.system_asset_labels.find_one({"group_id": default_gid})
+			if conflict:
+				return jsonify({"error": f"Cannot reset: \"{default_gid}\" is already used by another group"}), 409
 		for aid in asset_ids:
 			doc = db.system_asset_labels.find_one({"asset_id": aid})
-			
-			gid = doc.get("default_group_id", "")
 			if doc:
+				dgid = doc.get("default_group_id", "")
 				db.system_asset_labels.update_one(
 					{"asset_id": aid},
 					{
 						"$unset": {"icon_url": "", "icon_size": "", "icon_anchor": ""},
-						"$set": {"display_name": gid, "group_id": gid }
+						"$set": {"display_name": dgid, "group_id": dgid}
 					}
 				)
+		# Propagate reset to stored asset data
+		_propagate_group_rename(db, old_group_id, default_gid)
 		return jsonify({"ok": True, "message": "icon config reset"})
 
 	update_fields = {}
@@ -925,8 +953,14 @@ def update_icon_config():
 	if "icon_anchor" in data:
 		update_fields["icon_anchor"] = data["icon_anchor"]
 	if "group_id" in data:
-		update_fields["group_id"] = data["group_id"]
-		update_fields["display_name"] = data["group_id"]
+		new_gid = data["group_id"]
+		# Uniqueness: reject if another group already uses this name
+		if new_gid != old_group_id:
+			conflict = db.system_asset_labels.find_one({"group_id": new_gid})
+			if conflict:
+				return jsonify({"error": f"An asset type named \"{new_gid}\" already exists"}), 409
+		update_fields["group_id"] = new_gid
+		update_fields["display_name"] = new_gid
 
 	if not update_fields:
 		return jsonify({"error": "no fields to update"}), 400
@@ -936,6 +970,10 @@ def update_icon_config():
 			{"asset_id": aid},
 			{"$set": update_fields}
 		)
+
+	# Propagate group_id rename if it changed
+	if "group_id" in data:
+		_propagate_group_rename(db, old_group_id, data["group_id"])
 
 	return jsonify({"ok": True})
 
@@ -1140,14 +1178,16 @@ def get_resolved_map():
 	resolved_labels = {}
 	for l in system_labels:
 		aid = l["asset_id"]
+		# group_id is the authoritative display name; display_name kept for compat
+		gid = l.get("group_id") or l.get("display_name") or l["default_name"]
 		entry = {
 			"asset_id": aid,
 			"category_id": l.get("category_id"),
 			"category_name": l.get("category_name"),
 			"default_name": l["default_name"],
-			"group_id": l.get("group_id"),
+			"group_id": gid,
 			"default_group_id": l.get("default_group_id", ""),
-			"display_name": l["display_name"],
+			"display_name": gid,
 		}
 
 		if l.get("attributes"):
@@ -1170,10 +1210,9 @@ def get_resolved_map():
 @role_required(["super_admin", "admin"])
 def update_global_label():
 	"""
-	Globally update display name for asset label types (admin only).
-	Writes directly to system_asset_labels.display_name.
-	For grouped assets (sharing a group_id), also renames group_id across
-	all rows to the new value so the grouping key stays consistent.
+	Globally rename an asset group (admin only).
+	Renames group_id from old_group_id to new_group_id across all
+	system_asset_labels sharing that group. display_name is kept in sync.
 	The original value is preserved in default_group_id for revert.
 	---
 	tags:
@@ -1187,21 +1226,15 @@ def update_global_label():
 	    schema:
 	      type: object
 	      required:
-	        - asset_ids
-	        - display_name
+	        - old_group_id
+	        - new_group_id
 	      properties:
-	        asset_ids:
-	          type: array
-	          items:
-	            type: string
-	        display_name:
-	          type: string
 	        old_group_id:
 	          type: string
-	          description: If provided, renames group_id from this value to new_group_id on all rows sharing it
+	          description: Current group_id to rename from
 	        new_group_id:
 	          type: string
-	          description: The new group_id value to assign (required if old_group_id is provided)
+	          description: New group_id to rename to
 	responses:
 	  200:
 	    description: Label updated globally
@@ -1209,22 +1242,29 @@ def update_global_label():
 	    description: Missing required fields
 	"""
 	data = request.get_json(silent=True) or {}
-	asset_ids = data.get("asset_ids") or []
 	old_group_id = data.get("old_group_id")
 	new_group_id = data.get("new_group_id")
 
-	if not asset_ids:
-		return jsonify({"error": "asset ids required"}), 400
 	if not new_group_id or not old_group_id:
-		return jsonify({"error": "group id required"}), 400
+		return jsonify({"error": "old_group_id and new_group_id required"}), 400
+	if new_group_id == old_group_id:
+		return jsonify({"ok": True})
 
 	db = get_db()
 
-	print("UPDATING", old_group_id,"->", new_group_id)
+	# Uniqueness: reject if another group already uses this name
+	conflict = db.system_asset_labels.find_one({"group_id": new_group_id})
+	if conflict:
+		return jsonify({"error": f"An asset type named \"{new_group_id}\" already exists"}), 409
+
+	# 1. Update the label registry (source of truth)
 	db.system_asset_labels.update_many(
 		{"group_id": old_group_id},
 		{"$set": {"group_id": new_group_id, "display_name": new_group_id}}
 	)
+
+	# 2. Propagate to assets, master_assets, video_lib_assets
+	_propagate_group_rename(db, old_group_id, new_group_id)
 
 	return jsonify({"ok": True})
 

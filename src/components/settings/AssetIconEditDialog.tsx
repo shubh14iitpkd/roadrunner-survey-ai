@@ -148,6 +148,8 @@ export default function AssetIconEditDialog({
       }
       await onSave(assetIds, config);
       onOpenChange(false);
+    } catch (err: any) {
+      toast({ title: "Error", description: err.message || "Failed to save changes", variant: "destructive" });
     } finally {
       setSaving(false);
     }
@@ -158,6 +160,8 @@ export default function AssetIconEditDialog({
     try {
       await onSave(assetIds, { reset: true });
       onOpenChange(false);
+    } catch (err: any) {
+      toast({ title: "Error", description: err.message || "Failed to reset", variant: "destructive" });
     } finally {
       setSaving(false);
     }

@@ -89,7 +89,7 @@ export function LabelMapProvider({ children }: { children: ReactNode }) {
 
     await api.user.updateGlobalLabel(newGroupId, oldGroupId);
 
-    // Update local state for all member IDs
+    // Update local state: group_id is authoritative, display_name kept in sync
     setData((prev) => {
       if (!prev) return prev;
       const updatedLabels = { ...prev.labels };
@@ -97,8 +97,8 @@ export function LabelMapProvider({ children }: { children: ReactNode }) {
         if (updatedLabels[aid]) {
           updatedLabels[aid] = {
             ...updatedLabels[aid],
+            group_id: newGroupId,
             display_name: newGroupId,
-            ...(newGroupId ? { group_id: newGroupId } : {}),
           };
         }
       }
@@ -109,7 +109,7 @@ export function LabelMapProvider({ children }: { children: ReactNode }) {
   const updateAssetIcon = async (assetIds: string[], iconConfig: { icon_url?: string; icon_size?: [number, number]; icon_anchor?: [number, number]; group_id?: string; reset?: boolean }) => {
     await api.user.updateAssetIconConfig(assetIds, iconConfig);
 
-    // Update local state
+    // Update local state: group_id is authoritative, display_name kept in sync
     setData((prev) => {
       if (!prev) return prev;
       const updatedLabels = { ...prev.labels };
@@ -117,15 +117,18 @@ export function LabelMapProvider({ children }: { children: ReactNode }) {
         if (updatedLabels[aid]) {
           if (iconConfig.reset) {
             const { icon_url: _a, icon_size: _b, icon_anchor: _c, ...rest } = updatedLabels[aid];
-            updatedLabels[aid] = { ...rest, display_name: rest.default_group_id, group_id: rest.default_group_id };
+            const resetName = rest.default_group_id || rest.default_name;
+            updatedLabels[aid] = { ...rest, group_id: resetName, display_name: resetName };
           } else {
-            updatedLabels[aid] = {
-              ...updatedLabels[aid],
-              ...(iconConfig.icon_url !== undefined && { icon_url: iconConfig.icon_url }),
-              ...(iconConfig.icon_size !== undefined && { icon_size: iconConfig.icon_size }),
-              ...(iconConfig.icon_anchor !== undefined && { icon_anchor: iconConfig.icon_anchor }),
-              ...(iconConfig.group_id !== undefined && { group_id: iconConfig.group_id, display_name: iconConfig.group_id }),
-            };
+            const updates: Partial<ResolvedItem> = {};
+            if (iconConfig.icon_url !== undefined) updates.icon_url = iconConfig.icon_url;
+            if (iconConfig.icon_size !== undefined) updates.icon_size = iconConfig.icon_size;
+            if (iconConfig.icon_anchor !== undefined) updates.icon_anchor = iconConfig.icon_anchor;
+            if (iconConfig.group_id !== undefined) {
+              updates.group_id = iconConfig.group_id;
+              updates.display_name = iconConfig.group_id;
+            }
+            updatedLabels[aid] = { ...updatedLabels[aid], ...updates };
           }
         }
       }

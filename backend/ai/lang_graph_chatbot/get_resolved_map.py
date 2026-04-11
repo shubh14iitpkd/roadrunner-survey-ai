@@ -28,11 +28,14 @@ def get_resolved_map(user_id: str | None = None):
     labels = {}
     for l in system_labels:
         aid = l["asset_id"]
+        # group_id is the authoritative display name
+        gid = l.get("group_id") or l.get("display_name") or l["default_name"]
+        override_dn = labels_override.get(aid, {}).get("display_name")
         labels[aid] = {
-            "display_name": labels_override.get(aid, {}).get("display_name") or l["display_name"],
+            "display_name": override_dn or gid,
             "default_name": l["default_name"],
             "category_id": l.get("category_id"),
-            "group_id": l.get("group_id")
+            "group_id": override_dn or gid,
         }
     
     result = {"categories": categories, "labels": labels}

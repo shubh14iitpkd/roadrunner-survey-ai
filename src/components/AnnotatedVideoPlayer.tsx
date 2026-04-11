@@ -124,9 +124,8 @@ export default function AnnotatedVideoPlayer({
 
   const getDetectionDisplayName = useCallback(
     (d: Detection): string => {
-      if (d.asset_id && labelMapData?.labels?.[d.asset_id]) {
-        return labelMapData.labels[d.asset_id].display_name;
-      }
+      const label = d.asset_id ? labelMapData?.labels?.[d.asset_id] : undefined;
+      if (label) return label.group_id || label.display_name;
       // Fallback: humanise class_name
       const name = (d.class_name ?? "").split("_AssetCondition_")[0];
       return name

@@ -31,7 +31,8 @@ def _resolve_group_id(group_name: str) -> str | None:
     rm = get_resolved_map()
     name_lower = group_name.strip().lower()
     for _, info in rm["labels"].items():
-        if info["group_id"].lower() == name_lower or info["display_name"].lower() == name_lower:
+        gid = (info.get("group_id") or "").lower()
+        if gid == name_lower:
             return info["group_id"]
     return None
 
@@ -39,10 +40,10 @@ FUZZY_THRESHOLD = 90
 
 def _resolve_asset_ids(asset_name: str) -> list[str]:
     """
-    Resolve an asset display name / group_id to ALL matching asset_ids.
+    Resolve an asset name (group_id) to ALL matching asset_ids.
     E.g. "Guardrail" → [type_asset_102, type_asset_103, type_asset_104]
-    Tries exact/prefix match first, then falls back to fuzzy matching so that
-    near-matches like "Traffic Light" → "Traffic Lights" still resolve correctly.
+    Matches on group_id first, then default_name. Falls back to fuzzy matching
+    so near-matches like "Traffic Light" → "Traffic Lights" still resolve.
     """
     rm = get_resolved_map()
     name_lower = asset_name.strip().lower()
@@ -50,14 +51,12 @@ def _resolve_asset_ids(asset_name: str) -> list[str]:
     exact = []
     prefix_matches = []
     for aid, info in rm["labels"].items():
-        dn = info["display_name"].lower()
-        defn = info["default_name"].lower()
         gid = (info.get("group_id") or "").lower()
-        if dn == name_lower or defn == name_lower or gid == name_lower:
+        defn = info["default_name"].lower()
+        if gid == name_lower or defn == name_lower:
             exact.append(aid)
-        elif (dn.startswith(name_lower + " ")
-              or defn.startswith(name_lower.replace(" ", "_") + "_")
-              or gid.startswith(name_lower.replace(" ", "_") + "_")):
+        elif (gid.startswith(name_lower + " ")
+              or defn.startswith(name_lower.replace(" ", "_") + "_")):
             prefix_matches.append(aid)
 
     if exact or prefix_matches:
@@ -66,8 +65,9 @@ def _resolve_asset_ids(asset_name: str) -> list[str]:
     # Fuzzy fallback: find the best-matching group_id, then return all asset_ids in that group
     group_id_to_aids: dict[str, list[str]] = {}
     for aid, info in rm["labels"].items():
-        gid = (info.get("group_id") or info["display_name"]).lower()
-        group_id_to_aids.setdefault(gid, []).append(aid)
+        gid = (info.get("group_id") or "").lower()
+        if gid:
+            group_id_to_aids.setdefault(gid, []).append(aid)
 
     best = process.extractOne(name_lower, group_id_to_aids.keys(), scorer=fuzz.WRatio)
     if best and best[1] >= FUZZY_THRESHOLD:
@@ -78,10 +78,11 @@ def _resolve_asset_ids(asset_name: str) -> list[str]:
 
 
 def _get_category_id_for_group(group_id: str) -> str:
-    """Resolve a group_id to its category_id, scanning group_id field if direct lookup fails."""
+    """Resolve a group_id to its category_id."""
     rm = get_resolved_map()
+    gid_lower = (group_id or "").lower()
     for info in rm["labels"].values():
-        if (info.get("group_id") or "").lower() == (group_id or "").lower():
+        if (info.get("group_id") or "").lower() == gid_lower:
             return info.get("category_id", "")
     return ""
 
@@ -93,13 +94,13 @@ def _cat_name(category_id: str) -> str:
 
 
 def _label_name(asset_id: str) -> str:
+    """Return the display name for an asset_id. Uses group_id as the authoritative name."""
     rm = get_resolved_map()
     info = rm["labels"].get(asset_id)
     if info:
-        return info["display_name"]
+        return info.get("group_id") or info.get("display_name") or asset_id
     # Fallback: asset_id might actually be a group_id value (e.g. from aggregations
-    # that group by $group_id). The group_id IS the current display name after a rename,
-    # so return it directly rather than the stale display_name field.
+    # that group by $group_id) — return it directly.
     for label in rm["labels"].values():
         if (label.get("group_id") or "").lower() == asset_id.lower():
             return label["group_id"]

@@ -208,11 +208,11 @@ export default function Dashboard() {
     return "unknown";
   }, [labelMapData]);
 
-  // Helper to get asset display name from labelMap
+  // Helper to get asset display name from labelMap (group_id is authoritative)
   const getAssetDisplayName = useCallback((item: any) => {
-    const fromMap = labelMapData?.labels?.[item.asset_id]?.display_name;
-    if (fromMap) return fromMap;
-    return item.display_name || item.type;
+    const label = labelMapData?.labels?.[item.asset_id];
+    if (label) return label.group_id || label.display_name;
+    return item.type || 'Unknown';
   }, [labelMapData]);
 
   // Reset defect page when category changes

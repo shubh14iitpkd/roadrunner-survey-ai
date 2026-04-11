@@ -38,10 +38,9 @@ function assetToRow(asset: any, labelMap?: ResolvedMap | null) {
     "—";
 
   const assetIdKey: string | undefined = asset.asset_id;
+  const label = assetIdKey ? labelMap?.labels?.[assetIdKey] : undefined;
   const assetTypeName =
-    (assetIdKey && labelMap?.labels?.[assetIdKey]?.display_name) ||
-    (assetIdKey && labelMap?.labels?.[assetIdKey]?.default_name) ||
-    asset.display_name ||
+    (label && (label.group_id || label.display_name)) ||
     asset.type ||
     "—";
   const hist = asset.survey_history
@@ -78,7 +77,8 @@ export async function exportDefectByAssetTypeReport(filterAssetType?: string, la
     r.roadName, r.roadSide, capitalize(r.side), capitalize(r.zone), r.lastSurveyDate, capitalize(r.issueType),
   ]);
 
-  const suffix = labelMap?.labels?.[filterAssetType]?.display_name || "All_Types";
+  const filterLabel = filterAssetType ? labelMap?.labels?.[filterAssetType] : undefined;
+  const suffix = (filterLabel && (filterLabel.group_id || filterLabel.display_name)) || "All_Types";
   exportToExcel({
     filename: `Defect_Report_AssetType_${suffix}.xlsx`,
     sheetName: "By Asset Type",

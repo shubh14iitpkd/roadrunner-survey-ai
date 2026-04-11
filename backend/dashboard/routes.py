@@ -217,14 +217,14 @@ def top_asset_types():
 
 	results = list(agg)
 
-	# Fetch display names from system_asset_labels
+	# Fetch display names from system_asset_labels (group_id is authoritative)
 	asset_ids = [r["asset_id"] for r in results if r.get("asset_id")]
 	labels_map: dict = {}
 	if asset_ids:
 		labels = list(db.system_asset_labels.find({"asset_id": {"$in": asset_ids}}))
 		for l in labels:
 			labels_map[l["asset_id"]] = {
-				"display_name": l.get("display_name") or l.get("default_name"),
+				"display_name": l.get("group_id") or l.get("display_name") or l.get("default_name"),
 				"category_id": l.get("category_id"),
 			}
 

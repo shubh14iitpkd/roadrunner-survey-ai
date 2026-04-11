@@ -19,8 +19,6 @@ const Dashboard = lazy(() => import("./pages/Dashboard"));
 const RoadRegister = lazy(() => import("./pages/RoadRegister"));
 const SurveyUpload = lazy(() => import("./pages/SurveyUpload"));
 const VideoLibrary = lazy(() => import("./pages/VideoLibrary"));
-const AssetRegister = lazy(() => import("./pages/AssetRegister"));
-// const GISView = lazy(() => import("./pages/GISView"));
 const AskAI = lazy(() => import("./pages/AskAI"));
 const Settings = lazy(() => import("./pages/Settings"));
 const Login = lazy(() => import("./pages/Login"));
@@ -66,7 +64,6 @@ const App = () => (
                             <Route path="/roads" element={<RoadRegister />} />
                             <Route path="/upload" element={<AdminRoute><SurveyUpload /></AdminRoute>} />
                             <Route path="/videos" element={<VideoLibrary />} />
-                            <Route path="/assets" element={<AssetRegister />} />
                             <Route path="/defect-library" element={<AnomalyLibrary />} />
                             <Route path="/asset-library" element={<AssetLibrary />} />
                             <Route path="/roadgpt" element={<AskAI />} />

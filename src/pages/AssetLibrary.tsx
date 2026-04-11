@@ -172,9 +172,9 @@ export default function AssetLibrary() {
   }, [labelMapData]);
 
   const getAssetDisplayName = useCallback((asset: any) => {
-    const fromMap = labelMapData?.labels?.[asset.asset_id ?? asset.assetId]?.display_name;
-    if (fromMap) return fromMap;
-    return asset.display_name || asset.asset_type || asset.type || 'Unknown';
+    const label = labelMapData?.labels?.[asset.asset_id ?? asset.assetId];
+    if (label) return label.group_id || label.display_name;
+    return asset.asset_type || asset.type || 'Unknown';
   }, [labelMapData]);
 
   // ── Data loading ──
