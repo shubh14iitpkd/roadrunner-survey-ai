@@ -17,7 +17,7 @@ async function fetchDamagedAssets(filterAssetType?: string): Promise<any[]> {
   if (filterAssetType) {
     return items.filter(
       (a: any) =>
-        (a.asset_id || "").toLowerCase() === filterAssetType.toLowerCase()
+        (a.group_id || "").toLowerCase() === filterAssetType.toLowerCase()
     );
   }
   return items;

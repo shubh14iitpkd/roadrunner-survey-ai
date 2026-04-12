@@ -255,7 +255,7 @@ export default function Dashboard() {
             resp.items.map((item: any) => ({
               asset_id: item.asset_id,
               type: getAssetDisplayName(item),
-              type_id: item.asset_id,
+              type_id: item.group_id ?? item.asset_id,
               category: getCategoryDisplayName(item),
               category_id: item.category_id,
               defects: item.damaged_count,

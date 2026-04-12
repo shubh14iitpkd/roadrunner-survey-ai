@@ -553,7 +553,7 @@ def list_detected_assets(route_id: Optional[int] = None) -> str:
     pipeline = [
         {"$match": query},
         {"$group": {
-            "_id": {"asset_id": "$asset_id", "category_id": "$category_id"},
+            "_id": {"group_id": {"$ifNull": ["$group_id", "$asset_id"]}, "category_id": "$category_id"},
             "count": {"$sum": 1},
             "good": {"$sum": {"$cond": [{"$eq": ["$latest_condition", "good"]}, 1, 0]}},
             "damaged": {"$sum": {"$cond": [{"$ne": ["$latest_condition", "good"]}, 1, 0]}},
@@ -568,7 +568,7 @@ def list_detected_assets(route_id: Optional[int] = None) -> str:
     for r in results:
         cid = r["_id"]["category_id"]
         by_category.setdefault(cid, []).append({
-            "name": _label_name(r["_id"]["asset_id"]),
+            "name": _label_name(r["_id"]["group_id"]),
             "good": r["good"],
             "damaged": r["damaged"],
             "total": r["count"],

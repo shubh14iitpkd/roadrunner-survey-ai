@@ -481,7 +481,7 @@ def get_master_assets():
 				"mark_good_history": 0, # legacy field, replaced by asset_condition_logs
 			}
 		},
-		{ "$limit": 100 } # TODO remove in prod
+		# { "$limit": 100 } # TODO remove in prod
 	]
 	all_assets = list(db.master_assets.aggregate(pipeline))
 

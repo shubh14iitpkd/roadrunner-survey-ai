@@ -238,6 +238,7 @@ def top_asset_types():
 
 		items.append({
 			"asset_id": aid,
+			"group_id": d.get("_id", aid),
 			"type": atype,
 			"category_id": category_id_val,
 			"display_name": display_name,
