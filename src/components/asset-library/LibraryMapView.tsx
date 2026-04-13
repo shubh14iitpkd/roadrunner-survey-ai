@@ -132,7 +132,9 @@ function FitBounds({ assets }: { assets: AssetRecord[] }) {
   const fitted = useRef(false);
 
   useEffect(() => {
-    if (assets.length === 0) return;
+    // Only fit bounds once (initial data load). Filter changes should NOT
+    // re-zoom the map — users expect the viewport to stay put while filtering.
+    if (fitted.current || assets.length === 0) return;
     const bounds = L.latLngBounds(
       assets.map((a) => [a.lat, a.lng] as [number, number])
     );
@@ -154,13 +156,18 @@ function FlyToSelected({
   selectedId: string | null;
 }) {
   const map = useMap();
+  const prevId = useRef(selectedId);
 
   useEffect(() => {
+    // Only fly when the user actually selects a different asset.
+    // Ignore re-runs caused by assets array changing (filter/search).
+    if (selectedId === prevId.current) return;
+    prevId.current = selectedId;
     if (!selectedId) return;
     const asset = assets.find((a) => a.assetDisplayId === selectedId);
     if (!asset) return;
-    map.flyTo([asset.lat, asset.lng], Math.max(map.getZoom(), 16), {
-      duration: 0.6,
+    map.setView([asset.lat, asset.lng], Math.max(map.getZoom(), 16), {
+      animate: false,
     });
   }, [selectedId, assets, map]);
 
@@ -334,6 +341,7 @@ export default function LibraryMapView({
       style={{ minHeight: 200 }}
       zoomControl={true}
       scrollWheelZoom={true}
+      preferCanvas={true}
     >
       <TileLayer
         attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
@@ -344,7 +352,7 @@ export default function LibraryMapView({
       <FlyToSelected assets={assets} selectedId={selectedId} />
 
       {/* ── Polyline groups (Road Marking Line) ──────────── */}
-      {polylineGroups.map((group) => (
+      {/* {polylineGroups.map((group) => (
         <PolylineGroup
           key={group.key}
           routeKey={group.key}
@@ -353,7 +361,7 @@ export default function LibraryMapView({
           selectedId={selectedId}
           onSelect={onSelect}
         />
-      ))}
+      ))} */}
 
       {/* ── Regular marker assets ────────────────────────── */}
       {markerAssets.map((asset) => {

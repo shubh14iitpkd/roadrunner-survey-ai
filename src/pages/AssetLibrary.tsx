@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useCallback } from "react";
+import { useState, useMemo, useEffect, useCallback, useRef, useDeferredValue } from "react";
 import { useSearchParams, Link } from "react-router-dom";
 import LibraryMapView from "@/components/asset-library/LibraryMapView";
 import FrameComparisonPopup from "@/components/FrameComparisonPopup";
@@ -126,6 +126,9 @@ export default function AssetLibrary() {
   const [conditionLogs, setConditionLogs] = useState<any[]>([]);
   const [loadError, setLoadError] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  // Defer the search value so each keystroke doesn't trigger expensive
+  // filter recomputation + map re-render of 1000+ markers.
+  const deferredSearchQuery = useDeferredValue(searchQuery);
   const { data: labelMapData } = useLabelMap();
 
   const [roads, setRoads] = useState<{ route_id: number; name: string; side?: string }[]>([]);
@@ -153,6 +156,12 @@ export default function AssetLibrary() {
   const [fullViewLoading, setFullViewLoading] = useState(false);
 
   const [assets, setAssets] = useState<AssetRecord[]>([]);
+  // Cache detail responses keyed by masterDisplayId so repeated clicks are instant
+  const detailCacheRef = useRef<Record<string, Partial<AssetRecord>>>({});
+
+  // ── Map transition loading state ──
+  const [mapTransitioning, setMapTransitioning] = useState(false);
+  const mapTransitionTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ── Mark condition state ──
   const [markingSaving, setMarkingSaving] = useState<Set<string>>(new Set());
@@ -163,6 +172,27 @@ export default function AssetLibrary() {
     videoId: selectedAsset?.videoId,
     frameNumber: selectedAsset?.frameNumber,
   });
+
+  // Track which asset's image has actually finished loading.
+  // Must be state (not a ref) so it triggers a re-render when updated.
+  // Must be in an effect (not the render body) so it runs AFTER useFrameImage
+  // has had a chance to process the new videoId/frameNumber — otherwise stale
+  // imageUrl from the previous asset causes an immediate false-positive.
+  const [loadedForAssetId, setLoadedForAssetId] = useState<string | null>(null);
+  useEffect(() => {
+    if (!imageLoading && selectedAsset) {
+      if (imageUrl || !selectedAsset.videoId) {
+        setLoadedForAssetId(selectedAsset.id);
+      }
+    }
+  }, [imageLoading, imageUrl, selectedAsset]);
+
+  // True when we're waiting for the new point's image — covers both the
+  // useFrameImage loading state AND the 1-frame gap before it kicks in.
+  // Assets without a videoId skip the loading state entirely.
+  const pointImageLoading = selectedAsset != null
+    && !!selectedAsset.videoId
+    && (imageLoading || loadedForAssetId !== selectedAsset.id);
 
   const getCategoryDisplayName = useCallback((categoryId: string) => {
     if (!categoryId) return 'Unknown';
@@ -176,6 +206,14 @@ export default function AssetLibrary() {
     if (label) return label.group_id || label.display_name;
     return asset.asset_type || asset.type || 'Unknown';
   }, [labelMapData]);
+
+  // Store label-map callbacks in refs so loadData has a stable identity.
+  // Without this, every labelMapData change → new callback refs → new loadData
+  // ref → useEffect fires → full data refetch even though only display names changed.
+  const getCategoryNameRef = useRef(getCategoryDisplayName);
+  getCategoryNameRef.current = getCategoryDisplayName;
+  const getAssetNameRef = useRef(getAssetDisplayName);
+  getAssetNameRef.current = getAssetDisplayName;
 
   // ── Data loading ──
   const loadData = useCallback(async () => {
@@ -197,8 +235,8 @@ export default function AssetLibrary() {
           const lng = coords[0] || 0;
           const lat = coords[1] || 0;
           const categoryId = asset.category_id || '';
-          const categoryName = getCategoryDisplayName(categoryId);
-          const assetTypeName = getAssetDisplayName(asset);
+          const categoryName = getCategoryNameRef.current(categoryId);
+          const assetTypeName = getAssetNameRef.current(asset);
           const condition: string = asset.condition || asset.latest_condition || 'unknown';
 
           const mongoId = asset._id
@@ -207,14 +245,14 @@ export default function AssetLibrary() {
               : String(asset._id))
             : `AST-${idx}`;
 
-          // Extract latest survey_history entry for video/frame/box
-          const history: any[] = asset.survey_history || [];
-          const latestEntry = history.length > 0 ? history[history.length - 1] : null;
-
-          const rawVideoId = latestEntry?.video_id
-            ? (typeof latestEntry.video_id === 'object' && (latestEntry.video_id as any)?.$oid
-              ? (latestEntry.video_id as any).$oid
-              : latestEntry.video_id)
+          // survey_history is stripped from the slim list response to reduce payload.
+          // video_id/frame_number/box are promoted to latest_* top-level fields by the
+          // aggregation pipeline. Full survey_history is loaded on-demand when an asset
+          // is selected (see fetchAndMergeDetail).
+          const rawVideoId = asset.latest_video_id
+            ? (typeof asset.latest_video_id === 'object' && (asset.latest_video_id as any)?.$oid
+              ? (asset.latest_video_id as any).$oid
+              : String(asset.latest_video_id))
             : undefined;
 
           const surveyId = asset.latest_survey_id
@@ -230,25 +268,6 @@ export default function AssetLibrary() {
               : asset.last_seen_date)
             : asset.created_at?.split?.('T')?.[0] || '—';
 
-          // Map survey_history for the timeline
-          const surveyHistory = history.map((h: any) => ({
-            survey_display_id: h.survey_display_id,
-            survey_date: h.survey_date,
-            condition: h.condition,
-            confidence: h.confidence,
-            asset_display_id: h.asset_display_id,
-            match_confidence: h.match_confidence,
-            location: h.location,
-            video_id: h.video_id
-              ? (typeof h.video_id === 'object' && (h.video_id as any)?.$oid
-                ? (h.video_id as any).$oid
-                : String(h.video_id))
-              : undefined,
-            frame_number: h.frame_number,
-            box: h.box,
-            created_at: h.created_at,
-          }));
-
           return {
             id: mongoId,
             anomalyId: mongoId,
@@ -258,7 +277,7 @@ export default function AssetLibrary() {
             assetCategory: categoryName,
             assetDisplayId: asset.master_display_id || '',
             masterDisplayId: asset.master_display_id || '',
-            defectId: latestEntry?.defect_id ?? `DEF-${String(idx).padStart(6, '0')}`,
+            defectId: asset.latest_defect_id ?? `DEF-${String(idx).padStart(6, '0')}`,
             condition,
             markerColor: conditionToColor(condition),
             lat,
@@ -275,15 +294,15 @@ export default function AssetLibrary() {
             description: asset.description && typeof asset.description === 'object' ? asset.description : undefined,
             severity: asset.severity || 'Low',
             videoId: rawVideoId ? String(rawVideoId) : undefined,
-            frameNumber: latestEntry?.frame_number,
-            box: latestEntry?.box ? {
-              x: latestEntry.box.x,
-              y: latestEntry.box.y,
-              width: latestEntry.box.width ?? latestEntry.box.w ?? 0,
-              height: latestEntry.box.height ?? latestEntry.box.h ?? 0,
+            frameNumber: asset.latest_frame_number,
+            box: asset.latest_box ? {
+              x: asset.latest_box.x,
+              y: asset.latest_box.y,
+              width: asset.latest_box.width ?? asset.latest_box.w ?? 0,
+              height: asset.latest_box.height ?? asset.latest_box.h ?? 0,
             } : undefined,
-            surveyHistory,
-            totalSurveysDetected: asset.total_surveys_detected ?? history.length,
+            surveyHistory: [], // loaded lazily on asset selection via fetchAndMergeDetail
+            totalSurveysDetected: asset.survey_count ?? 0,
           };
         });
         setAssets(mapped);
@@ -294,9 +313,59 @@ export default function AssetLibrary() {
     } finally {
       setLoading(false);
     }
-  }, [getCategoryDisplayName, getAssetDisplayName]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // stable — reads label-map via refs, not direct deps
 
   useEffect(() => { loadData(); }, [loadData]);
+
+  // ── Lazy detail loader ──
+  // Fetches survey_history + full description/issue for one selected asset.
+  // Results are cached in detailCacheRef so repeated clicks are instant.
+  const fetchAndMergeDetail = useCallback(async (asset: AssetRecord) => {
+    if (!asset.masterDisplayId) return;
+    const cached = detailCacheRef.current[asset.masterDisplayId];
+    if (cached) {
+      setSelectedAsset(prev =>
+        prev?.masterDisplayId === asset.masterDisplayId ? { ...prev, ...cached } : prev
+      );
+      return;
+    }
+    try {
+      const resp = await api.assets.getMasterByDisplayId(asset.masterDisplayId);
+      if (resp?.item) {
+        const raw = resp.item;
+        const history: any[] = raw.survey_history || [];
+        const detail: Partial<AssetRecord> = {
+          surveyHistory: history.map((h: any) => ({
+            survey_display_id: h.survey_display_id,
+            survey_date: h.survey_date,
+            condition: h.condition,
+            confidence: h.confidence,
+            asset_display_id: h.asset_display_id,
+            match_confidence: h.match_confidence,
+            location: h.location,
+            video_id: h.video_id
+              ? (typeof h.video_id === 'object' && (h.video_id as any)?.$oid
+                ? (h.video_id as any).$oid
+                : String(h.video_id))
+              : undefined,
+            frame_number: h.frame_number,
+            box: h.box,
+            created_at: h.created_at,
+          })),
+          totalSurveysDetected: raw.total_surveys_detected ?? history.length,
+          issue: raw.issue || '',
+          ...(raw.description && typeof raw.description === 'object' ? { description: raw.description } : {}),
+        };
+        detailCacheRef.current[asset.masterDisplayId] = detail;
+        setSelectedAsset(prev =>
+          prev?.masterDisplayId === asset.masterDisplayId ? { ...prev, ...detail } : prev
+        );
+      }
+    } catch {
+      // silently ignore — user still sees slim data (type, location, condition, road)
+    }
+  }, []);
 
   useEffect(() => {
     const typeParam = searchParams.get("type");
@@ -314,7 +383,7 @@ export default function AssetLibrary() {
 
   // ── Filtering ──
   const filteredAssets = useMemo(() => {
-    const q = searchQuery.toLowerCase().trim();
+    const q = deferredSearchQuery.toLowerCase().trim();
     return assets.filter((a) => {
       if (categoryFilter !== "all" && a.assetCategory !== categoryFilter) return false;
       if (conditionFilter !== "all" && a.condition !== conditionFilter) return false;
@@ -331,7 +400,7 @@ export default function AssetLibrary() {
       )) return false;
       return true;
     });
-  }, [assets, conditionFilter, categoryFilter, selectedAssetType, directionFilter, zoneFilter, selectedRouteId, searchQuery]);
+  }, [assets, conditionFilter, categoryFilter, selectedAssetType, directionFilter, zoneFilter, selectedRouteId, deferredSearchQuery]);
 
   // ── Sorting filtered assets ──
   const sortedAndFilteredAssets = useMemo(() => {
@@ -358,17 +427,24 @@ export default function AssetLibrary() {
     if (idx === -1) return;
     const nextIdx = direction === 'prev' ? idx - 1 : idx + 1;
     if (nextIdx >= 0 && nextIdx < sortedAndFilteredAssets.length) {
-      setSelectedAsset(sortedAndFilteredAssets[nextIdx]);
+      const nextAsset = sortedAndFilteredAssets[nextIdx];
+      setSelectedAsset(nextAsset);
       setSelectedSurveyIdx(0);
       setMarkerPopup(null);
+      fetchAndMergeDetail(nextAsset);
     }
-  }, [selectedAsset, sortedAndFilteredAssets]);
+  }, [selectedAsset, sortedAndFilteredAssets, fetchAndMergeDetail]);
 
   const handleRowClick = useCallback((asset: AssetRecord) => {
     setSelectedAsset(asset);
     setSelectedSurveyIdx(0);
     setMarkerPopup(null);
-  }, []);
+    fetchAndMergeDetail(asset);
+    // Show blur overlay while map repositions
+    setMapTransitioning(true);
+    if (mapTransitionTimer.current) clearTimeout(mapTransitionTimer.current);
+    mapTransitionTimer.current = setTimeout(() => setMapTransitioning(false), 400);
+  }, [fetchAndMergeDetail]);
 
   const [exporting, setExporting] = useState(false);
   const handleExportExcel = async () => {
@@ -446,13 +522,16 @@ export default function AssetLibrary() {
     try {
       await api.assets.markAsGood(mongoId, { name: surveyorName, user_id: surveyorId, survey_id: asset.surveyId });
       toast.success(`Asset ${asset.assetDisplayId} marked as good`);
-      loadData();
+      setAssets(prev => prev.map(a => a.id === mongoId ? { ...a, condition: "good", markerColor: conditionToColor("good") } : a));
+      setSelectedAsset(prev => prev?.id === mongoId ? { ...prev, condition: "good", markerColor: conditionToColor("good") } : prev);
+      // Invalidate cached detail so condition logs are fresh on next Full View open
+      if (asset.masterDisplayId) delete detailCacheRef.current[asset.masterDisplayId];
     } catch (err: any) {
       toast.error(err?.message || "Failed to mark asset as good");
     } finally {
       setMarkingSaving((prev) => { const s = new Set(prev); s.delete(assetKey); return s; });
     }
-  }, [confirmMarkGoodAsset, user, loadData]);
+  }, [confirmMarkGoodAsset, user]);
 
   // ── Mark as Defective (good → defective) ──
   const handleMarkDefective = useCallback((asset: AssetRecord) => {
@@ -479,13 +558,16 @@ export default function AssetLibrary() {
     try {
       await api.assets.unmarkGood(mongoId, { name: surveyorName, user_id: surveyorId, survey_id: surveyId });
       toast.success(`Asset ${asset.assetDisplayId} marked as defective`);
-      loadData();
+      setAssets(prev => prev.map(a => a.id === mongoId ? { ...a, condition: "damaged", markerColor: conditionToColor("damaged") } : a));
+      setSelectedAsset(prev => prev?.id === mongoId ? { ...prev, condition: "damaged", markerColor: conditionToColor("damaged") } : prev);
+      // Invalidate cached detail so condition logs are fresh on next Full View open
+      if (asset.masterDisplayId) delete detailCacheRef.current[asset.masterDisplayId];
     } catch (err: any) {
       toast.error(err?.message || "Failed to mark asset as defective");
     } finally {
       setMarkingSaving((prev) => { const s = new Set(prev); s.delete(assetKey); return s; });
     }
-  }, [confirmMarkDefectiveAsset, user, loadData]);
+  }, [confirmMarkDefectiveAsset, user]);
 
   const assetColumns = useMemo(
     () => buildAssetColumns(markingSaving, handleMarkGood, handleMarkDefective),
@@ -495,6 +577,7 @@ export default function AssetLibrary() {
   const handleAssetTypeSelect = useCallback((assetType: string)=> {
     console.log(labelMapData)
     const assetGroup = Object.values(labelMapData?.labels || {}).find((label) => label.group_id === assetType);
+    
     setAttributes(assetGroup?.attributes || {})
     console.log(assetGroup)
     setSelectedAssetType(assetType)
@@ -603,15 +686,26 @@ export default function AssetLibrary() {
             selectedId={selectedAsset?.assetDisplayId ?? null}
             onSelect={handleRowClick}
           />
+          {/* Loading overlay — shown during initial data fetch, map transition, or while a selected point's image loads */}
+          {(loading || mapTransitioning || pointImageLoading) && (
+            <div className="absolute inset-0 bg-background/30 backdrop-blur-[2px] z-[1000] flex items-center justify-center transition-opacity duration-200">
+              <div className="flex flex-col items-center gap-2 bg-background/80 rounded-xl px-5 py-3 shadow-lg">
+                <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                <span className="text-[10px] text-muted-foreground font-medium">
+                  {loading ? "Loading assets…" : "Loading asset…"}
+                </span>
+              </div>
+            </div>
+          )}
         </div>
 
         <AssetDetailSidebar
           markerPopup={markerPopup}
           selectedAsset={selectedAsset}
-          imageUrl={imageUrl}
+          imageUrl={pointImageLoading ? null : imageUrl}
           frameWidth={frameWidth}
           frameHeight={frameHeight}
-          imageLoading={imageLoading}
+          imageLoading={pointImageLoading}
           filteredAssets={sortedAndFilteredAssets}
           onCloseAsset={() => setSelectedAsset(null)}
           getAssetDisplayName={getAssetDisplayName}
@@ -701,6 +795,7 @@ export default function AssetLibrary() {
               ? Object.entries(selectedAsset.description).filter(([k]) => !DESCRIPTION_KEY_FILTER.has(k))
               : [];
             if (!issue && filteredDesc.length === 0) return null;
+            // console.log("Asset Description:", selectedAsset.description);
             return (
               <div className="px-5 pt-4 pb-2 space-y-3">
                 {/* {issue && (

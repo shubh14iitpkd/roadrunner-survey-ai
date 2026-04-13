@@ -118,3 +118,17 @@ def init_app_db(app: Flask) -> None:
 	db["master_assets"].create_index([("asset_type", ASCENDING)], name="idx_master_asset_type")
 	db["master_assets"].create_index([("route_id", ASCENDING)], name="idx_master_route")
 	db["master_assets"].create_index([("master_display_id", ASCENDING)], unique=True, sparse=True, name="uniq_master_display_id")
+	db["master_assets"].create_index([("latest_condition", ASCENDING)], name="idx_master_condition")
+	db["master_assets"].create_index([("category_id", ASCENDING)], name="idx_master_category")
+	db["master_assets"].create_index([("route_id", ASCENDING), ("latest_condition", ASCENDING)], name="idx_master_route_condition")
+
+	# Assets — additional sort and linkage indexes
+	db["assets"].create_index([("detected_at", DESCENDING)], name="idx_assets_detected")
+	db["assets"].create_index([("created_at", DESCENDING)], name="idx_assets_created")
+	db["assets"].create_index([("master_asset_id", ASCENDING), ("survey_id", ASCENDING)], name="idx_assets_master_survey")
+
+	# Surveys — compound index for N+1-free latest-survey lookups
+	db["surveys"].create_index([("route_id", ASCENDING), ("is_latest", ASCENDING)], name="idx_surveys_route_latest")
+
+	# Dashboard cache — TTL expiry for auto-purging stale cache entries
+	db["dashboard_cache"].create_index([("cached_at", ASCENDING)], expireAfterSeconds=300, name="ttl_cache_expiry")

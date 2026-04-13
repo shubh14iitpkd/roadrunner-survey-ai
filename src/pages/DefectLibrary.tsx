@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useCallback, useRef } from "react";
+import { useState, useMemo, useEffect, useCallback, useRef, useDeferredValue } from "react";
 import { createPortal } from "react-dom";
 import { useSearchParams, Link } from "react-router-dom";
 import LibraryMapView from "@/components/asset-library/LibraryMapView";
@@ -201,6 +201,7 @@ export default function DefectLibrary() {
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const deferredSearchQuery = useDeferredValue(searchQuery);
   const [markedGoodCount, setMarkingGoodCount] = useState(0);
   const { data: labelMapData } = useLabelMap();
 
@@ -242,11 +243,30 @@ export default function DefectLibrary() {
   const [editIssueValue, setEditIssueValue] = useState("");
   const [editIssueSaving, setEditIssueSaving] = useState(false);
 
+  // ── Map transition loading state ──
+  const [mapTransitioning, setMapTransitioning] = useState(false);
+  const mapTransitionTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // ── Cached frame image via hook ──
   const { imageUrl, frameWidth, frameHeight, loading: imageLoading } = useFrameImage({
     videoId: selectedDefect?.videoId,
     frameNumber: selectedDefect?.frameNumber,
   });
+
+  // Track which defect's image has actually finished loading.
+  const [loadedForAssetId, setLoadedForAssetId] = useState<string | null>(null);
+  useEffect(() => {
+    if (!imageLoading && selectedDefect) {
+      if (imageUrl || !selectedDefect.videoId) {
+        setLoadedForAssetId(selectedDefect.id);
+      }
+    }
+  }, [imageLoading, imageUrl, selectedDefect]);
+
+  // True when we're waiting for the new point's image
+  const pointImageLoading = selectedDefect != null
+    && !!selectedDefect.videoId
+    && (imageLoading || loadedForAssetId !== selectedDefect.id);
 
   // ── Helpers using labelMap ──
   const getCategoryDisplayName = useCallback((categoryId: string) => {
@@ -264,6 +284,14 @@ export default function DefectLibrary() {
     return asset.asset_type || asset.type || 'Unknown';
   }, [labelMapData]);
 
+  // Store label-map callbacks in refs so loadData has a stable identity.
+  const getCategoryNameRef = useRef(getCategoryDisplayName);
+  getCategoryNameRef.current = getCategoryDisplayName;
+  const getAssetNameRef = useRef(getAssetDisplayName);
+  getAssetNameRef.current = getAssetDisplayName;
+
+  // Cache detail responses keyed by masterDisplayId so repeated clicks are instant
+  const detailCacheRef = useRef<Record<string, Partial<AssetRecord>>>({});
 
   // ── Data loading ──
   const loadData = useCallback(async () => {
@@ -282,21 +310,21 @@ export default function DefectLibrary() {
           const lng = coords[0] || 0;
           const lat = coords[1] || 0;
           const categoryId = asset.category_id || '';
-          const categoryName = getCategoryDisplayName(categoryId);
-          const assetTypeName = getAssetDisplayName(asset);
+          const categoryName = getCategoryNameRef.current(categoryId);
+          const assetTypeName = getAssetNameRef.current(asset);
 
           const mongoId = asset._id
             ? (typeof asset._id === 'object' && (asset._id as any)?.$oid ? (asset._id as any).$oid : String(asset._id))
             : `AST-${idx}`;
 
-          // Extract latest survey_history entry for video/frame/box
-          const history: any[] = asset.survey_history || [];
-          const latestEntry = history.length > 0 ? history[history.length - 1] : null;
-
-          const rawVideoId = latestEntry?.video_id
-            ? (typeof latestEntry.video_id === 'object' && (latestEntry.video_id as any)?.$oid
-              ? (latestEntry.video_id as any).$oid
-              : latestEntry.video_id)
+          // survey_history is stripped from the slim list response to reduce payload.
+          // video_id/frame_number/box are promoted to latest_* top-level fields by the
+          // aggregation pipeline. Full survey_history is loaded on-demand when an asset
+          // is selected (see fetchAndMergeDetail).
+          const rawVideoId = asset.latest_video_id
+            ? (typeof asset.latest_video_id === 'object' && (asset.latest_video_id as any)?.$oid
+              ? (asset.latest_video_id as any).$oid
+              : String(asset.latest_video_id))
             : undefined;
 
           const surveyId = asset.latest_survey_id
@@ -312,8 +340,75 @@ export default function DefectLibrary() {
               : asset.last_seen_date)
             : asset.created_at?.split?.('T')?.[0] || '—';
 
-          // Map survey_history for the timeline
-          const surveyHistory = history.map((h: any) => ({
+          const condition = asset.condition || asset.latest_condition || 'defective';
+          return {
+            id: mongoId,
+            defectId: asset.latest_defect_id ?? `DEF-${String(idx).padStart(6, '0')}`,
+            assetId: asset.asset_id || '',
+            assetDisplayId: asset.master_display_id || '',
+            masterDisplayId: asset.master_display_id || '',
+            category_id: categoryId,
+            assetType: assetTypeName,
+            assetCategory: categoryName,
+            condition,
+            markerColor: '#ef4444',
+            lat,
+            lng,
+            surveyId,
+            roadName: asset.route_name || '',
+            roadSide: asset.road_side || undefined,
+            routeId: asset.route_id != null ? Number(asset.route_id) : undefined,
+            groupId: asset.group_id ?? undefined,
+            side: asset.side || 'Unknown',
+            zone: asset.zone || 'Unknown',
+            lastSurveyDate: lastDate,
+            issue: asset.issue ? capitalize(asset.issue) : "Defective",
+            description: asset.description && typeof asset.description === 'object' ? asset.description : undefined,
+            severity: asset.severity || (idx % 3 === 0 ? 'High' : idx % 3 === 1 ? 'Medium' : 'Low'),
+            videoId: rawVideoId ? String(rawVideoId) : undefined,
+            frameNumber: asset.latest_frame_number,
+            box: asset.latest_box ? {
+              x: asset.latest_box.x,
+              y: asset.latest_box.y,
+              width: asset.latest_box.width ?? asset.latest_box.w ?? 0,
+              height: asset.latest_box.height ?? asset.latest_box.h ?? 0,
+            } : undefined,
+            surveyHistory: [], // loaded lazily on defect selection via fetchAndMergeDetail
+            totalSurveysDetected: asset.survey_count ?? 0,
+          };
+        });
+        setDefects(mapped);
+      }
+    } catch (err: any) {
+      console.error("Failed to load data:", err);
+      setLoadError(true);
+    } finally {
+      setLoading(false);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // stable — reads label-map via refs, not direct deps
+
+  useEffect(() => { loadData(); }, [loadData]);
+
+  // ── Lazy detail loader ──
+  // Fetches survey_history + full description/issue for one selected defect.
+  // Results are cached in detailCacheRef so repeated clicks are instant.
+  const fetchAndMergeDetail = useCallback(async (asset: AssetRecord) => {
+    if (!asset.masterDisplayId) return;
+    const cached = detailCacheRef.current[asset.masterDisplayId];
+    if (cached) {
+      setSelectedDefect(prev =>
+        prev?.masterDisplayId === asset.masterDisplayId ? { ...prev, ...cached } : prev
+      );
+      return;
+    }
+    try {
+      const resp = await api.assets.getMasterByDisplayId(asset.masterDisplayId);
+      if (resp?.item) {
+        const raw = resp.item;
+        const history: any[] = raw.survey_history || [];
+        const detail: Partial<AssetRecord> = {
+          surveyHistory: history.map((h: any) => ({
             survey_display_id: h.survey_display_id,
             survey_date: h.survey_date,
             condition: h.condition,
@@ -329,55 +424,20 @@ export default function DefectLibrary() {
             frame_number: h.frame_number,
             box: h.box,
             created_at: h.created_at,
-          }));
-
-          const condition = asset.condition || asset.latest_condition || 'defective';
-          return {
-            id: mongoId,
-            defectId: latestEntry?.defect_id ?? `DEF-${String(idx).padStart(6, '0')}`,
-            assetId: asset.asset_id || '',
-            assetDisplayId: asset.master_display_id || '',
-            masterDisplayId: asset.master_display_id || '',
-            category_id: categoryId,
-            assetType: assetTypeName,
-            assetCategory: categoryName,
-            condition,
-            markerColor: '#ef4444',
-            lat,
-            lng,
-            surveyId,
-            roadName: asset.route_name || '',
-            roadSide: asset.road_side || undefined,
-            routeId: asset.route_id != null ? Number(asset.route_id) : undefined,
-            side: asset.side || 'Unknown',
-            zone: asset.zone || 'Unknown',
-            lastSurveyDate: lastDate,
-            issue: asset.issue ? capitalize(asset.issue) : "Defective",
-            description: asset.description && typeof asset.description === 'object' ? asset.description : undefined,
-            severity: asset.severity || (idx % 3 === 0 ? 'High' : idx % 3 === 1 ? 'Medium' : 'Low'),
-            videoId: rawVideoId ? String(rawVideoId) : undefined,
-            frameNumber: latestEntry?.frame_number,
-            box: latestEntry?.box ? {
-              x: latestEntry.box.x,
-              y: latestEntry.box.y,
-              width: latestEntry.box.width ?? latestEntry.box.w ?? 0,
-              height: latestEntry.box.height ?? latestEntry.box.h ?? 0,
-            } : undefined,
-            surveyHistory,
-            totalSurveysDetected: asset.total_surveys_detected ?? history.length,
-          };
-        });
-        setDefects(mapped);
+          })),
+          totalSurveysDetected: raw.total_surveys_detected ?? history.length,
+          issue: raw.issue ? capitalize(raw.issue) : asset.issue || 'Defective',
+          ...(raw.description && typeof raw.description === 'object' ? { description: raw.description } : {}),
+        };
+        detailCacheRef.current[asset.masterDisplayId] = detail;
+        setSelectedDefect(prev =>
+          prev?.masterDisplayId === asset.masterDisplayId ? { ...prev, ...detail } : prev
+        );
       }
-    } catch (err: any) {
-      console.error("Failed to load data:", err);
-      setLoadError(true);
-    } finally {
-      setLoading(false);
+    } catch {
+      // silently ignore — user still sees slim data
     }
-  }, [getCategoryDisplayName, getAssetDisplayName]);
-
-  useEffect(() => { loadData(); }, [loadData]);
+  }, []);
 
   useEffect(() => {
     const typeParam = searchParams.get("type");
@@ -390,7 +450,7 @@ export default function DefectLibrary() {
 
   // ── Filtering ──
   const filteredDefects = useMemo(() => {
-    const q = searchQuery.toLowerCase().trim();
+    const q = deferredSearchQuery.toLowerCase().trim();
     const fil = defects.filter((a) => {
       if (categoryFilter !== "all" && a.assetCategory !== categoryFilter) return false;
       if (directionFilter !== "all" && a.side !== directionFilter) return false;
@@ -408,7 +468,7 @@ export default function DefectLibrary() {
     });
 
     return fil;
-  }, [defects, categoryFilter, selectedAssetType, directionFilter, zoneFilter, selectedRouteId, searchQuery]);
+  }, [defects, categoryFilter, selectedAssetType, directionFilter, zoneFilter, selectedRouteId, deferredSearchQuery]);
 
   // ── Sorting filtered defects ──
   const sortedAndFilteredDefects = useMemo(() => {
@@ -436,20 +496,24 @@ export default function DefectLibrary() {
     if (idx === -1) return;
     const nextIdx = direction === 'prev' ? idx - 1 : idx + 1;
     if (nextIdx >= 0 && nextIdx < sortedAndFilteredDefects.length) {
-      setSelectedDefect(sortedAndFilteredDefects[nextIdx]);
+      const nextDefect = sortedAndFilteredDefects[nextIdx];
+      setSelectedDefect(nextDefect);
       setSelectedSurveyIdx(0);
       setMarkerPopup(null);
+      fetchAndMergeDetail(nextDefect);
     }
-  }, [selectedDefect, sortedAndFilteredDefects]);
-
-
+  }, [selectedDefect, sortedAndFilteredDefects, fetchAndMergeDetail]);
 
   const handleRowClick = useCallback((defect: AssetRecord) => {
-    console.log(defect)
     setSelectedDefect(defect);
     setSelectedSurveyIdx(0);
     setMarkerPopup(null);
-  }, []);
+    fetchAndMergeDetail(defect);
+    // Show blur overlay while map repositions
+    setMapTransitioning(true);
+    if (mapTransitionTimer.current) clearTimeout(mapTransitionTimer.current);
+    mapTransitionTimer.current = setTimeout(() => setMapTransitioning(false), 400);
+  }, [fetchAndMergeDetail]);
 
   const handleMarkGood = useCallback((asset: AssetRecord) => {
     if (user.role === "Viewer") {
@@ -481,6 +545,8 @@ export default function DefectLibrary() {
       setGoodSet((prev) => new Set(prev).add(assetKey));
       setMarkingGoodCount((prev) => prev + 1);
       toast.success(`Asset ${asset.assetDisplayId} marked as good`);
+      // Invalidate cached detail so condition logs are fresh on next Full View open
+      if (asset.masterDisplayId) delete detailCacheRef.current[asset.masterDisplayId];
     } catch (err: any) {
       toast.error(err?.message || "Failed to mark asset as good");
     } finally {
@@ -504,6 +570,8 @@ export default function DefectLibrary() {
       setGoodSet((prev) => { const s = new Set(prev); s.delete(assetKey); return s; });
       setMarkingGoodCount((prev) => prev - 1);
       toast.success(`Asset ${asset.assetDisplayId} reverted to defective`);
+      // Invalidate cached detail so condition logs are fresh on next Full View open
+      if (asset.masterDisplayId) delete detailCacheRef.current[asset.masterDisplayId];
     } catch (err: any) {
       toast.error(err?.message || "Failed to revert asset");
     } finally {
@@ -564,6 +632,11 @@ export default function DefectLibrary() {
       setEditIssueSaving(false);
     }
   }, [editIssueAsset, editIssueValue, selectedDefect]);
+
+  const defectColumns = useMemo(
+    () => buildDefectColumns(goodSet, markingGood, handleMarkGood, handleUnmarkGood, handleOpenEditIssue),
+    [goodSet, markingGood, handleMarkGood, handleUnmarkGood, handleOpenEditIssue]
+  );
 
   const [exporting, setExporting] = useState(false);
   const handleExportExcel = async () => {
@@ -713,15 +786,26 @@ export default function DefectLibrary() {
             selectedId={selectedDefect?.assetDisplayId ?? null}
             onSelect={handleRowClick}
           />
+          {/* Loading overlay — shown during initial data fetch, map transition, or while a selected point's image loads */}
+          {(loading || mapTransitioning || pointImageLoading) && (
+            <div className="absolute inset-0 bg-background/30 backdrop-blur-[2px] z-[1000] flex items-center justify-center transition-opacity duration-200">
+              <div className="flex flex-col items-center gap-2 bg-background/80 rounded-xl px-5 py-3 shadow-lg">
+                <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                <span className="text-[10px] text-muted-foreground font-medium">
+                  {loading ? "Loading defects…" : "Loading defect…"}
+                </span>
+              </div>
+            </div>
+          )}
         </div>
 
         <AssetDetailSidebar
           markerPopup={markerPopup}
           selectedAsset={selectedDefect}
-          imageUrl={imageUrl}
+          imageUrl={pointImageLoading ? null : imageUrl}
           frameWidth={frameWidth}
           frameHeight={frameHeight}
-          imageLoading={imageLoading}
+          imageLoading={pointImageLoading}
           filteredAssets={sortedAndFilteredDefects}
           onCloseAsset={() => setSelectedDefect(null)}
           getAssetDisplayName={getAssetDisplayName}
@@ -1102,7 +1186,7 @@ export default function DefectLibrary() {
         onRetry={loadData}
         idField="assetDisplayId"
         onClearFilters={clearFilters}
-        columns={buildDefectColumns(goodSet, markingGood, handleMarkGood, handleUnmarkGood, handleOpenEditIssue)}
+        columns={defectColumns}
         sortKey={sortKey}
         sortDir={sortDir}
         onSort={(colKey: string) => {

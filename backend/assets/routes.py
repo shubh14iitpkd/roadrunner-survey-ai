@@ -381,7 +381,10 @@ def get_master_assets():
 	if road_side:
 		query["side"] = road_side
 
-	# Lookup route names, exclude heavy fields (embedding, full survey_history)
+	# Slim list pipeline: excludes survey_history (large array), embedding, and other heavy
+	# fields to minimize payload. video_id/frame_number/box are promoted from the latest
+	# asset record so the map and image-preview still work without the full history.
+	# The full survey_history is fetched on-demand via GET /api/assets/master/<id>.
 	pipeline = [
 		{"$match": query},
 		{
@@ -392,19 +395,8 @@ def get_master_assets():
 				"as": "road_info"
 			}
 		},
-		# Fetch created_at for every survey referenced in survey_history
-		{
-			"$lookup": {
-				"from": "surveys",
-				"let": {"survey_ids": "$survey_history.survey_id"},
-				"pipeline": [
-					{"$match": {"$expr": {"$in": ["$_id", "$$survey_ids"]}}},
-					{"$project": {"_id": 1, "created_at": 1}},
-				],
-				"as": "survey_dates"
-			}
-		},
-		# Fetch description + issue from the latest per-survey asset record
+		# Fetch description, issue, and image-preview fields from the latest asset record.
+		# Uses idx_assets_master_survey compound index for fast lookup.
 		{
 			"$lookup": {
 				"from": "assets",
@@ -420,7 +412,7 @@ def get_master_assets():
 							}
 						}
 					},
-					{"$project": {"description": 1, "issue": 1}},
+					{"$project": {"description": 1, "issue": 1, "frame_number": 1, "video_id": 1, "box": 1, "defect_id": 1}},
 					{"$limit": 1},
 				],
 				"as": "latest_asset_data"
@@ -433,55 +425,34 @@ def get_master_assets():
 				"condition": "$latest_condition",
 				"confidence": "$latest_confidence",
 				"location": "$canonical_location",
-				# description from the latest per-survey asset record
 				"description": {"$arrayElemAt": ["$latest_asset_data.description", 0]},
-				# issue: prefer the per-survey asset's value, fall back to master's
 				"issue": {
 					"$ifNull": [
 						{"$arrayElemAt": ["$latest_asset_data.issue", 0]},
 						"$issue",
 					]
 				},
-				"survey_history": {
-					"$map": {
-						"input": "$survey_history",
-						"as": "sh",
-						"in": {
-							"$mergeObjects": [
-								"$$sh",
-								{
-									"created_at": {
-										"$let": {
-											"vars": {
-												"matched": {
-													"$filter": {
-														"input": "$survey_dates",
-														"as": "sd",
-														"cond": {"$eq": ["$$sd._id", "$$sh.survey_id"]},
-													}
-												}
-											},
-											"in": {"$arrayElemAt": ["$$matched.created_at", 0]},
-										}
-									}
-								}
-							]
-						}
-					}
-				},
+				# Promote image-preview fields to top level so the sidebar renders
+				# immediately without needing the full survey_history array.
+				"latest_frame_number": {"$arrayElemAt": ["$latest_asset_data.frame_number", 0]},
+				"latest_video_id": {"$arrayElemAt": ["$latest_asset_data.video_id", 0]},
+				"latest_box": {"$arrayElemAt": ["$latest_asset_data.box", 0]},
+				"latest_defect_id": {"$arrayElemAt": ["$latest_asset_data.defect_id", 0]},
+				# survey_count replaces the full survey_history array for the list view
+				"survey_count": {"$size": "$survey_history"},
 			}
 		},
 		{
 			"$project": {
 				"road_info": 0,
-				"survey_dates": 0,
 				"latest_asset_data": 0,
 				"embedding": 0,        # no need to send 512-d vector to the browser
 				"modified_by": 0,      # legacy field, replaced by asset_condition_logs
 				"mark_good_history": 0, # legacy field, replaced by asset_condition_logs
+				"survey_history": 0,   # fetched on-demand via GET /api/assets/master/<id>
 			}
 		},
-		# { "$limit": 100 } # TODO remove in prod
+		# { "$limit": 60000 }
 	]
 	all_assets = list(db.master_assets.aggregate(pipeline))
 
@@ -964,8 +935,13 @@ def update_icon_config():
 			)
 			all_aids = list({l["asset_id"] for l in group_labels})
 
+		# Batch fetch all docs then update individually (each may have different defaults)
+		aid_docs = {
+			d["asset_id"]: d
+			for d in db.system_asset_labels.find({"asset_id": {"$in": all_aids}})
+		}
 		for aid in all_aids:
-			doc = db.system_asset_labels.find_one({"asset_id": aid})
+			doc = aid_docs.get(aid)
 			if doc:
 				dgid = doc.get("default_group_id", "")
 				reset_set = {"display_name": dgid, "group_id": dgid}
@@ -1008,11 +984,10 @@ def update_icon_config():
 	if not update_fields:
 		return jsonify({"error": "no fields to update"}), 400
 
-	for aid in asset_ids:
-		db.system_asset_labels.update_one(
-			{"asset_id": aid},
-			{"$set": update_fields}
-		)
+	db.system_asset_labels.update_many(
+		{"asset_id": {"$in": asset_ids}},
+		{"$set": update_fields}
+	)
 
 	# Propagate group_id rename if it changed
 	if "group_id" in data:
