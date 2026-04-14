@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
+import { useAuth } from "@/contexts/AuthContext";
 import { useLabelMap } from "@/contexts/LabelMapContext";
 import { getCategoryColorCode } from "@/components/CategoryBadge";
 import { useFrameImage } from "@/hooks/useFrameImage";
@@ -73,10 +74,22 @@ const CONDITION_COLORS: Record<string, string> = {
 
 function generateId() { return Math.random().toString(36).substring(2, 10); }
 
+// Map DB condition values to display values and vice-versa
+const conditionToDisplay = (c: string): string => {
+  if (c.toLowerCase() === 'damaged') return 'Defective';
+  // Capitalize first letter for other DB values (e.g. "good" → "Good")
+  return c.charAt(0).toUpperCase() + c.slice(1).toLowerCase();
+};
+const conditionToStorage = (c: string): string => {
+  if (c === 'Defective') return 'damaged';
+  return c.toLowerCase();
+};
+
 // ─── Main Component ─────────────────────────────────────────────────
 export default function QCLayer() {
   const { masterDisplayId } = useParams<{ masterDisplayId: string }>();
   const navigate = useNavigate();
+  const { user } = useAuth();
   const { data: labelMap, loading: labelMapLoading } = useLabelMap();
 
   // Master asset state
@@ -231,7 +244,8 @@ export default function QCLayer() {
     const box = latestObservation.box || masterAsset.box;
     const groupId = masterAsset.group_id || masterAsset.asset_type || "Unknown";
     const catId = masterAsset.category_id || "";
-    const condition = latestObservation.condition || masterAsset.latest_condition || "Good";
+    const rawCondition = latestObservation.condition || masterAsset.latest_condition || "Good";
+    const condition = conditionToDisplay(rawCondition);
 
     let ann: Annotation | null = null;
     if (box) {
@@ -408,12 +422,34 @@ export default function QCLayer() {
     toast.success("Annotation updated");
   };
 
-  const handleSaveAll = () => {
-    const {x, y, width, height, label} = annotation;
-    console.log("Test: ", label )
-    console.log("Saving annotation to backend:", { x, y, width, height });
-    console.log(x*frameWidth, y*frameHeight, width*frameWidth, height*frameHeight)
-    toast.success("Annotation saved");
+  const [saving, setSaving] = useState(false);
+
+  const handleSaveAll = async () => {
+    if (!annotation || !masterDisplayId || !user) return;
+    const fw = frameWidth || 2560;
+    const fh = frameHeight || 1440;
+
+    setSaving(true);
+    try {
+      await api.assets.qcUpdate(masterDisplayId, {
+        name: `${user.first_name} ${user.last_name}`.trim(),
+        user_id: user.id,
+        group_id: annotation.label,
+        category_id: annotation.category_id,
+        condition: conditionToStorage(annotation.condition),
+        box: {
+          x: annotation.x * fw,
+          y: annotation.y * fh,
+          width: annotation.width * fw,
+          height: annotation.height * fh,
+        },
+      });
+      toast.success("Annotation saved");
+    } catch {
+      toast.error("Failed to save annotation");
+    } finally {
+      setSaving(false);
+    }
   };
 
   // Zoom controls
@@ -540,8 +576,8 @@ export default function QCLayer() {
         {/* Right side: annotation count + save */}
         <div className="flex-1" />
         {annotation && (
-          <Button size="sm" className="h-8 text-xs gap-1" onClick={handleSaveAll}>
-            <Save className="h-3.5 w-3.5" /> Save
+          <Button size="sm" className="h-8 text-xs gap-1" onClick={handleSaveAll} disabled={saving}>
+            <Save className="h-3.5 w-3.5" /> {saving ? "Saving..." : "Save"}
           </Button>
         )}
       </div>

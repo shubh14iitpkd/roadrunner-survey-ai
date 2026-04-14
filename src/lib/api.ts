@@ -247,6 +247,13 @@ export const api = {
 			apiFetch(`/api/assets/${asset_id}/unmark-good`, { method: "PATCH", body: JSON.stringify(modifier || {}) }),
 		getConditionLogs: (asset_id: string) =>
 			apiFetch(`/api/assets/${asset_id}/condition-logs`),
+		qcUpdate: (masterDisplayId: string, payload: {
+			name: string; user_id: string;
+			group_id: string; category_id: string; condition: string;
+			box: { x: number; y: number; width: number; height: number };
+		}) => apiFetch(`/api/assets/master/${masterDisplayId}/qc-update`, {
+			method: "PATCH", body: JSON.stringify(payload),
+		}),
 		updateIssue: (asset_id: string, issue: string) =>
 			apiFetch(`/api/assets/${asset_id}/issue`, { method: "PATCH", body: JSON.stringify({ issue }) }),
 		getAvailableIcons: () => apiFetch("/api/assets/available-icons"),

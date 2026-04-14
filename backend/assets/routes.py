@@ -1051,6 +1051,232 @@ def get_condition_logs(asset_id: str):
 	return mongo_response({"items": logs, "count": len(logs)})
 
 
+@assets_bp.patch("/master/<master_display_id>/qc-update", endpoint="assets_qc_update")
+@role_required(["super_admin", "admin", "surveyor"])
+def qc_update_asset(master_display_id: str):
+	"""
+	Save QC layer edits for a master asset.
+	Updates the master_assets and assets collections with the edited
+	annotation data, and logs all changes to asset_condition_logs.
+	---
+	tags:
+	  - Assets
+	security:
+	  - Bearer: []
+	parameters:
+	  - name: master_display_id
+	    in: path
+	    type: string
+	    required: true
+	  - name: body
+	    in: body
+	    required: true
+	    schema:
+	      type: object
+	      required:
+	        - name
+	        - user_id
+	        - box
+	      properties:
+	        name:
+	          type: string
+	        user_id:
+	          type: string
+	        group_id:
+	          type: string
+	        category_id:
+	          type: string
+	        condition:
+	          type: string
+	        box:
+	          type: object
+	          properties:
+	            x:
+	              type: number
+	            y:
+	              type: number
+	            width:
+	              type: number
+	            height:
+	              type: number
+	responses:
+	  200:
+	    description: QC edits saved
+	  400:
+	    description: Missing required fields
+	  404:
+	    description: Asset not found
+	"""
+	body = request.get_json(silent=True) or {}
+
+	surveyor_name = (body.get("name") or "").strip()
+	surveyor_user_id = (body.get("user_id") or "").strip()
+	if not surveyor_name or not surveyor_user_id:
+		return jsonify({"error": "name and user_id are required"}), 400
+
+	new_group_id = (body.get("group_id") or "").strip()
+	new_category_id = (body.get("category_id") or "").strip()
+	new_condition = (body.get("condition") or "").strip()
+	new_box = body.get("box")
+
+	if not new_box:
+		return jsonify({"error": "box is required"}), 400
+
+	db = get_db()
+	now = get_now_iso()
+
+	# Fetch current master asset
+	master = db.master_assets.find_one({"master_display_id": master_display_id})
+	if not master:
+		return jsonify({"error": "not found"}), 404
+
+	master_oid = master["_id"]
+
+	# --- Determine what changed ---
+	old_group_id = master.get("group_id", "")
+	old_asset_id = master.get("asset_id", "")
+	old_category_id = master.get("category_id", "")
+	old_condition = master.get("latest_condition", "")
+	old_box = master.get("latest_box") or {}
+
+	type_changed = bool(new_group_id and new_group_id != old_group_id)
+	condition_changed = bool(new_condition and new_condition.lower() != old_condition.lower())
+	box_moved = bool(new_box and (
+		new_box.get("x") != old_box.get("x") or
+		new_box.get("y") != old_box.get("y") or
+		new_box.get("width") != old_box.get("width") or
+		new_box.get("height") != old_box.get("height")
+	))
+
+	if not type_changed and not condition_changed and not box_moved:
+		return jsonify({"ok": True, "message": "no changes detected"})
+
+	# --- Resolve new asset_id from system_asset_labels if type changed ---
+	new_asset_id = old_asset_id
+	if type_changed:
+		label_doc = db.system_asset_labels.find_one({"group_id": new_group_id})
+		if label_doc:
+			new_asset_id = label_doc.get("asset_id", old_asset_id)
+
+	# --- Build update for master_assets ---
+	master_update = {"updated_at": now}
+	if type_changed:
+		master_update["group_id"] = new_group_id
+		master_update["asset_type"] = new_group_id
+		master_update["asset_id"] = new_asset_id
+	if new_category_id and new_category_id != old_category_id:
+		master_update["category_id"] = new_category_id
+	if condition_changed:
+		master_update["latest_condition"] = new_condition.lower()
+	if box_moved:
+		master_update["latest_box"] = new_box
+
+	db.master_assets.update_one(
+		{"_id": master_oid},
+		{"$set": master_update},
+	)
+
+	# --- Update the latest asset observation ---
+	survey_history = master.get("survey_history", [])
+	if survey_history:
+		latest_obs_id = survey_history[-1].get("asset_observation_id")
+		if latest_obs_id:
+			asset_update = {}
+			if type_changed:
+				asset_update["group_id"] = new_group_id
+				asset_update["asset_type"] = new_group_id
+				asset_update["asset_id"] = new_asset_id
+			if new_category_id and new_category_id != old_category_id:
+				asset_update["category_id"] = new_category_id
+			if condition_changed:
+				asset_update["condition"] = new_condition.lower()
+			if box_moved:
+				asset_update["box"] = new_box
+			if asset_update:
+				db.assets.update_one(
+					{"_id": latest_obs_id},
+					{"$set": asset_update},
+				)
+
+		# Also update the survey_history entry on the master
+		sh_idx = len(survey_history) - 1
+		sh_update = {}
+		if box_moved:
+			sh_update[f"survey_history.{sh_idx}.box"] = new_box
+		if condition_changed:
+			sh_update[f"survey_history.{sh_idx}.condition"] = new_condition.lower()
+		if sh_update:
+			db.master_assets.update_one(
+				{"_id": master_oid},
+				{"$set": sh_update},
+			)
+
+	# --- Regenerate CLIP embedding if bounding box changed ---
+	if box_moved and survey_history:
+		latest_obs = survey_history[-1]
+		vid_id = latest_obs.get("video_id")
+		frame_num = latest_obs.get("frame_number")
+		if vid_id and frame_num is not None:
+			video_doc = db.videos.find_one(
+				{"_id": ObjectId(str(vid_id))},
+				{"storage_url": 1},
+			)
+			if video_doc and video_doc.get("storage_url"):
+				from pathlib import Path as _Path
+				from services.asset_linker import regenerate_embedding
+
+				upload_dir = _Path(os.environ.get("UPLOAD_DIR") or os.path.join(
+					os.path.dirname(os.path.abspath(__file__)), "..", "uploads"
+				))
+				up = _Path("/uploads")
+				video_path = upload_dir / _Path(video_doc["storage_url"]).relative_to(up)
+
+				new_embedding = regenerate_embedding(video_path, int(frame_num), new_box)
+				if new_embedding is not None:
+					db.master_assets.update_one(
+						{"_id": master_oid},
+						{"$set": {"embedding": new_embedding}},
+					)
+					latest_obs_id = latest_obs.get("asset_observation_id")
+					if latest_obs_id:
+						db.assets.update_one(
+							{"_id": latest_obs_id},
+							{"$set": {"embedding": new_embedding}},
+						)
+
+	# --- Log to asset_condition_logs ---
+	log_entry = {
+		"master_asset_id": master_oid,
+		"master_display_id": master_display_id,
+		"action": "qc_edit",
+		"name": surveyor_name,
+		"user_id": surveyor_user_id,
+		"changed_at": now,
+		"type_changed": type_changed,
+		"condition_changed": condition_changed,
+		"box_moved": box_moved,
+		# Store previous state for revert
+		"previous_state": {
+			"group_id": old_group_id,
+			"asset_id": old_asset_id,
+			"category_id": old_category_id,
+			"condition": old_condition,
+			"box": old_box,
+		},
+		# Store new state
+		"new_state": {
+			"group_id": new_group_id or old_group_id,
+			"asset_id": new_asset_id,
+			"category_id": new_category_id or old_category_id,
+			"condition": new_condition.lower() if new_condition else old_condition,
+			"box": new_box,
+		},
+	}
+	db.asset_condition_logs.insert_one(log_entry)
+
+	return jsonify({"ok": True})
+
+
 @assets_bp.put("/icon-config", endpoint="update_icon_config")
 @role_required(["super_admin","admin"])
 def update_icon_config():

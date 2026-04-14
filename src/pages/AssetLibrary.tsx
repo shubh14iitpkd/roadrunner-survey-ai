@@ -988,7 +988,7 @@ export default function AssetLibrary() {
                   }));
                   const logItems: LogItem[] = conditionLogs.map((log) => ({
                     kind: 'log',
-                    condition: log.action === 'marked_good' ? 'good' : 'damaged',
+                    condition: log.action === 'marked_good' ? 'good' : (log.action === 'qc_edit' ? (log.new_state?.condition || 'unknown') : 'damaged'),
                     log,
                     date: log.changed_at ?? '',
                   }));
@@ -1011,6 +1011,36 @@ export default function AssetLibrary() {
                         {merged.map((item, mIdx) => {
                           const isGoodAction = item.condition === 'good';
                           if (item.kind === 'log') {
+                            const isQcEdit = item.log.action === 'qc_edit';
+                            if (isQcEdit) {
+                              const changes: string[] = [];
+                              if (item.log.type_changed) changes.push(`Type: ${item.log.previous_state?.group_id} → ${item.log.new_state?.group_id}`);
+                              if (item.log.condition_changed) changes.push(`Condition: ${displayCondition(item.log.previous_state?.condition)} → ${displayCondition(item.log.new_state?.condition)}`);
+                              if (item.log.box_moved) changes.push('Bounding box adjusted');
+                              return (
+                                <div key={`log-${mIdx}`} className="flex items-start gap-3">
+                                  <div className="shrink-0 flex items-center justify-center w-[18px] pt-1">
+                                    <div className="h-2 w-2 rounded-full border-2 border-background bg-blue-500" />
+                                  </div>
+                                  <div className="py-1 text-xs text-muted-foreground">
+                                    <div>
+                                      <span className="font-semibold text-blue-600">QC Edit</span>
+                                      <span className="text-border"> · </span>
+                                      <span>by <span className="text-foreground font-medium">{item.log.name || '-'}</span></span>
+                                      <span className="text-border"> · </span>
+                                      <span>on {item.date ? new Date(item.date).toISOString().split('T')[0] : '-'}</span>
+                                    </div>
+                                    {changes.length > 0 && (
+                                      <div className="mt-0.5 space-y-0.5">
+                                        {changes.map((c, i) => (
+                                          <div key={i} className="text-[10px] text-muted-foreground">{c}</div>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            }
                             return (
                               <div key={`log-${mIdx}`} className="flex items-center gap-3">
                                 <div className="shrink-0 flex items-center justify-center w-[18px]">
@@ -1025,12 +1055,6 @@ export default function AssetLibrary() {
                                   </span>
                                   <span className="text-border">·</span>
                                   <span>by <span className="text-foreground font-medium">{item.log.name || '-'}</span></span>
-                                  {/* {item.log.survey_display_id && (
-                                    <>
-                                      <span className="text-border">·</span>
-                                      <span>Survey <span className="font-mono text-foreground font-medium">{item.log.survey_display_id}</span></span>
-                                    </>
-                                  )} */}
                                   <span className="text-border">·</span>
                                   <span>on {item.date ? new Date(item.date).toISOString().split('T')[0] : '-'}</span>
                                 </div>

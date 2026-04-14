@@ -101,6 +101,41 @@ def _crop_asset(frame: np.ndarray, box: dict,
     return Image.fromarray(cv2.cvtColor(crop_bgr, cv2.COLOR_BGR2RGB))
 
 
+def regenerate_embedding(video_path: Path, frame_number: int,
+                         box: dict) -> Optional[list]:
+    """
+    Generate a new CLIP embedding for a given video frame + bounding box.
+    Returns the embedding as a list of floats, or None on failure.
+    Used by the QC update endpoint when a bounding box is adjusted.
+    """
+    if not video_path.exists():
+        log.warning("[LINKER] Video not found at %s", video_path)
+        return None
+
+    cap = cv2.VideoCapture(str(video_path))
+    if not cap.isOpened():
+        log.warning("[LINKER] Cannot open video: %s", video_path)
+        return None
+
+    try:
+        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_number)
+        ret, frame = cap.read()
+        if not ret:
+            log.warning("[LINKER] Cannot read frame %d from %s", frame_number, video_path)
+            return None
+
+        crop = _crop_asset(frame, box)
+        model, processor, device = _get_clip()
+        emb = _get_embedding(model, processor, device, crop)
+        return emb.tolist()
+
+    except Exception as exc:
+        log.warning("[LINKER] Embedding regen failed: %s", exc)
+        return None
+    finally:
+        cap.release()
+
+
 def _cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
     """Cosine similarity between two L2-normalised vectors."""
     return float(np.dot(a, b))
