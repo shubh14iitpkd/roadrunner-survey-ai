@@ -214,9 +214,12 @@ export default function DefectLibrary() {
   const [searchQuery, setSearchQuery] = useState("");
   const { data: labelMapData } = useLabelMap();
 
-  const [selectedRouteId, setSelectedRouteId] = useState<number | null>(null);
-  const [selectedAssetType, setSelectedAssetType] = useState<string>("all");
-  const [categoryFilter, setCategoryFilter] = useState<string>("all");
+  const [selectedRouteId, setSelectedRouteId] = useState<number | null>(() => {
+    const p = searchParams.get("route_id");
+    return p ? Number(p) : null;
+  });
+  const [selectedAssetType, setSelectedAssetType] = useState<string>(() => searchParams.get("type") || "all");
+  const [categoryFilter, setCategoryFilter] = useState<string>(() => searchParams.get("category") || "all");
   const [directionFilter, setDirectionFilter] = useState<"all" | "LHS" | "RHS">("all");
   const [zoneFilter, setZoneFilter] = useState<"all" | "shoulder" | "median" | "pavement" | "overhead">("all");
 
