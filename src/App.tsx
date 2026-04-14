@@ -12,6 +12,7 @@ import { LabelMapProvider } from "./contexts/LabelMapContext";
 import Layout from "./components/Layout";
 import ProtectedRoute from "./components/ProtectedRoute";
 import AdminRoute from "./components/AdminRoute";
+import NonViewerRoute from "./components/NonViewerRoute";
 import { ChatProvider } from "./contexts/ChatContext";
 
 // Lazy load pages for better performance
@@ -28,6 +29,7 @@ const ModelTest = lazy(() => import("./pages/ModelTest"));
 const AnomalyLibrary = lazy(() => import("./pages/DefectLibrary"));
 const AssetLibrary = lazy(() => import("./pages/AssetLibrary"));
 const QCLayer = lazy(() => import("./pages/QCLayer"));
+const VideoAnnotator = lazy(() => import("./pages/VideoAnnotator"));
 
 const queryClient = new QueryClient();
 
@@ -68,7 +70,8 @@ const App = () => (
                             <Route path="/asset-library" element={<AssetLibrary />} />
                             <Route path="/roadgpt" element={<AskAI />} />
                             <Route path="/settings" element={<Settings />} />
-                            <Route path="/:masterDisplayId/edit" element={<QCLayer />} />
+                            <Route path="/:masterDisplayId/edit" element={<NonViewerRoute><QCLayer /></NonViewerRoute>} />
+                            <Route path="/videos/:videoId/annotate" element={<NonViewerRoute><VideoAnnotator /></NonViewerRoute>} />
                             <Route path="*" element={<NotFound />} />
                           </Routes>
                         </Layout>

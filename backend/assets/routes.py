@@ -535,6 +535,7 @@ def get_master_map_points():
 # Valid sort keys and their corresponding MongoDB field names
 _SORT_KEY_MAP = {
 	"assetDisplayId": "master_display_id",
+	"defectId": "latest_defect_id",
 	"assetType": "asset_type",
 	"condition": "latest_condition",
 	"roadName": "route_name",
@@ -607,7 +608,6 @@ def get_master_assets_paginated():
 	# Determine sort
 	sort_key_param = request.args.get("sort_key", "lastSurveyDate")
 	sort_dir_param = request.args.get("sort_dir", "desc")
-	mongo_sort_key = _SORT_KEY_MAP.get(sort_key_param, "last_seen_date")
 	mongo_sort_dir = DESCENDING if sort_dir_param == "desc" else ASCENDING
 
 	# Projection: exclude heavy fields
@@ -621,11 +621,55 @@ def get_master_assets_paginated():
 	total_count = db.master_assets.count_documents(query)
 	total_pages = math.ceil(total_count / limit) if total_count > 0 else 1
 
-	# Fetch paginated items
-	items_cursor = db.master_assets.find(query, projection) \
-		.sort(mongo_sort_key, mongo_sort_dir) \
-		.skip(skip) \
-		.limit(limit)
+	# Category sort needs special handling: sort by display name, not raw category_id
+	if sort_key_param == "category":
+		# Build category_id → display_name mapping from system_asset_categories
+		cat_branches = []
+		for cat in db.system_asset_categories.find({}, {"category_id": 1, "display_name": 1, "_id": 0}):
+			cat_branches.append({
+				"case": {"$eq": ["$category_id", cat["category_id"]]},
+				"then": cat.get("display_name", cat["category_id"]),
+			})
+		add_sort_field = {"$addFields": {
+			"_cat_sort": {"$switch": {"branches": cat_branches, "default": {"$ifNull": ["$category_id", ""]}}}
+		}}
+
+		# Paginated items via aggregation
+		items_cursor = db.master_assets.aggregate([
+			{"$match": query},
+			{"$project": projection},
+			add_sort_field,
+			{"$sort": {"_cat_sort": mongo_sort_dir}},
+			{"$skip": skip},
+			{"$limit": limit},
+			{"$project": {"_cat_sort": 0}},
+		])
+
+		# Sorted IDs via aggregation
+		sorted_ids = [
+			d["master_display_id"]
+			for d in db.master_assets.aggregate([
+				{"$match": query},
+				add_sort_field,
+				{"$sort": {"_cat_sort": mongo_sort_dir}},
+				{"$project": {"master_display_id": 1, "_id": 0}},
+			])
+		]
+	else:
+		mongo_sort_key = _SORT_KEY_MAP.get(sort_key_param, "last_seen_date")
+
+		# Fetch paginated items
+		items_cursor = db.master_assets.find(query, projection) \
+			.sort(mongo_sort_key, mongo_sort_dir) \
+			.skip(skip) \
+			.limit(limit)
+
+		# Fetch sorted_ids: all matching master_display_ids in sort order.
+		sorted_ids = [
+			d["master_display_id"]
+			for d in db.master_assets.find(query, {"master_display_id": 1, "_id": 0})
+				.sort(mongo_sort_key, mongo_sort_dir)
+		]
 
 	items = []
 	for doc in items_cursor:
@@ -643,14 +687,6 @@ def get_master_assets_paginated():
 		# Description from denormalized field
 		doc["description"] = doc.get("latest_description")
 		items.append(doc)
-
-	# Fetch sorted_ids: all matching master_display_ids in sort order.
-	# This is a lightweight query (~70k short strings ≈ 700KB raw, ~80KB gzipped).
-	sorted_ids = [
-		d["master_display_id"]
-		for d in db.master_assets.find(query, {"master_display_id": 1, "_id": 0})
-			.sort(mongo_sort_key, mongo_sort_dir)
-	]
 
 	return fast_mongo_response({
 		"items": items,
@@ -1275,6 +1311,362 @@ def qc_update_asset(master_display_id: str):
 	db.asset_condition_logs.insert_one(log_entry)
 
 	return jsonify({"ok": True})
+
+
+@assets_bp.post("/manual-annotations", endpoint="assets_manual_annotations")
+@role_required(["super_admin", "admin", "surveyor"])
+def save_manual_annotations():
+	"""
+	Save manually drawn annotations from the video annotator.
+	Creates asset docs, master_asset docs, generates embeddings,
+	and updates the frames collection with new detections.
+	---
+	tags:
+	  - Assets
+	security:
+	  - Bearer: []
+	parameters:
+	  - name: body
+	    in: body
+	    required: true
+	    schema:
+	      type: object
+	      required:
+	        - video_id
+	        - annotations
+	        - name
+	        - user_id
+	      properties:
+	        video_id:
+	          type: string
+	        annotations:
+	          type: array
+	          items:
+	            type: object
+	            properties:
+	              frame_number:
+	                type: integer
+	              box:
+	                type: object
+	              group_id:
+	                type: string
+	              category_id:
+	                type: string
+	              condition:
+	                type: string
+	              timestamp:
+	                type: number
+	        name:
+	          type: string
+	        user_id:
+	          type: string
+	responses:
+	  200:
+	    description: Annotations saved
+	  400:
+	    description: Missing required fields
+	"""
+	from pathlib import Path as _Path
+	import cv2
+	from services.asset_linker import regenerate_embedding, _generate_master_display_id
+	from services.ZoneMapper import ZoneMapper
+	from services.LatLongEstimator import LatLongEstimator
+	from utils.gpx_helpers import parse_gpx, interpolate_gpx
+
+	body = request.get_json(silent=True) or {}
+
+	video_id = (body.get("video_id") or "").strip()
+	annotations = body.get("annotations") or []
+	surveyor_name = (body.get("name") or "").strip()
+	surveyor_user_id = (body.get("user_id") or "").strip()
+
+	if not video_id or not annotations or not surveyor_name:
+		return jsonify({"error": "video_id, annotations, name are required"}), 400
+
+	db = get_db()
+	now = get_now_iso()
+
+	# Fetch video to get survey context
+	video_doc = db.videos.find_one({"_id": ObjectId(video_id)})
+	if not video_doc:
+		return jsonify({"error": "video not found"}), 404
+
+	survey_id = video_doc.get("survey_id")
+	route_id = video_doc.get("route_id")
+	storage_url = video_doc.get("storage_url", "")
+
+	# Fetch survey info
+	survey_display_id = ""
+	survey_date = None
+	if survey_id:
+		survey_doc = db.surveys.find_one(
+			{"_id": survey_id},
+			{"survey_display_id": 1, "survey_date": 1},
+		)
+		if survey_doc:
+			survey_display_id = survey_doc.get("survey_display_id", "")
+			survey_date = survey_doc.get("survey_date")
+
+	# Fetch route info for denormalization
+	route_name = ""
+	road_side = ""
+	if route_id:
+		road_doc = db.roads.find_one({"route_id": route_id}, {"road_name": 1, "road_side": 1})
+		if road_doc:
+			route_name = road_doc.get("road_name", "")
+			road_side = road_doc.get("road_side", "")
+
+	# Resolve video path for embedding generation
+	video_path = None
+	if storage_url:
+		upload_dir = _Path(os.environ.get("UPLOAD_DIR") or os.path.join(
+			os.path.dirname(os.path.abspath(__file__)), "..", "uploads"
+		))
+		up = _Path("/uploads")
+		try:
+			video_path = upload_dir / _Path(storage_url).relative_to(up)
+		except ValueError:
+			video_path = None
+
+	# --- Compute side, zone, and location for each annotation ---
+	zone_mapper = ZoneMapper()
+	lat_long_estimator = LatLongEstimator()
+
+	# Get video dimensions and metadata for GPX interpolation
+	video_width = 1920
+	video_height = 1080
+	gpx_data = {}
+	fps = 30
+	total_frames = 0
+
+	if video_path and video_path.exists():
+		cap = cv2.VideoCapture(str(video_path))
+		if cap.isOpened():
+			video_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+			video_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+			fps = cap.get(cv2.CAP_PROP_FPS) or 30
+			total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+			cap.release()
+
+	# Parse and interpolate GPX for location estimation
+	gpx_file_url = video_doc.get("gpx_file_url")
+	if gpx_file_url and video_path:
+		upload_dir_gpx = _Path(os.environ.get("UPLOAD_DIR") or os.path.join(
+			os.path.dirname(os.path.abspath(__file__)), "..", "uploads"
+		))
+		gpx_path = upload_dir_gpx / gpx_file_url.lstrip("/uploads/")
+		if gpx_path.exists():
+			gpx_parsed = parse_gpx(gpx_path)
+			if gpx_parsed and total_frames > 0:
+				gpx_data = interpolate_gpx(total_frames, fps, gpx_parsed, frame_interval=1, time_offset=0)
+
+	# Resolve asset_id from system_asset_labels by group_id
+	label_cache = {}
+	def resolve_label(group_id):
+		if group_id not in label_cache:
+			doc = db.system_asset_labels.find_one({"group_id": group_id})
+			label_cache[group_id] = doc
+		return label_cache[group_id]
+
+	created_assets = []
+	created_masters = []
+	frames_updates = {}  # frame_number -> list of new detections
+
+	for ann in annotations:
+		frame_number = ann.get("frame_number")
+		box = ann.get("box")
+		group_id = (ann.get("group_id") or "").strip()
+		category_id = (ann.get("category_id") or "").strip()
+		condition = (ann.get("condition") or "good").strip().lower()
+		timestamp = ann.get("timestamp", 0)
+
+		if frame_number is None or not box or not group_id:
+			continue
+
+		# Resolve asset_id from label map
+		label_doc = resolve_label(group_id)
+		asset_id_str = label_doc.get("asset_id", "") if label_doc else ""
+
+		# Generate display IDs
+		from utils.ids import generate_asset_display_id, generate_defect_id
+		asset_display_id = generate_asset_display_id(db=db)
+		defect_id = generate_defect_id(db=db) if condition != "good" else None
+
+		# Convert box {x, y, width, height} to xyxy for ZoneMapper/LatLongEstimator
+		# (consistent with local_processor.py which passes xyxy to these services)
+		box_x = box.get("x", 0)
+		box_y = box.get("y", 0)
+		box_w = box.get("width", 0)
+		box_h = box.get("height", 0)
+		xyxy_box = [box_x, box_y, box_x + box_w, box_y + box_h]
+
+		# Compute side and zone using ZoneMapper
+		asset_side = zone_mapper.get_road_side(xyxy_box, video_width)
+		asset_zone = zone_mapper.resolve_zone(group_id, xyxy_box, video_width, video_height)
+
+		# Compute location using GPX + LatLongEstimator
+		asset_location = None
+		if gpx_data and gpx_data.get(frame_number):
+			car_lat = gpx_data[frame_number]["lat"]
+			car_lon = gpx_data[frame_number]["lon"]
+			car_heading = lat_long_estimator.calculate_bearing_for_frame(
+				frame_number=frame_number,
+				interpolated_gpx=gpx_data,
+				total_frames=total_frames,
+				frame_interval=1,
+			)
+			estimated = lat_long_estimator.estimate_location(
+				car_lat, car_lon, car_heading, video_width, video_height, xyxy_box
+			)
+			asset_location = {
+				"type": "Point",
+				"coordinates": [estimated["lon"], estimated["lat"]],
+			}
+
+		# Create asset document
+		asset_doc = {
+			"asset_type": group_id,
+			"type": group_id,
+			"asset_display_id": asset_display_id,
+			"defect_id": defect_id,
+			"asset_id": asset_id_str,
+			"category_id": category_id,
+			"group_id": group_id,
+			"confidence": 1.0,
+			"condition": condition,
+			"frame_number": frame_number,
+			"timestamp": timestamp,
+			"video_id": video_id,
+			"survey_id": survey_id,
+			"route_id": route_id,
+			"side": asset_side,
+			"zone": asset_zone,
+			"box": box,
+			"location": asset_location,
+			"created_at": now,
+			"detected_at": now,
+			"source": "manual",
+			"annotated_by": surveyor_name,
+			"annotated_by_user_id": surveyor_user_id,
+		}
+
+		result = db.assets.insert_one(asset_doc)
+		asset_doc["_id"] = result.inserted_id
+
+		# Generate embedding
+		embedding_list = None
+		if video_path:
+			embedding_list = regenerate_embedding(video_path, int(frame_number), box)
+		if embedding_list:
+			db.assets.update_one(
+				{"_id": asset_doc["_id"]},
+				{"$set": {"embedding": embedding_list}},
+			)
+
+		# Create master_asset document
+		survey_history_entry = {
+			"survey_id": survey_id,
+			"survey_display_id": survey_display_id,
+			"survey_date": survey_date,
+			"asset_observation_id": asset_doc["_id"],
+			"asset_display_id": asset_display_id,
+			"condition": condition,
+			"confidence": 1.0,
+			"issue": None if condition == "good" else "Defective",
+			"defect_id": defect_id,
+			"location": asset_location,
+			"video_id": video_id,
+			"frame_number": frame_number,
+			"time": timestamp,
+			"box": box,
+			"match_confidence": 1.0,
+			"created_at": now,
+		}
+
+		master_doc = {
+			"master_display_id": _generate_master_display_id(db),
+			"asset_id": asset_id_str,
+			"asset_type": group_id,
+			"group_id": group_id,
+			"category_id": category_id,
+			"side": asset_side,
+			"zone": asset_zone,
+			"route_id": route_id,
+			"route_name": route_name,
+			"road_side": road_side,
+			"canonical_location": asset_location,
+			"embedding": embedding_list,
+			"first_seen_date": survey_date,
+			"last_seen_date": survey_date,
+			"total_surveys_detected": 1,
+			"latest_condition": condition,
+			"latest_survey_id": survey_id,
+			"latest_survey_display_id": survey_display_id,
+			"latest_confidence": 1.0,
+			"survey_history": [survey_history_entry],
+			"issue": None if condition == "good" else "Defective",
+			"latest_frame_number": frame_number,
+			"latest_video_id": video_id,
+			"latest_box": box,
+			"latest_defect_id": defect_id,
+			"latest_description": None,
+			"source": "manual",
+			"created_at": now,
+			"updated_at": now,
+		}
+
+		master_result = db.master_assets.insert_one(master_doc)
+
+		# Link asset to master
+		db.assets.update_one(
+			{"_id": asset_doc["_id"]},
+			{"$set": {"master_asset_id": master_result.inserted_id}},
+		)
+
+		# Log to asset_condition_logs so manual additions are attributed to the user
+		db.asset_condition_logs.insert_one({
+			"master_asset_id": master_result.inserted_id,
+			"master_display_id": master_doc["master_display_id"],
+			"action": "manual_addition",
+			"previous_condition": None,
+			"new_condition": condition,
+			"name": surveyor_name,
+			"user_id": surveyor_user_id,
+			"survey_id": survey_id,
+			"changed_at": now,
+		})
+
+		created_assets.append(asset_display_id)
+		created_masters.append(master_doc["master_display_id"])
+
+		# Queue frame detection update
+		if frame_number not in frames_updates:
+			frames_updates[frame_number] = []
+		frames_updates[frame_number].append({
+			"class_name": group_id,
+			"confidence": 1.0,
+			"box": xyxy_box,
+			"asset_id": asset_id_str,
+			"category_id": category_id,
+			"source": "manual",
+		})
+
+	# Update frames collection with new detections
+	for frame_number, new_detections in frames_updates.items():
+		db.frames.update_one(
+			{"video_id": video_id, "frame_number": frame_number},
+			{
+				"$push": {"detections": {"$each": new_detections}},
+				"$inc": {"detections_count": len(new_detections)},
+			},
+		)
+
+	return jsonify({
+		"ok": True,
+		"assets_created": len(created_assets),
+		"asset_ids": created_assets,
+		"master_ids": created_masters,
+	})
 
 
 @assets_bp.put("/icon-config", endpoint="update_icon_config")

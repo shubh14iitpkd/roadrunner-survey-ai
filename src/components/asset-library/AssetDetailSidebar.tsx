@@ -545,7 +545,7 @@ export default function AssetDetailSidebar({
               <X className="h-3 w-3" />
             </button>
             <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/80 via-black/50 to-transparent px-2.5 pb-1.5 pt-6 pointer-events-none z-10">
-              <p className="text-[9px] text-white/60 uppercase tracking-wider font-semibold">Road</p>
+              <p className="text-[9px] text-white/60 uppercase tracking-wider font-semibold">Route</p>
               <p className="text-[11px] text-white font-semibold truncate">{selectedAsset.roadName}</p>
             </div>
           </div>
@@ -556,7 +556,7 @@ export default function AssetDetailSidebar({
                 // ["ID", selectedAsset.defectId],
                 ["Asset ID", selectedAsset.assetDisplayId],
                 ["Type", selectedAsset.assetType],
-                ["Road Side", selectedAsset.side],
+                ["Asset Side", selectedAsset.side],
                 ["Zone", selectedAsset.zone],
               ] as [string, string | undefined][]).map(([label, val]) => (
                 <div key={label} className="min-w-0">

@@ -63,7 +63,7 @@ const BASE_ASSET_COLUMNS: ColumnDef[] = [
   },
   { key: "coords", header: "Coordinates", className: "font-mono text-[10px] py-1.5 px-1.5 whitespace-nowrap text-center", render: (a) => `${a.lat.toFixed(4)}, ${a.lng.toFixed(4)}` },
   { key: "road", header: "Route", className: "text-[11px] py-1.5 px-1.5 whitespace-nowrap text-center", render: (a) => a.roadName, getValue: (a) => a.roadName },
-  { key: "side", header: "Route Side", className: "text-[11px] py-1.5 px-1.5 text-center", render: (a) => a.side, getValue: (a) => a.side },
+  { key: "side", header: "Asset Side", className: "text-[11px] py-1.5 px-1.5 text-center", render: (a) => a.side, getValue: (a) => a.side },
   { key: "zone", header: "Zone", className: "text-[11px] capitalize py-1.5 px-1.5 text-center", render: (a) => a.zone, getValue: (a) => a.zone },
   { key: "survey", header: "Survey", className: "text-[11px] py-1.5 px-1.5 whitespace-nowrap text-center", render: (a) => a.lastSurveyDate, getValue: (a) => a.lastSurveyDate },
 ];
@@ -137,7 +137,6 @@ export default function AssetLibrary() {
   const { user } = useAuth();
   const [searchParams] = useSearchParams();
   const [loading, setLoading] = useState(false);
-  const [rollbackAssetId, setRollbackAssetId] = useState<string | null>(null);
   const [conditionLogs, setConditionLogs] = useState<any[]>([]);
   const [loadError, setLoadError] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -152,8 +151,8 @@ export default function AssetLibrary() {
   const [zoneFilter, setZoneFilter] = useState<"all" | "shoulder" | "median" | "pavement" | "overhead">("all");
   const [attributes, setAttributes] = useState<Record<string, readonly string[]>>({});
 
-  const [sortKey, setSortKey] = useState<string | null>("lastSurveyDate");
-  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+  const [sortKey, setSortKey] = useState<string | null>("assetDisplayId");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
 
   const [selectedAsset, setSelectedAsset] = useState<AssetRecord | null>(null);
   const [selectedSurveyIdx, setSelectedSurveyIdx] = useState(0);
@@ -581,29 +580,6 @@ export default function AssetLibrary() {
     }
   };
 
-  const handleRollback = useCallback(async (asset: AssetRecord) => {
-    if (!asset?.id) return;
-    if (user?.role === "Viewer") {
-      toast.error("You do not have permission to revert assets.");
-      return;
-    }
-    const surveyorName = user ? `${user.first_name} ${user.last_name}`.trim() || user.email : "";
-    const surveyorId = user?.id ?? "";
-    const surveyId = asset.surveyId;
-    setRollbackAssetId(asset.id);
-    try {
-      await api.assets.unmarkGood(asset.id, { name: surveyorName, user_id: surveyorId, survey_id: surveyId });
-      toast.success(`Asset ${asset.assetDisplayId} reverted to defective`);
-      setShowFullView(false);
-      setSelectedAsset(null);
-      loadData();
-    } catch (err: any) {
-      toast.error(err?.message || "Failed to revert asset");
-    } finally {
-      setRollbackAssetId(null);
-    }
-  }, [user, loadData]);
-
   // ── Mark as Good (defective → good) ──
   const handleMarkGood = useCallback((asset: AssetRecord) => {
     if (user?.role === "Viewer") {
@@ -720,6 +696,7 @@ export default function AssetLibrary() {
     opts.sort((a, b) => a.name.localeCompare(b.name));
     return opts
   }, [labelMapData]);
+  categoryOptionsRef.current = categoryOptions;
 
   const clearFilters = useCallback(() => {
     setCategoryFilter("all");
@@ -990,7 +967,10 @@ export default function AssetLibrary() {
                   }));
                   const logItems: LogItem[] = conditionLogs.map((log) => ({
                     kind: 'log',
-                    condition: log.action === 'marked_good' ? 'good' : (log.action === 'qc_edit' ? (log.new_state?.condition || 'unknown') : 'damaged'),
+                    condition: log.action === 'marked_good' ? 'good'
+                      : log.action === 'qc_edit' ? (log.new_state?.condition || 'unknown')
+                      : log.action === 'manual_addition' ? (log.new_condition || 'good')
+                      : 'damaged',
                     log,
                     date: log.changed_at ?? '',
                   }));
@@ -1014,6 +994,7 @@ export default function AssetLibrary() {
                           const isGoodAction = item.condition === 'good';
                           if (item.kind === 'log') {
                             const isQcEdit = item.log.action === 'qc_edit';
+                            const isManualAdd = item.log.action === 'manual_addition';
                             if (isQcEdit) {
                               const changes: string[] = [];
                               if (item.log.type_changed) changes.push(`Type: ${item.log.previous_state?.group_id} → ${item.log.new_state?.group_id}`);
@@ -1039,6 +1020,22 @@ export default function AssetLibrary() {
                                         ))}
                                       </div>
                                     )}
+                                  </div>
+                                </div>
+                              );
+                            }
+                            if (isManualAdd) {
+                              return (
+                                <div key={`log-${mIdx}`} className="flex items-center gap-3">
+                                  <div className="shrink-0 flex items-center justify-center w-[18px]">
+                                    <div className="h-2 w-2 rounded-full border-2 border-background bg-violet-500" />
+                                  </div>
+                                  <div className="items-center gap-2 py-1 text-xs text-muted-foreground">
+                                    <span className="font-semibold text-violet-600">Manually Added</span>
+                                    <span className="text-border"> · </span>
+                                    <span>by <span className="text-foreground font-medium">{item.log.name || '-'}</span></span>
+                                    <span className="text-border"> · </span>
+                                    <span>on {item.date ? new Date(item.date).toISOString().split('T')[0] : '-'}</span>
                                   </div>
                                 </div>
                               );
@@ -1093,11 +1090,6 @@ export default function AssetLibrary() {
                                 <div className="flex items-center gap-2 mb-1">
                                   {isLatest && (
                                     <span className="text-[8px] font-bold uppercase tracking-wider text-primary bg-primary/10 dark:text-muted-secondary dark:bg-muted-secondary/10 rounded px-1.5 py-0.5">Latest</span>
-                                  )}
-                                  {effectivelyGood && (
-                                    <span className="text-[8px] font-bold uppercase tracking-wider text-emerald-600 bg-emerald-500/10 rounded px-1.5 py-0.5">
-                                      Marked Good by {latestMarkGood?.name}
-                                    </span>
                                   )}
                                 </div>
                                 <div className="grid grid-cols-5 gap-3 text-xs">
