@@ -697,25 +697,27 @@ export default function AssetLibrary() {
 
 
   const assetTypeOptions = useMemo(() => {
-    // Derive available asset types from map points (which are already server-filtered)
-    const types = new Set<string>();
-    for (const p of mapPoints) {
-      const name = getAssetNameRef.current({ asset_id: p.asset_id, asset_type: p.asset_type });
-      types.add(name);
-    }
-    return [...types].sort();
-  }, [mapPoints]);
+    const labels = Object.values(labelMapData?.labels || {});
+    if (!labels) return [];
+    const category = categoryFilter !== "all"
+      ? Object.values(labelMapData?.categories || {}).find(c => c.display_name === categoryFilter)
+      : null;
+    const uniqueGroupIds = new Set(
+      labels
+        .filter(l => !category || l.category_id === category.category_id)
+        .map(l => l.group_id)
+    );
+    return [...uniqueGroupIds].sort();
+  }, [labelMapData, categoryFilter]);
+
 
   const categoryOptions = useMemo(() => {
     const categoryMap = labelMapData?.categories;
-    if (!categoryMap) return [];
     const opts = []
     for (const [cat, cinfo] of Object.entries(categoryMap)) {
       opts.push({ id: cat, name: cinfo.display_name });
     }
     opts.sort((a, b) => a.name.localeCompare(b.name));
-    // Keep ref in sync for buildFilterParams to look up category_id by display name
-    categoryOptionsRef.current = opts;
     return opts
   }, [labelMapData]);
 

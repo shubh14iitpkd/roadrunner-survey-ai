@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Layers, MapPin, X, Eye, Maximize2, ChevronLeft, ChevronRight, Download, ZoomIn, ZoomOut, RotateCcw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
+import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import type { AssetRecord } from "@/types/asset";
 import { getCategoryColorCode } from "@/components/CategoryBadge";
@@ -267,6 +268,8 @@ export default function AssetDetailSidebar({
 }: AssetDetailSidebarProps) {
   const expanded = !!(markerPopup || selectedAsset);
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const isViewer = user?.role === "Viewer";
   const imgRef = useRef<HTMLImageElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   // Counter incremented on image onLoad to trigger canvas re-draw
@@ -590,15 +593,17 @@ export default function AssetDetailSidebar({
               >
                 <ChevronRight className="h-3 w-3" />
               </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-6 text-[10px] gap-1 px-2 font-semibold border-secondary text-secondary bg-secondary/10 hover:bg-secondary/20 hover:text-secondary"
-                onClick={() => navigate(`/${selectedAsset.masterDisplayId}/edit`) }
-              >
-                <Layers className="h-3 w-3" />
-                QC
-              </Button>
+              {!isViewer && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-6 text-[10px] gap-1 px-2 font-semibold border-secondary text-secondary bg-secondary/10 hover:bg-secondary/20 hover:text-secondary"
+                  onClick={() => navigate(`/${selectedAsset.masterDisplayId}/edit`) }
+                >
+                  <Layers className="h-3 w-3" />
+                  QC
+                </Button>
+              )}
             </div>
           </div>
         </div>
