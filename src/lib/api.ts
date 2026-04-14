@@ -205,6 +205,38 @@ export const api = {
 			const q = qs.toString();
 			return apiFetch(`/api/assets/master${q ? `?${q}` : ""}`, { method: "POST" });
 		},
+		getMasterMapPoints: (params?: { route_id?: number; category?: string; condition?: string; zone?: string; side?: string; asset_type?: string; search?: string }) => {
+			const qs = new URLSearchParams();
+			if (params?.route_id != null) qs.set("route_id", String(params.route_id));
+			if (params?.category) qs.set("category", params.category);
+			if (params?.condition) qs.set("condition", params.condition);
+			if (params?.zone) qs.set("zone", params.zone);
+			if (params?.side) qs.set("side", params.side);
+			if (params?.asset_type) qs.set("asset_type", params.asset_type);
+			if (params?.search) qs.set("search", params.search);
+			const q = qs.toString();
+			return apiFetch(`/api/assets/master/map-points${q ? `?${q}` : ""}`);
+		},
+		getMasterPaginated: (params?: {
+			page?: number; limit?: number; sort_key?: string; sort_dir?: string;
+			route_id?: number; category?: string; condition?: string;
+			zone?: string; side?: string; asset_type?: string; search?: string;
+		}) => {
+			const qs = new URLSearchParams();
+			if (params?.page != null) qs.set("page", String(params.page));
+			if (params?.limit != null) qs.set("limit", String(params.limit));
+			if (params?.sort_key) qs.set("sort_key", params.sort_key);
+			if (params?.sort_dir) qs.set("sort_dir", params.sort_dir);
+			if (params?.route_id != null) qs.set("route_id", String(params.route_id));
+			if (params?.category) qs.set("category", params.category);
+			if (params?.condition) qs.set("condition", params.condition);
+			if (params?.zone) qs.set("zone", params.zone);
+			if (params?.side) qs.set("side", params.side);
+			if (params?.asset_type) qs.set("asset_type", params.asset_type);
+			if (params?.search) qs.set("search", params.search);
+			const q = qs.toString();
+			return apiFetch(`/api/assets/master/paginated${q ? `?${q}` : ""}`);
+		},
 		get: (asset_id: string) => apiFetch(`/api/assets/${asset_id}`),
 		getMasterByDisplayId: (masterDisplayId: string) => apiFetch(`/api/assets/master/${masterDisplayId}`),
 		bulkInsert: (assets: any[]) => apiFetch("/api/assets/bulk", { method: "POST", body: JSON.stringify({ assets }) }),

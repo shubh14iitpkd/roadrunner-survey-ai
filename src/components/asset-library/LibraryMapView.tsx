@@ -1,14 +1,8 @@
 import { useEffect, useRef, useMemo, useCallback } from "react";
-import { isAssetIconExist, getAssetIconFromId } from "@/components/settings/iconConfig";
-import { useLabelMap } from "@/contexts/LabelMapContext";
 import {
   MapContainer,
   TileLayer,
-  CircleMarker,
-  Tooltip,
   useMap,
-  Marker,
-  Polyline,
 } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
@@ -22,13 +16,11 @@ const SELECTED_RADIUS = 10;
 
 /* ── Helper: deterministic per-route colour (medium vibrancy) ── */
 function routeColor(key: string, selected: boolean): string {
-  // Simple DJB2 hash → hue
   let hash = 4321;
   for (let i = 0; i < key.length; i++) {
     hash = (hash * 33) ^ key.charCodeAt(i);
   }
   const hue = Math.abs(hash) % 360;
-  // Saturation 55-65 %, Lightness 48-55 % keeps colours vivid but not garish
   const sat = selected ? 70 : 60;
   const lit = selected ? 55 : 50;
   return `hsl(${hue}, ${sat}%, ${lit}%)`;
@@ -48,14 +40,11 @@ function haversineM(lat1: number, lng1: number, lat2: number, lng2: number): num
 }
 
 /* ── Helper: greedy nearest-neighbour spatial sort ─────── */
-// Reorders assets so consecutive entries are geographically adjacent,
-// regardless of the order they arrive from the API.
 function nearestNeighborSort(assets: AssetRecord[]): AssetRecord[] {
   if (assets.length <= 1) return [...assets];
 
   const unvisited = new Set(assets.map((_, i) => i));
 
-  // Start from the southernmost point (min lat) — likely one road end
   let startIdx = 0;
   let minLat = assets[0].lat;
   for (const i of unvisited) {
@@ -81,8 +70,6 @@ function nearestNeighborSort(assets: AssetRecord[]): AssetRecord[] {
 }
 
 /* ── Helper: split spatially-sorted assets into segments ── */
-// Gap > POLYLINE_MAX_GAP_M metres between consecutive sorted points
-// starts a new segment so far-apart detections aren't linked.
 const POLYLINE_MAX_GAP_M = 100;
 
 function splitIntoSegments(
@@ -105,20 +92,6 @@ function splitIntoSegments(
   return segments;
 }
 
-/* ── Helper: build a selected variant of an icon (larger) ── */
-function getSelectedIcon(baseIcon: L.Icon): L.Icon {
-  const opts = (baseIcon as any).options;
-  const [w, h] = opts.iconSize as [number, number];
-  const [ax, ay] = opts.iconAnchor as [number, number];
-  const scale = 1.45;
-  return L.icon({
-    ...opts,
-    iconSize: [Math.round(w * scale), Math.round(h * scale)] as [number, number],
-    iconAnchor: [Math.round(ax * scale), Math.round(ay * scale)] as [number, number],
-    className: `${opts.className ?? ''} leaflet-marker-selected`.trim(),
-  });
-}
-
 /* ── Props ──────────────────────────────────────────────── */
 interface LibraryMapViewProps {
   assets: AssetRecord[];
@@ -132,8 +105,6 @@ function FitBounds({ assets }: { assets: AssetRecord[] }) {
   const fitted = useRef(false);
 
   useEffect(() => {
-    // Only fit bounds once (initial data load). Filter changes should NOT
-    // re-zoom the map — users expect the viewport to stay put while filtering.
     if (fitted.current || assets.length === 0) return;
     const bounds = L.latLngBounds(
       assets.map((a) => [a.lat, a.lng] as [number, number])
@@ -159,8 +130,6 @@ function FlyToSelected({
   const prevId = useRef(selectedId);
 
   useEffect(() => {
-    // Only fly when the user actually selects a different asset.
-    // Ignore re-runs caused by assets array changing (filter/search).
     if (selectedId === prevId.current) return;
     prevId.current = selectedId;
     if (!selectedId) return;
@@ -174,124 +143,212 @@ function FlyToSelected({
   return null;
 }
 
-/* ── Sub-component: one polyline per route group ────────── */
-interface PolylineGroupProps {
-  routeKey: string;
-  routeId: number | undefined;
-  groupAssets: AssetRecord[];
+/* ── Canvas marker layer: renders 70k+ markers without React reconciliation ── */
+function CanvasMarkerLayer({
+  markerAssets,
+  polylineGroups,
+  selectedId,
+  onSelect,
+}: {
+  markerAssets: AssetRecord[];
+  polylineGroups: { key: string; routeId: number | undefined; assets: AssetRecord[] }[];
   selectedId: string | null;
   onSelect: (asset: AssetRecord) => void;
-}
+}) {
+  const map = useMap();
+  const layerRef = useRef<L.LayerGroup>(L.layerGroup());
+  const tooltipRef = useRef<L.Tooltip>(L.tooltip({ direction: "top", offset: [0, -8], opacity: 0.95 }));
+  // Map from assetDisplayId → L.CircleMarker for fast selection updates
+  const markerMapRef = useRef<Map<string, L.CircleMarker>>(new Map());
+  // Track previous selection to restore style
+  const prevSelectedRef = useRef<string | null>(null);
+  // Build a lookup from displayId → AssetRecord for click handling
+  const assetLookupRef = useRef<Map<string, AssetRecord>>(new Map());
 
-function PolylineGroup({ routeKey, routeId: _routeId, groupAssets, selectedId, onSelect }: PolylineGroupProps) {
-  // Split into segments so far-apart points aren't joined
-  const segments = useMemo<[number, number][][]>(
-    () => splitIntoSegments(groupAssets).map((seg) => seg.map((a) => [a.lat, a.lng] as [number, number])),
-    [groupAssets]
-  );
-  // console.log("segments", segments);
-  const hasSelected = groupAssets.some((a) => a.assetDisplayId === selectedId);
-  const selectedAsset = groupAssets.find((a) => a.assetDisplayId === selectedId);
+  // Rebuild all markers when assets change
+  useEffect(() => {
+    const layer = layerRef.current;
+    const tooltip = tooltipRef.current;
+    const markerMap = markerMapRef.current;
+    const assetLookup = assetLookupRef.current;
 
-  const handleClick = useCallback(
-    (e: L.LeafletMouseEvent) => {
-      const { lat, lng } = e.latlng;
-      let nearest = groupAssets[0];
-      let minDist = Infinity;
-      for (const a of groupAssets) {
-        const d = haversineM(lat, lng, a.lat, a.lng);
-        if (d < minDist) {
-          minDist = d;
-          nearest = a;
+    // Clear existing
+    layer.clearLayers();
+    markerMap.clear();
+    assetLookup.clear();
+
+    // Build asset lookup
+    for (const a of markerAssets) {
+      if (a.assetDisplayId) assetLookup.set(a.assetDisplayId, a);
+    }
+
+    // Add regular circle markers
+    for (const asset of markerAssets) {
+      const isSelected = asset.assetDisplayId === selectedId;
+      const marker = L.circleMarker([asset.lat, asset.lng], {
+        radius: isSelected ? SELECTED_RADIUS : DEFAULT_RADIUS,
+        color: "#fff",
+        weight: isSelected ? 1.8 : 1.5,
+        fillColor: isSelected ? SELECTED_COLOR : (asset.markerColor ?? "red"),
+        fillOpacity: isSelected ? 0.9 : 0.7,
+      });
+
+      // Store displayId on the marker for click lookup
+      (marker as any)._assetDisplayId = asset.assetDisplayId;
+
+      marker.on("click", () => {
+        const a = assetLookup.get(asset.assetDisplayId ?? "");
+        if (a) onSelect(a);
+      });
+
+      marker.on("mouseover", (e) => {
+        tooltip.setLatLng(e.latlng);
+        tooltip.setContent(
+          `<div class="text-xs leading-tight">` +
+          `<div class="font-semibold">${asset.assetType}</div>` +
+          `<div class="text-[10px] text-muted-foreground font-mono">${asset.lat.toFixed(5)}, ${asset.lng.toFixed(5)}</div>` +
+          `</div>`
+        );
+        if (!map.hasLayer(tooltip)) tooltip.addTo(map);
+      });
+
+      marker.on("mouseout", () => {
+        if (map.hasLayer(tooltip)) map.removeLayer(tooltip);
+      });
+
+      layer.addLayer(marker);
+      if (asset.assetDisplayId) markerMap.set(asset.assetDisplayId, marker);
+    }
+
+    // Add polyline groups
+    for (const group of polylineGroups) {
+      const hasSelected = group.assets.some((a) => a.assetDisplayId === selectedId);
+      const color = routeColor(group.key, hasSelected);
+
+      // Also add polyline assets to lookup
+      for (const a of group.assets) {
+        if (a.assetDisplayId) assetLookup.set(a.assetDisplayId, a);
+      }
+
+      const segments = splitIntoSegments(group.assets);
+
+      for (const seg of segments) {
+        if (seg.length === 1) {
+          // Single point — draw as small circle
+          const a = seg[0];
+          const dot = L.circleMarker([a.lat, a.lng], {
+            radius: 5,
+            color,
+            fillColor: color,
+            fillOpacity: 0.85,
+            weight: 1,
+          });
+          dot.on("click", () => {
+            const rec = assetLookup.get(a.assetDisplayId ?? "");
+            if (rec) onSelect(rec);
+          });
+          dot.on("mouseover", (e) => {
+            tooltip.setLatLng(e.latlng);
+            tooltip.setContent(`<div class="text-xs leading-tight"><div class="font-semibold">Road Marking Line</div></div>`);
+            if (!map.hasLayer(tooltip)) tooltip.addTo(map);
+          });
+          dot.on("mouseout", () => { if (map.hasLayer(tooltip)) map.removeLayer(tooltip); });
+          layer.addLayer(dot);
+        } else {
+          // Polyline segment
+          const positions: [number, number][] = seg.map((a) => [a.lat, a.lng]);
+          const line = L.polyline(positions, {
+            color,
+            weight: hasSelected ? 8 : 6,
+            opacity: hasSelected ? 1 : 0.8,
+            lineCap: "round",
+            lineJoin: "round",
+          });
+          line.on("click", (e) => {
+            // Find nearest asset to click point
+            const { lat, lng } = e.latlng;
+            let nearest = seg[0];
+            let minDist = Infinity;
+            for (const a of seg) {
+              const d = haversineM(lat, lng, a.lat, a.lng);
+              if (d < minDist) { minDist = d; nearest = a; }
+            }
+            onSelect(nearest);
+          });
+          line.on("mouseover", (e) => {
+            tooltip.setLatLng(e.latlng);
+            tooltip.setContent(`<div class="text-xs leading-tight"><div class="font-semibold">Road Marking Line</div></div>`);
+            if (!map.hasLayer(tooltip)) tooltip.addTo(map);
+          });
+          line.on("mouseout", () => { if (map.hasLayer(tooltip)) map.removeLayer(tooltip); });
+          layer.addLayer(line);
         }
       }
-      onSelect(nearest);
-    },
-    [groupAssets, onSelect]
-  );
 
-  return (
-    <>
-      {/* Shadow — slightly wider invisible line for easier clicking */}
-      {/* <Polyline
-        positions={positions}
-        pathOptions={{
-          color: "transparent",
-          weight: 14,
-          opacity: 0,
-        }}
-        eventHandlers={{ click: handleClick }}
-      /> */}
+      // Highlight selected asset in polyline group
+      const selectedAsset = group.assets.find((a) => a.assetDisplayId === selectedId);
+      if (selectedAsset) {
+        const highlight = L.circleMarker([selectedAsset.lat, selectedAsset.lng], {
+          radius: SELECTED_RADIUS,
+          color: "#fff",
+          fillColor: SELECTED_COLOR,
+          fillOpacity: 0.95,
+          weight: 2,
+        });
+        layer.addLayer(highlight);
+      }
+    }
 
-      {/* One Polyline per contiguous segment; isolated points → CircleMarker */}
-      {segments.map((segPositions, idx) =>
-        segPositions.length === 1 ? (
-          // Single isolated detection: render as a small dot so it's visible
-          <CircleMarker
-            key={idx}
-            center={segPositions[0]}
-            radius={5}
-            pathOptions={{
-              color: routeColor(routeKey, hasSelected),
-              fillColor: routeColor(routeKey, hasSelected),
-              fillOpacity: 0.85,
-              weight: 1,
-            }}
-            eventHandlers={{ click: handleClick }}
-          >
-            <Tooltip sticky direction="top" opacity={0.95}>
-              <div className="text-xs leading-tight">
-                <div className="font-semibold">Road Marking Line</div>
-              </div>
-            </Tooltip>
-          </CircleMarker>
-        ) : (
-          <Polyline
-            key={idx}
-            positions={segPositions}
-            pathOptions={{
-              color: routeColor(routeKey, hasSelected),
-              weight: hasSelected ? 8 : 6,
-              opacity: hasSelected ? 1 : 0.8,
-              dashArray: undefined,
-              lineCap: "round",
-              lineJoin: "round",
-            }}
-            eventHandlers={{ click: handleClick }}
-          >
-            <Tooltip sticky direction="top" opacity={0.95}>
-              <div className="text-xs leading-tight">
-                <div className="font-semibold">Road Marking Line</div>
-              </div>
-            </Tooltip>
-          </Polyline>
-        )
-      )}
+    // Add the layer group to the map
+    if (!map.hasLayer(layer)) layer.addTo(map);
 
-      {/* Highlight the selected asset with a dot on the polyline */}
-      {selectedAsset && (
-        <CircleMarker
-          center={[selectedAsset.lat, selectedAsset.lng]}
-          radius={SELECTED_RADIUS}
-          pathOptions={{
-            color: "#fff",
-            fillColor: SELECTED_COLOR,
-            fillOpacity: 0.95,
-            weight: 2,
-          }}
-        >
-          <Tooltip direction="top" offset={[0, -8]} opacity={0.95} permanent={false}>
-            <div className="text-xs leading-tight">
-              <div className="font-semibold">{selectedAsset.assetType}</div>
-              <div className="text-[10px] text-muted-foreground font-mono">
-                {selectedAsset.lat.toFixed(5)}, {selectedAsset.lng.toFixed(5)}
-              </div>
-            </div>
-          </Tooltip>
-        </CircleMarker>
-      )}
-    </>
-  );
+    prevSelectedRef.current = selectedId;
+
+    return () => {
+      if (map.hasLayer(tooltip)) map.removeLayer(tooltip);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [markerAssets, polylineGroups, map, onSelect]);
+
+  // Fast-path: update only selection styling without rebuilding all markers
+  useEffect(() => {
+    const markerMap = markerMapRef.current;
+    const prev = prevSelectedRef.current;
+
+    if (prev === selectedId) return;
+
+    // Restore previous marker
+    if (prev) {
+      const prevMarker = markerMap.get(prev);
+      if (prevMarker) {
+        const asset = assetLookupRef.current.get(prev);
+        prevMarker.setRadius(DEFAULT_RADIUS);
+        prevMarker.setStyle({
+          fillColor: asset?.markerColor ?? "red",
+          fillOpacity: 0.7,
+          weight: 1.5,
+        });
+      }
+    }
+
+    // Highlight new marker
+    if (selectedId) {
+      const newMarker = markerMap.get(selectedId);
+      if (newMarker) {
+        newMarker.setRadius(SELECTED_RADIUS);
+        newMarker.setStyle({
+          fillColor: SELECTED_COLOR,
+          fillOpacity: 0.9,
+          weight: 1.8,
+        });
+        newMarker.bringToFront();
+      }
+    }
+
+    prevSelectedRef.current = selectedId;
+  }, [selectedId]);
+
+  return null;
 }
 
 /* ── Main component ─────────────────────────────────────── */
@@ -300,15 +357,12 @@ export default function LibraryMapView({
   selectedId,
   onSelect,
 }: LibraryMapViewProps) {
-  const { data: labelMapData } = useLabelMap();
   const center = useMemo<[number, number]>(() => {
     if (assets.length === 0) return [25.2, 55.27]; // Dubai fallback
     return [assets[0].lat, assets[0].lng];
   }, [assets]);
 
-  const wantsIcons = localStorage.getItem('wants_icons') === 'true';
-
-  /* ── Partition ─────────────────────────────────────────── */
+  /* ── Partition into markers vs polyline groups ──────────── */
   const { markerAssets, polylineGroups } = useMemo(() => {
     const markers: AssetRecord[] = [];
     const groupMap = new Map<string, AssetRecord[]>();
@@ -333,6 +387,13 @@ export default function LibraryMapView({
     };
   }, [assets]);
 
+  // Stable onSelect ref to avoid rebuilding markers when parent re-renders
+  const onSelectRef = useRef(onSelect);
+  onSelectRef.current = onSelect;
+  const stableOnSelect = useCallback((asset: AssetRecord) => {
+    onSelectRef.current(asset);
+  }, []);
+
   return (
     <MapContainer
       center={center}
@@ -351,75 +412,12 @@ export default function LibraryMapView({
       <FitBounds assets={assets} />
       <FlyToSelected assets={assets} selectedId={selectedId} />
 
-      {/* ── Polyline groups (Road Marking Line) ──────────── */}
-      {/* {polylineGroups.map((group) => (
-        <PolylineGroup
-          key={group.key}
-          routeKey={group.key}
-          routeId={group.routeId}
-          groupAssets={group.assets}
-          selectedId={selectedId}
-          onSelect={onSelect}
-        />
-      ))} */}
-
-      {/* ── Regular marker assets ────────────────────────── */}
-      {markerAssets.map((asset) => {
-        const isSelected = asset.assetDisplayId === selectedId;
-        const useIcon = wantsIcons && isAssetIconExist(asset.assetId, labelMapData);
-
-        if (useIcon) {
-          const baseIcon = getAssetIconFromId(asset.assetId, labelMapData);
-          const icon = isSelected ? getSelectedIcon(baseIcon) : baseIcon;
-          return (
-            <Marker
-              key={asset.assetDisplayId}
-              position={[asset.lat, asset.lng]}
-              icon={icon}
-              zIndexOffset={isSelected ? 1000 : 0}
-              eventHandlers={{
-                click: () => onSelect(asset),
-              }}
-            >
-              <Tooltip direction="top" offset={[0, -8]} opacity={0.95}>
-                <div className="text-xs leading-tight">
-                  <div className="font-semibold">{asset.assetType}</div>
-                  <div className="text-[10px] text-muted-foreground font-mono">
-                    {asset.lat.toFixed(5)}, {asset.lng.toFixed(5)}
-                  </div>
-                </div>
-              </Tooltip>
-            </Marker>
-          );
-        }
-
-        return (
-          <CircleMarker
-            key={asset.assetDisplayId}
-            center={[asset.lat, asset.lng]}
-            radius={isSelected ? SELECTED_RADIUS : DEFAULT_RADIUS}
-            pathOptions={{
-              color: "#fff",
-              stroke: true,
-              fillColor: isSelected ? SELECTED_COLOR : (asset.markerColor ?? "red"),
-              fillOpacity: isSelected ? 0.9 : 0.7,
-              weight: isSelected ? 1.8 : 1.5,
-            }}
-            eventHandlers={{
-              click: () => onSelect(asset),
-            }}
-          >
-            <Tooltip direction="top" offset={[0, -8]} opacity={0.95}>
-              <div className="text-xs leading-tight">
-                <div className="font-semibold">{asset.assetType}</div>
-                <div className="text-[10px] text-muted-foreground font-mono">
-                  {asset.lat.toFixed(5)}, {asset.lng.toFixed(5)}
-                </div>
-              </div>
-            </Tooltip>
-          </CircleMarker>
-        );
-      })}
+      <CanvasMarkerLayer
+        markerAssets={markerAssets}
+        polylineGroups={polylineGroups}
+        selectedId={selectedId}
+        onSelect={stableOnSelect}
+      />
     </MapContainer>
   );
 }

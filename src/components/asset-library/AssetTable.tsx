@@ -40,6 +40,20 @@ interface AssetTableProps {
   sortDir?: "asc" | "desc";
   /** Handler called when a sortable column header is clicked */
   onSort?: (colKey: string) => void;
+  /** Server-side pagination: current page (1-based) */
+  serverPage?: number;
+  /** Server-side pagination: total number of pages */
+  serverTotalPages?: number;
+  /** Server-side pagination: total matching item count */
+  serverTotalCount?: number;
+  /** Server-side pagination: page size */
+  serverPageSize?: number;
+  /** Server-side pagination: callback when page changes */
+  onPageChange?: (page: number) => void;
+  /** Server-side pagination: callback when page size changes */
+  onPageSizeChange?: (size: number) => void;
+  /** Sorted IDs for map-click page jumping (server-side pagination only) */
+  sortedIds?: string[];
 }
 
 export default function AssetTable({
@@ -57,29 +71,65 @@ export default function AssetTable({
   sortKey: propSortKey = null,
   sortDir: propSortDir = "asc",
   onSort: propOnSort = () => {},
+  serverPage,
+  serverTotalPages,
+  serverTotalCount,
+  serverPageSize,
+  onPageChange,
+  onPageSizeChange,
+  sortedIds,
 }: AssetTableProps) {
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
+  const isServerPaginated = serverPage != null;
 
-  // Reset page when items or search change
-  useEffect(() => { setPage(1); }, [items.length, searchQuery]);
+  // ── Client-side pagination state (used when NOT server-paginated) ──
+  const [localPage, setLocalPage] = useState(1);
+  const [localPageSize, setLocalPageSize] = useState(10);
 
-  // Items are already sorted by parent, just paginate them
-  const totalPages = Math.ceil(items.length / pageSize);
+  const page = isServerPaginated ? serverPage : localPage;
+  const pageSize = isServerPaginated ? (serverPageSize ?? 10) : localPageSize;
+  const totalCount = isServerPaginated ? (serverTotalCount ?? 0) : items.length;
+  const totalPages = isServerPaginated ? (serverTotalPages ?? 1) : Math.ceil(items.length / localPageSize);
+
+  const setPage = (p: number | ((prev: number) => number)) => {
+    const nextPage = typeof p === "function" ? p(page) : p;
+    if (isServerPaginated && onPageChange) {
+      onPageChange(nextPage);
+    } else {
+      setLocalPage(nextPage);
+    }
+  };
+
+  const setPageSize = (size: number) => {
+    if (isServerPaginated && onPageSizeChange) {
+      onPageSizeChange(size);
+    } else {
+      setLocalPageSize(size);
+      setLocalPage(1);
+    }
+  };
+
+  // Reset local page when items or search change (client-side only)
+  useEffect(() => {
+    if (!isServerPaginated) setLocalPage(1);
+  }, [items.length, searchQuery, isServerPaginated]);
+
+  // In server mode, items ARE the current page; in client mode, slice them
   const pagedItems = useMemo(
-    () => items.slice((page - 1) * pageSize, page * pageSize),
-    [items, page, pageSize]
+    () => isServerPaginated ? items : items.slice((localPage - 1) * localPageSize, localPage * localPageSize),
+    [items, localPage, localPageSize, isServerPaginated]
   );
 
-  // Jump to the page containing the selected row when selection changes
+  // Jump to the page containing the selected row when selection changes.
+  // Server-paginated: parent handles page navigation (handleRowClick / navigateAsset),
+  // so we only auto-jump for client-side pagination.
   useEffect(() => {
-    if (!selectedId) return;
+    if (!selectedId || isServerPaginated) return;
     const idx = items.findIndex((a) => a[idField] === selectedId);
     if (idx === -1) return;
-    const targetPage = Math.floor(idx / pageSize) + 1;
-    setPage(targetPage);
+    const targetPage = Math.floor(idx / localPageSize) + 1;
+    setLocalPage(targetPage);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedId, items, pageSize, idField]);
+  }, [selectedId, isServerPaginated]);
 
   // Scroll selected row into view after page has rendered
   useEffect(() => {
@@ -135,7 +185,7 @@ export default function AssetTable({
               </Button>
             </div>
           </div>
-        ) : items.length === 0 ? (
+        ) : totalCount === 0 ? (
           <div className="flex-1 flex items-center justify-center p-8">
             <div className="text-center">
               <Search className="h-10 w-10 mx-auto mb-2 text-muted-foreground/30" />
@@ -161,7 +211,7 @@ export default function AssetTable({
                         "text-[9px] font-semibold uppercase tracking-wider text-muted-foreground px-1.5 py-1 whitespace-nowrap text-center",
                         sortable && "cursor-pointer select-none hover:text-foreground"
                       )}
-                      onClick={sortable ? () => { propOnSort(col.key); setPage(1); } : undefined}
+                      onClick={sortable ? () => { propOnSort(col.key); } : undefined}
                     >
                       <span className="inline-flex items-center gap-0.5 justify-center">
                         {col.header}
@@ -203,13 +253,13 @@ export default function AssetTable({
           </Table>
         )}
       </div>
-      {items.length > 0 && (
+      {totalCount > 0 && (
         <div className="flex items-center justify-between px-4 py-1 border-t border-border text-[11px] text-muted-foreground">
           <div className="flex items-center gap-2">
             <span className="tabular-nums">
-              {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, items.length)} of {items.length}
+              {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, totalCount)} of {totalCount}
             </span>
-            <Select value={String(pageSize)} onValueChange={(v) => { setPageSize(Number(v)); setPage(1); }}>
+            <Select value={String(pageSize)} onValueChange={(v) => setPageSize(Number(v))}>
               <SelectTrigger className="h-5 w-14 text-[10px] border-border bg-background">
                 <SelectValue />
               </SelectTrigger>

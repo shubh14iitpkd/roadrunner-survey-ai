@@ -104,11 +104,11 @@ export default function AssetFilterStrip({
                 {directionFilter}
               </span>
             )}
-            {zoneFilter !== "all" && (
+            {/* {zoneFilter !== "all" && (
               <span className="inline-flex capitalize items-center rounded-full bg-primary/10 text-primary px-1.5 py-0.5 text-[9px] font-semibold border border-primary/20">
                 {zoneFilter}
               </span>
-            )}
+            )} */}
           </div>
         )}
       </div>

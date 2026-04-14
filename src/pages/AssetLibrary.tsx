@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useCallback, useRef, useDeferredValue } from "react";
+import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { useSearchParams, Link } from "react-router-dom";
 import LibraryMapView from "@/components/asset-library/LibraryMapView";
 import FrameComparisonPopup from "@/components/FrameComparisonPopup";
@@ -22,7 +22,7 @@ import AssetDetailSidebar from "@/components/asset-library/AssetDetailSidebar";
 import AssetTable, { type ColumnDef } from "@/components/asset-library/AssetTable";
 import capitalize from "@/helpers/capitalize";
 
-// ── Description keys to exclude from the full view ──────────
+// ── Description keys to exclude from the Detailed view ──────────
 const DESCRIPTION_KEY_FILTER = new Set([
   'Asset condition',
 ]);
@@ -118,6 +118,21 @@ function buildAssetColumns(
   ];
 }
 
+// Minimal map point from the /map-points endpoint
+interface MapPoint {
+  master_display_id: string;
+  asset_type: string;
+  asset_id: string;
+  lat: number;
+  lng: number;
+  condition: string;
+  group_id?: string;
+  side: string;
+  zone: string;
+  route_id?: number;
+  category_id: string;
+}
+
 export default function AssetLibrary() {
   const { user } = useAuth();
   const [searchParams] = useSearchParams();
@@ -126,9 +141,6 @@ export default function AssetLibrary() {
   const [conditionLogs, setConditionLogs] = useState<any[]>([]);
   const [loadError, setLoadError] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
-  // Defer the search value so each keystroke doesn't trigger expensive
-  // filter recomputation + map re-render of 1000+ markers.
-  const deferredSearchQuery = useDeferredValue(searchQuery);
   const { data: labelMapData } = useLabelMap();
 
   const [roads, setRoads] = useState<{ route_id: number; name: string; side?: string }[]>([]);
@@ -140,8 +152,8 @@ export default function AssetLibrary() {
   const [zoneFilter, setZoneFilter] = useState<"all" | "shoulder" | "median" | "pavement" | "overhead">("all");
   const [attributes, setAttributes] = useState<Record<string, readonly string[]>>({});
 
-  const [sortKey, setSortKey] = useState<string | null>(null);
-  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  const [sortKey, setSortKey] = useState<string | null>("lastSurveyDate");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
 
   const [selectedAsset, setSelectedAsset] = useState<AssetRecord | null>(null);
   const [selectedSurveyIdx, setSelectedSurveyIdx] = useState(0);
@@ -155,7 +167,15 @@ export default function AssetLibrary() {
   const [showFullView, setShowFullView] = useState(false);
   const [fullViewLoading, setFullViewLoading] = useState(false);
 
-  const [assets, setAssets] = useState<AssetRecord[]>([]);
+  // ── Two-phase data: lightweight map points + paginated table items ──
+  const [mapPoints, setMapPoints] = useState<MapPoint[]>([]);
+  const [tableItems, setTableItems] = useState<AssetRecord[]>([]);
+  const [sortedIds, setSortedIds] = useState<string[]>([]);
+  const [tablePage, setTablePage] = useState(1);
+  const [tablePageSize, setTablePageSize] = useState(10);
+  const [totalCount, setTotalCount] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
+
   // Cache detail responses keyed by masterDisplayId so repeated clicks are instant
   const detailCacheRef = useRef<Record<string, Partial<AssetRecord>>>({});
 
@@ -207,105 +227,122 @@ export default function AssetLibrary() {
     return asset.asset_type || asset.type || 'Unknown';
   }, [labelMapData]);
 
-  // Store label-map callbacks in refs so loadData has a stable identity.
-  // Without this, every labelMapData change → new callback refs → new loadData
-  // ref → useEffect fires → full data refetch even though only display names changed.
+  // Store label-map callbacks in refs so data loading has a stable identity.
   const getCategoryNameRef = useRef(getCategoryDisplayName);
   getCategoryNameRef.current = getCategoryDisplayName;
   const getAssetNameRef = useRef(getAssetDisplayName);
   getAssetNameRef.current = getAssetDisplayName;
 
-  // ── Data loading ──
-  const loadData = useCallback(async () => {
+  // ── Build filter params for server requests ──
+  // categoryFilter stores the display name (from the Select), but the backend
+  // expects category_id. Look it up via categoryOptions.
+  const categoryOptionsRef = useRef<{id: string; name: string}[]>([]);
+
+  const buildFilterParams = useCallback(() => {
+    const params: Record<string, any> = {};
+    if (selectedRouteId !== null) params.route_id = selectedRouteId;
+    if (categoryFilter !== "all") {
+      const match = categoryOptionsRef.current.find(c => c.name === categoryFilter);
+      if (match) params.category = match.id;
+    }
+    if (conditionFilter !== "all") params.condition = conditionFilter;
+    if (directionFilter !== "all") params.side = directionFilter;
+    if (zoneFilter !== "all") params.zone = zoneFilter;
+    if (selectedAssetType !== "all") params.asset_type = selectedAssetType;
+    if (searchQuery.trim()) params.search = searchQuery.trim();
+    return params;
+  }, [selectedRouteId, categoryFilter, conditionFilter, directionFilter, zoneFilter, selectedAssetType, searchQuery]);
+
+  // ── Map a raw paginated item to AssetRecord ──
+  const mapRawToAssetRecord = useCallback((asset: any, idx: number): AssetRecord => {
+    const coords = asset.location?.coordinates || asset.canonical_location?.coordinates || [];
+    const lng = coords[0] || 0;
+    const lat = coords[1] || 0;
+    const categoryId = asset.category_id || '';
+    const categoryName = getCategoryNameRef.current(categoryId);
+    const assetTypeName = getAssetNameRef.current(asset);
+    const condition: string = asset.condition || asset.latest_condition || 'unknown';
+    const mongoId = asset._id ? String(asset._id) : `AST-${idx}`;
+    const rawVideoId = asset.latest_video_id ? String(asset.latest_video_id) : undefined;
+    const surveyId = asset.latest_survey_id ? String(asset.latest_survey_id) : undefined;
+    const lastDate = asset.last_seen_date
+      ? (typeof asset.last_seen_date === 'string' ? asset.last_seen_date.split('T')[0] : asset.last_seen_date)
+      : asset.created_at?.split?.('T')?.[0] || '—';
+
+    return {
+      id: mongoId,
+      assetId: asset.asset_id || '',
+      category_id: categoryId,
+      assetType: assetTypeName,
+      assetCategory: categoryName,
+      assetDisplayId: asset.master_display_id || '',
+      masterDisplayId: asset.master_display_id || '',
+      defectId: asset.latest_defect_id ?? `DEF-${String(idx).padStart(6, '0')}`,
+      condition,
+      markerColor: conditionToColor(condition),
+      lat, lng, surveyId,
+      roadName: asset.route_name || '',
+      roadSide: asset.road_side || undefined,
+      routeId: asset.route_id != null ? Number(asset.route_id) : undefined,
+      groupId: asset.group_id ?? undefined,
+      side: asset.side || 'Unknown',
+      zone: asset.zone || 'Unknown',
+      lastSurveyDate: lastDate,
+      issue: asset.issue || '',
+      description: asset.description && typeof asset.description === 'object' ? asset.description : undefined,
+      severity: asset.severity || 'Low',
+      videoId: rawVideoId ? String(rawVideoId) : undefined,
+      frameNumber: asset.latest_frame_number,
+      box: asset.latest_box ? {
+        x: asset.latest_box.x, y: asset.latest_box.y,
+        width: asset.latest_box.width ?? asset.latest_box.w ?? 0,
+        height: asset.latest_box.height ?? asset.latest_box.h ?? 0,
+      } : undefined,
+      surveyHistory: [],
+      totalSurveysDetected: asset.survey_count ?? 0,
+    };
+  }, []);
+
+  // ── Fetch a single table page ──
+  const fetchTablePage = useCallback(async (
+    page: number, pageSize: number, filters: Record<string, any>,
+    sKey: string | null, sDir: string,
+  ) => {
+    const resp = await api.assets.getMasterPaginated({
+      ...filters,
+      page,
+      limit: pageSize,
+      sort_key: sKey || "lastSurveyDate",
+      sort_dir: sDir,
+    });
+    if (resp) {
+      const mapped = (resp.items || []).map((a: any, i: number) => mapRawToAssetRecord(a, (page - 1) * pageSize + i));
+      setTableItems(mapped);
+      setSortedIds(resp.sorted_ids || []);
+      setTotalCount(resp.total_count ?? 0);
+      setTotalPages(resp.total_pages ?? 1);
+      setTablePage(resp.page ?? page);
+    }
+  }, [mapRawToAssetRecord]);
+
+  // ── Initial + filter/sort data loading ──
+  const loadData = useCallback(async (filters?: Record<string, any>, page = 1) => {
     try {
       setLoading(true);
       setLoadError(false);
-      const [roadsResp, masterResp] = await Promise.all([
+      const effectiveFilters = filters ?? buildFilterParams();
+
+      const [roadsResp, mapResp] = await Promise.all([
         api.roads.list(),
-        api.assets.getMaster({}), // no condition filter = all assets
+        api.assets.getMasterMapPoints(effectiveFilters),
+        fetchTablePage(page, tablePageSize, effectiveFilters, sortKey, sortDir),
       ]);
 
       if (roadsResp?.items) {
         setRoads(roadsResp.items.map((r: any) => ({ route_id: r.route_id, name: r.road_name, side: r.road_side })));
       }
-
-      if (masterResp?.items) {
-        const mapped: AssetRecord[] = masterResp.items.map((asset: any, idx: number) => {
-          const coords = asset.location?.coordinates || asset.canonical_location?.coordinates || [];
-          const lng = coords[0] || 0;
-          const lat = coords[1] || 0;
-          const categoryId = asset.category_id || '';
-          const categoryName = getCategoryNameRef.current(categoryId);
-          const assetTypeName = getAssetNameRef.current(asset);
-          const condition: string = asset.condition || asset.latest_condition || 'unknown';
-
-          const mongoId = asset._id
-            ? (typeof asset._id === 'object' && (asset._id as any)?.$oid
-              ? (asset._id as any).$oid
-              : String(asset._id))
-            : `AST-${idx}`;
-
-          // survey_history is stripped from the slim list response to reduce payload.
-          // video_id/frame_number/box are promoted to latest_* top-level fields by the
-          // aggregation pipeline. Full survey_history is loaded on-demand when an asset
-          // is selected (see fetchAndMergeDetail).
-          const rawVideoId = asset.latest_video_id
-            ? (typeof asset.latest_video_id === 'object' && (asset.latest_video_id as any)?.$oid
-              ? (asset.latest_video_id as any).$oid
-              : String(asset.latest_video_id))
-            : undefined;
-
-          const surveyId = asset.latest_survey_id
-            ? (typeof asset.latest_survey_id === 'object' && (asset.latest_survey_id as any)?.$oid
-              ? (asset.latest_survey_id as any).$oid
-              : String(asset.latest_survey_id))
-            : undefined;
-
-          // Format the last_seen_date
-          const lastDate = asset.last_seen_date
-            ? (typeof asset.last_seen_date === 'string'
-              ? asset.last_seen_date.split('T')[0]
-              : asset.last_seen_date)
-            : asset.created_at?.split?.('T')?.[0] || '—';
-
-          return {
-            id: mongoId,
-            anomalyId: mongoId,
-            assetId: asset.asset_id || '',
-            category_id: categoryId,
-            assetType: assetTypeName,
-            assetCategory: categoryName,
-            assetDisplayId: asset.master_display_id || '',
-            masterDisplayId: asset.master_display_id || '',
-            defectId: asset.latest_defect_id ?? `DEF-${String(idx).padStart(6, '0')}`,
-            condition,
-            markerColor: conditionToColor(condition),
-            lat,
-            lng,
-            surveyId,
-            roadName: asset.route_name || '',
-            roadSide: asset.road_side || undefined,
-            routeId: asset.route_id != null ? Number(asset.route_id) : undefined,
-            groupId: asset.group_id ?? undefined,
-            side: asset.side || 'Unknown',
-            zone: asset.zone || 'Unknown',
-            lastSurveyDate: lastDate,
-            issue: asset.issue || '',
-            description: asset.description && typeof asset.description === 'object' ? asset.description : undefined,
-            severity: asset.severity || 'Low',
-            videoId: rawVideoId ? String(rawVideoId) : undefined,
-            frameNumber: asset.latest_frame_number,
-            box: asset.latest_box ? {
-              x: asset.latest_box.x,
-              y: asset.latest_box.y,
-              width: asset.latest_box.width ?? asset.latest_box.w ?? 0,
-              height: asset.latest_box.height ?? asset.latest_box.h ?? 0,
-            } : undefined,
-            surveyHistory: [], // loaded lazily on asset selection via fetchAndMergeDetail
-            totalSurveysDetected: asset.survey_count ?? 0,
-          };
-        });
-        setAssets(mapped);
+      if (mapResp?.points) {
+        setMapPoints(mapResp.points);
       }
     } catch (err: any) {
       console.error("Failed to load data:", err);
@@ -314,9 +351,61 @@ export default function AssetLibrary() {
       setLoading(false);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // stable — reads label-map via refs, not direct deps
+  }, [buildFilterParams, fetchTablePage, tablePageSize, sortKey, sortDir]);
 
-  useEffect(() => { loadData(); }, [loadData]);
+  // Load on mount
+  const initialLoadDoneRef = useRef(false);
+  useEffect(() => { loadData().then(() => { initialLoadDoneRef.current = true; }); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Re-fetch when filters change (debounced for search via useEffect delay)
+  const filterTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const prevFiltersRef = useRef<string>("");
+
+  useEffect(() => {
+    const filters = buildFilterParams();
+    const filterKey = JSON.stringify(filters) + `|${sortKey}|${sortDir}`;
+    if (filterKey === prevFiltersRef.current) return;
+    prevFiltersRef.current = filterKey;
+
+    // Skip on mount (loadData already called above)
+    if (!initialLoadDoneRef.current) return;
+
+    // Deselect current asset when filters or sort change
+    setSelectedAsset(null);
+
+    if (filterTimerRef.current) clearTimeout(filterTimerRef.current);
+    filterTimerRef.current = setTimeout(() => {
+      loadData(filters, 1);
+    }, searchQuery.trim() ? 350 : 0); // Debounce search, instant for other filters
+
+    return () => { if (filterTimerRef.current) clearTimeout(filterTimerRef.current); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [categoryFilter, conditionFilter, directionFilter, zoneFilter, selectedAssetType, selectedRouteId, searchQuery, sortKey, sortDir]);
+
+  // ── Convert map points to AssetRecord for the map component ──
+  const mapAssets = useMemo<AssetRecord[]>(() => {
+    return mapPoints.map((p) => ({
+      id: p.master_display_id,
+      assetDisplayId: p.master_display_id,
+      masterDisplayId: p.master_display_id,
+      assetId: p.asset_id,
+      assetType: getCategoryNameRef.current ? getAssetNameRef.current({ asset_id: p.asset_id, asset_type: p.asset_type }) : p.asset_type,
+      assetCategory: getCategoryNameRef.current(p.category_id),
+      defectId: '',
+      lat: p.lat,
+      lng: p.lng,
+      condition: p.condition,
+      markerColor: conditionToColor(p.condition),
+      groupId: p.group_id ?? undefined,
+      routeId: p.route_id,
+      side: p.side || 'Unknown',
+      zone: p.zone || 'Unknown',
+      roadName: '',
+      lastSurveyDate: '',
+      issue: '',
+      severity: 'Low',
+    }));
+  }, [mapPoints]);
 
   // ── Lazy detail loader ──
   // Fetches survey_history + full description/issue for one selected asset.
@@ -335,6 +424,11 @@ export default function AssetLibrary() {
       if (resp?.item) {
         const raw = resp.item;
         const history: any[] = raw.survey_history || [];
+        const lastDate = raw.last_seen_date
+          ? String(raw.last_seen_date).split('T')[0]
+          : raw.created_at?.split?.('T')?.[0] || '—';
+
+        // Backend uses fast_mongo_response so all ObjectIds are plain strings already.
         const detail: Partial<AssetRecord> = {
           surveyHistory: history.map((h: any) => ({
             survey_display_id: h.survey_display_id,
@@ -344,11 +438,7 @@ export default function AssetLibrary() {
             asset_display_id: h.asset_display_id,
             match_confidence: h.match_confidence,
             location: h.location,
-            video_id: h.video_id
-              ? (typeof h.video_id === 'object' && (h.video_id as any)?.$oid
-                ? (h.video_id as any).$oid
-                : String(h.video_id))
-              : undefined,
+            video_id: h.video_id ? String(h.video_id) : undefined,
             frame_number: h.frame_number,
             box: h.box,
             created_at: h.created_at,
@@ -356,6 +446,21 @@ export default function AssetLibrary() {
           totalSurveysDetected: raw.total_surveys_detected ?? history.length,
           issue: raw.issue || '',
           ...(raw.description && typeof raw.description === 'object' ? { description: raw.description } : {}),
+          // Fields that map-point assets lack — fill from the full document
+          // so clicking a map point loads the frame image just like a table click.
+          id: raw._id ? String(raw._id) : undefined,
+          videoId: raw.latest_video_id ? String(raw.latest_video_id) : undefined,
+          frameNumber: raw.latest_frame_number,
+          box: raw.latest_box ? {
+            x: raw.latest_box.x, y: raw.latest_box.y,
+            width: raw.latest_box.width ?? raw.latest_box.w ?? 0,
+            height: raw.latest_box.height ?? raw.latest_box.h ?? 0,
+          } : undefined,
+          surveyId: raw.latest_survey_id ? String(raw.latest_survey_id) : undefined,
+          roadName: raw.route_name || '',
+          roadSide: raw.road_side || undefined,
+          lastSurveyDate: lastDate,
+          defectId: raw.latest_defect_id ?? '',
         };
         detailCacheRef.current[asset.masterDisplayId] = detail;
         setSelectedAsset(prev =>
@@ -381,61 +486,41 @@ export default function AssetLibrary() {
     if (routeIdParam) setSelectedRouteId(Number(routeIdParam));
   }, [searchParams]);
 
-  // ── Filtering ──
-  const filteredAssets = useMemo(() => {
-    const q = deferredSearchQuery.toLowerCase().trim();
-    return assets.filter((a) => {
-      if (categoryFilter !== "all" && a.assetCategory !== categoryFilter) return false;
-      if (conditionFilter !== "all" && a.condition !== conditionFilter) return false;
-      if (directionFilter !== "all" && a.side !== directionFilter) return false;
-      if (selectedAssetType !="all" && selectedAssetType !== a.assetType) return false;
-      if (zoneFilter !== "all" && a.zone !== zoneFilter) return false;
-      if (selectedRouteId !== null && a.routeId !== selectedRouteId) return false;
-      if (q && !(
-        (a.defectId ?? '').toLowerCase().includes(q) ||
-        (a.assetDisplayId ?? '').toLowerCase().includes(q) ||
-        a.assetId.toLowerCase().includes(q) ||
-        a.assetType.toLowerCase().includes(q) ||
-        (a.roadName ?? '').toLowerCase().includes(q)
-      )) return false;
-      return true;
-    });
-  }, [assets, conditionFilter, categoryFilter, selectedAssetType, directionFilter, zoneFilter, selectedRouteId, deferredSearchQuery]);
+  // Navigate to prev/next asset within the sorted list
+  const navigateAsset = useCallback(async (direction: 'prev' | 'next') => {
+    if (!selectedAsset || !sortedIds.length) return;
+    const currentIdx = sortedIds.indexOf(selectedAsset.assetDisplayId ?? '');
+    if (currentIdx === -1) return;
+    const nextIdx = direction === 'prev' ? currentIdx - 1 : currentIdx + 1;
+    if (nextIdx < 0 || nextIdx >= sortedIds.length) return;
 
-  // ── Sorting filtered assets ──
-  const sortedAndFilteredAssets = useMemo(() => {
-    if (!sortKey) return filteredAssets;
-    const col = BASE_ASSET_COLUMNS.find((c) => c.key === sortKey);
-    if (!col?.getValue) return filteredAssets;
-    const getter = col.getValue;
-    return [...filteredAssets].sort((a, b) => {
-      const va = getter(a);
-      const vb = getter(b);
-      let cmp: number;
-      if (typeof va === "number" && typeof vb === "number") {
-        cmp = va - vb;
-      } else {
-        cmp = String(va).localeCompare(String(vb), undefined, { numeric: true, sensitivity: "base" });
-      }
-      return sortDir === "asc" ? cmp : -cmp;
-    });
-  }, [filteredAssets, sortKey, sortDir]);
+    const nextDisplayId = sortedIds[nextIdx];
+    const targetPage = Math.floor(nextIdx / tablePageSize) + 1;
 
-  const navigateAsset = useCallback((direction: 'prev' | 'next') => {
-    if (!selectedAsset) return;
-    const idx = sortedAndFilteredAssets.findIndex(a => a.defectId === selectedAsset.defectId);
-    if (idx === -1) return;
-    const nextIdx = direction === 'prev' ? idx - 1 : idx + 1;
-    if (nextIdx >= 0 && nextIdx < sortedAndFilteredAssets.length) {
-      const nextAsset = sortedAndFilteredAssets[nextIdx];
-      setSelectedAsset(nextAsset);
-      setSelectedSurveyIdx(0);
-      setMarkerPopup(null);
-      fetchAndMergeDetail(nextAsset);
+    // If the target is on a different page, fetch it
+    if (targetPage !== tablePage) {
+      const filters = buildFilterParams();
+      await fetchTablePage(targetPage, tablePageSize, filters, sortKey, sortDir);
     }
-  }, [selectedAsset, sortedAndFilteredAssets, fetchAndMergeDetail]);
 
-  const handleRowClick = useCallback((asset: AssetRecord) => {
+    // Find the asset in tableItems (it may have just been loaded)
+    // Use a short delay to allow state to settle after page fetch
+    setTimeout(() => {
+      setSelectedAsset(prev => {
+        // Try to find in current tableItems
+        const found = tableItems.find(a => a.assetDisplayId === nextDisplayId);
+        if (found) {
+          setSelectedSurveyIdx(0);
+          setMarkerPopup(null);
+          fetchAndMergeDetail(found);
+          return found;
+        }
+        return prev;
+      });
+    }, 50);
+  }, [selectedAsset, sortedIds, tablePage, tablePageSize, tableItems, buildFilterParams, fetchTablePage, sortKey, sortDir, fetchAndMergeDetail]);
+
+  const handleRowClick = useCallback(async (asset: AssetRecord) => {
     setSelectedAsset(asset);
     setSelectedSurveyIdx(0);
     setMarkerPopup(null);
@@ -444,32 +529,53 @@ export default function AssetLibrary() {
     setMapTransitioning(true);
     if (mapTransitionTimer.current) clearTimeout(mapTransitionTimer.current);
     mapTransitionTimer.current = setTimeout(() => setMapTransitioning(false), 400);
-  }, [fetchAndMergeDetail]);
+
+    // If this is a map click (asset from mapAssets, may not be on current table page),
+    // navigate the table to the page containing this asset
+    if (asset.assetDisplayId && sortedIds.length > 0) {
+      const idx = sortedIds.indexOf(asset.assetDisplayId);
+      if (idx !== -1) {
+        const targetPage = Math.floor(idx / tablePageSize) + 1;
+        if (targetPage !== tablePage) {
+          const filters = buildFilterParams();
+          await fetchTablePage(targetPage, tablePageSize, filters, sortKey, sortDir);
+        }
+      }
+    }
+  }, [fetchAndMergeDetail, sortedIds, tablePage, tablePageSize, buildFilterParams, fetchTablePage, sortKey, sortDir]);
 
   const [exporting, setExporting] = useState(false);
   const handleExportExcel = async () => {
     setExporting(true);
-    // the export was so blazingly fast I could not see the loader
-    // await new Promise(resolve => setTimeout(resolve, 4000));
-    console.log("Exporting Excel with assets:", exporting);
     try {
+      // Fetch all filtered assets for export via the fast master endpoint
+      const filters = buildFilterParams();
+      const resp = await api.assets.getMaster(filters);
+      const allItems: any[] = resp?.items || [];
       const headers = [
         "Asset ID", "Asset Type", "Category", "Condition",
         "Latitude", "Longitude", "Route Name", "Route Side", "Asset Side", "Asset Zone", "Survey Date",
       ];
-      const rows = filteredAssets.map((a) => [
-        a.assetDisplayId, a.assetType, a.assetCategory, capitalize(displayCondition(a.condition)),
-        a.lat, a.lng, a.roadName, a.roadSide ?? "—", capitalize(a.side), capitalize(a.zone), a.lastSurveyDate,
-      ]);
+      const rows = allItems.map((a: any) => {
+        const coords = a.location?.coordinates || a.canonical_location?.coordinates || [];
+        const condition = a.condition || a.latest_condition || 'unknown';
+        const lastDate = a.last_seen_date ? String(a.last_seen_date).split('T')[0] : a.created_at?.split?.('T')?.[0] || '—';
+        return [
+          a.master_display_id, getAssetDisplayName(a), getCategoryDisplayName(a.category_id || ''), capitalize(displayCondition(condition)),
+          coords[1] || 0, coords[0] || 0, a.route_name || '', a.road_side ?? "—", capitalize(a.side || 'Unknown'), capitalize(a.zone || 'Unknown'), lastDate,
+        ];
+      });
       exportToExcel({
         filename: "Asset_Library_Report.xlsx",
         sheetName: "Assets",
         title: "RoadSight AI - Asset Library Report",
-        subtitle: `Generated: ${new Date().toLocaleDateString()} | ${filteredAssets.length} assets`,
+        subtitle: `Generated: ${new Date().toLocaleDateString()} | ${allItems.length} assets`,
         headers,
         rows,
       });
       toast.success("Asset report exported as Excel");
+    } catch (err: any) {
+      toast.error("Failed to export: " + (err?.message || "Unknown error"));
     } finally {
       setExporting(false);
     }
@@ -522,9 +628,12 @@ export default function AssetLibrary() {
     try {
       await api.assets.markAsGood(mongoId, { name: surveyorName, user_id: surveyorId, survey_id: asset.surveyId });
       toast.success(`Asset ${asset.assetDisplayId} marked as good`);
-      setAssets(prev => prev.map(a => a.id === mongoId ? { ...a, condition: "good", markerColor: conditionToColor("good") } : a));
+      // Optimistically update table items
+      setTableItems(prev => prev.map(a => a.id === mongoId ? { ...a, condition: "good", markerColor: conditionToColor("good") } : a));
+      // Optimistically update map points
+      setMapPoints(prev => prev.map(p => p.master_display_id === asset.assetDisplayId ? { ...p, condition: "good" } : p));
       setSelectedAsset(prev => prev?.id === mongoId ? { ...prev, condition: "good", markerColor: conditionToColor("good") } : prev);
-      // Invalidate cached detail so condition logs are fresh on next Full View open
+      // Invalidate cached detail so condition logs are fresh on next Detailed View open
       if (asset.masterDisplayId) delete detailCacheRef.current[asset.masterDisplayId];
     } catch (err: any) {
       toast.error(err?.message || "Failed to mark asset as good");
@@ -558,9 +667,12 @@ export default function AssetLibrary() {
     try {
       await api.assets.unmarkGood(mongoId, { name: surveyorName, user_id: surveyorId, survey_id: surveyId });
       toast.success(`Asset ${asset.assetDisplayId} marked as defective`);
-      setAssets(prev => prev.map(a => a.id === mongoId ? { ...a, condition: "damaged", markerColor: conditionToColor("damaged") } : a));
+      // Optimistically update table items
+      setTableItems(prev => prev.map(a => a.id === mongoId ? { ...a, condition: "damaged", markerColor: conditionToColor("damaged") } : a));
+      // Optimistically update map points
+      setMapPoints(prev => prev.map(p => p.master_display_id === asset.assetDisplayId ? { ...p, condition: "damaged" } : p));
       setSelectedAsset(prev => prev?.id === mongoId ? { ...prev, condition: "damaged", markerColor: conditionToColor("damaged") } : prev);
-      // Invalidate cached detail so condition logs are fresh on next Full View open
+      // Invalidate cached detail so condition logs are fresh on next Detailed View open
       if (asset.masterDisplayId) delete detailCacheRef.current[asset.masterDisplayId];
     } catch (err: any) {
       toast.error(err?.message || "Failed to mark asset as defective");
@@ -585,10 +697,14 @@ export default function AssetLibrary() {
 
 
   const assetTypeOptions = useMemo(() => {
-    let source = assets;
-    if (categoryFilter !== "all") source = source.filter(a => a.assetCategory === categoryFilter);
-    return [...new Set(source.map((a) => a.assetType))].sort();
-  }, [assets, categoryFilter]);
+    // Derive available asset types from map points (which are already server-filtered)
+    const types = new Set<string>();
+    for (const p of mapPoints) {
+      const name = getAssetNameRef.current({ asset_id: p.asset_id, asset_type: p.asset_type });
+      types.add(name);
+    }
+    return [...types].sort();
+  }, [mapPoints]);
 
   const categoryOptions = useMemo(() => {
     const categoryMap = labelMapData?.categories;
@@ -598,6 +714,8 @@ export default function AssetLibrary() {
       opts.push({ id: cat, name: cinfo.display_name });
     }
     opts.sort((a, b) => a.name.localeCompare(b.name));
+    // Keep ref in sync for buildFilterParams to look up category_id by display name
+    categoryOptionsRef.current = opts;
     return opts
   }, [labelMapData]);
 
@@ -656,7 +774,7 @@ export default function AssetLibrary() {
 
       {/* Filter Strip */}
       <AssetFilterStrip
-        filteredCount={filteredAssets.length}
+        filteredCount={totalCount}
         countLabel="assets"
         directionFilter={directionFilter}
         onDirectionChange={setDirectionFilter}
@@ -682,7 +800,7 @@ export default function AssetLibrary() {
       <div className="flex min-h-0" style={{ flex: "1 1 45%" }}>
         <div className="flex-1 relative min-w-0" style={{ zIndex: 0, isolation: 'isolate' }}>
           <LibraryMapView
-            assets={filteredAssets}
+            assets={mapAssets}
             selectedId={selectedAsset?.assetDisplayId ?? null}
             onSelect={handleRowClick}
           />
@@ -706,7 +824,7 @@ export default function AssetLibrary() {
           frameWidth={frameWidth}
           frameHeight={frameHeight}
           imageLoading={pointImageLoading}
-          filteredAssets={sortedAndFilteredAssets}
+          filteredAssets={tableItems}
           onCloseAsset={() => setSelectedAsset(null)}
           getAssetDisplayName={getAssetDisplayName}
           onNavigate={navigateAsset}
@@ -734,12 +852,12 @@ export default function AssetLibrary() {
         />
       </div>
 
-      {/* Full View Dialog */}
+      {/* Detailed View Dialog */}
       <Dialog open={showFullView} onOpenChange={async (open) => {
         if (!open) { setShowFullView(false); setConditionLogs([]); setFullViewLoading(false); }
       }}>
         <DialogHeader className="hidden">
-          <DialogTitle>Full Asset View</DialogTitle>
+          <DialogTitle>Detailed Asset View</DialogTitle>
           <DialogDescription>Full description of an asset</DialogDescription>
         </DialogHeader>
         <DialogContent className="max-w-[80vw] w-[70vw] h-[85vh] max-h-[90vh] overflow-auto p-0" style={{ zIndex: 9999 }}>
@@ -1100,14 +1218,14 @@ export default function AssetLibrary() {
 
       {/* Bottom Table */}
       <AssetTable
-        items={sortedAndFilteredAssets}
+        items={tableItems}
         loading={loading}
         loadError={loadError}
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
         selectedId={selectedAsset?.assetDisplayId ?? null}
         onRowClick={handleRowClick}
-        onRetry={loadData}
+        onRetry={() => loadData()}
         idField="assetDisplayId"
         onClearFilters={clearFilters}
         columns={assetColumns}
@@ -1121,6 +1239,20 @@ export default function AssetLibrary() {
             setSortDir("asc");
           }
         }}
+        serverPage={tablePage}
+        serverTotalPages={totalPages}
+        serverTotalCount={totalCount}
+        serverPageSize={tablePageSize}
+        onPageChange={async (newPage) => {
+          const filters = buildFilterParams();
+          await fetchTablePage(newPage, tablePageSize, filters, sortKey, sortDir);
+        }}
+        onPageSizeChange={async (newSize) => {
+          setTablePageSize(newSize);
+          const filters = buildFilterParams();
+          await fetchTablePage(1, newSize, filters, sortKey, sortDir);
+        }}
+        sortedIds={sortedIds}
       />
     </div>
   );

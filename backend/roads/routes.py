@@ -211,6 +211,16 @@ def update_road(route_id: int):
 	res = db.roads.find_one_and_update({"route_id": route_id}, {"$set": {**body, "updated_at": get_now_iso()}})
 	if not res:
 		return jsonify({"error": "not found"}), 404
+
+	# Propagate denormalized road name/side to master_assets if changed
+	propagate = {}
+	if "road_name" in body:
+		propagate["route_name"] = body["road_name"]
+	if "road_side" in body:
+		propagate["road_side"] = body["road_side"]
+	if propagate:
+		db.master_assets.update_many({"route_id": route_id}, {"$set": propagate})
+
 	return jsonify({"ok": True})
 
 

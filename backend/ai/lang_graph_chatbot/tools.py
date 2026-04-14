@@ -351,14 +351,15 @@ def list_asset_categories(with_labels: bool = False) -> str:
     """
     rm = get_resolved_map()
 
-    cat_labels: dict[str, list[str]] = {}
+    cat_labels: dict[str, set[str]] = {}
     for info in rm["labels"].values():
         cid = info.get("category_id", "unknown")
-        cat_labels.setdefault(cid, []).append(info["display_name"])
+        name = info.get("group_id") or info["display_name"]
+        cat_labels.setdefault(cid, set()).add(name)
 
     categories = []
     for cid, cat_info in rm["categories"].items():
-        labels = sorted(cat_labels.get(cid, []))
+        labels = sorted(cat_labels.get(cid, set()))
         entry: dict = {
             "category_id": cid,
             "name": cat_info["display_name"],
@@ -1093,7 +1094,7 @@ def get_route_condition_report(route_id: int) -> str:
     asset_pipeline = [
         {"$match": {"route_id": route_id, "latest_condition": {"$ne": "good"}}},
         {"$group": {
-            "_id": "$asset_id",
+            "_id": {"$ifNull": ["$group_id", "$asset_id"]},
             "damaged_count": {"$sum": 1},
         }},
         {"$sort": {"damaged_count": -1}},
@@ -1242,11 +1243,11 @@ def get_catalog_category_info(category_name: str) -> str:
         return json.dumps({"error": f"Category '{category_name}' not found in catalog"})
 
     rm = get_resolved_map()
-    labels = [
-        info["display_name"]
+    labels = set(
+        info.get("group_id") or info["display_name"]
         for aid, info in rm["labels"].items()
         if info.get("category_id") == cid
-    ]
+    )
     labels_sorted = sorted(labels)
 
     return json.dumps({
@@ -1284,8 +1285,9 @@ def find_asset_category(asset_name: str) -> str:
         gid = (info.get("group_id") or "").lower()
         if name_lower in dn or name_lower in defn or name_lower in gid or dn.startswith(name_lower):
             cid = info.get("category_id", "")
+            asset_display = info.get("group_id") or info["display_name"]
             matches.append({
-                "asset": info["display_name"],
+                "asset": asset_display,
                 "category": _cat_name(cid),
                 "category_id": cid,
             })
@@ -1294,14 +1296,14 @@ def find_asset_category(asset_name: str) -> str:
         return json.dumps({"error": f"Asset '{asset_name}' not found in catalog"})
 
     # Deduplicate by category for a clean summary
-    seen_cats = {}
+    seen_cats: dict[str, set] = {}
     for m in matches:
-        seen_cats.setdefault(m["category"], []).append(m["asset"])
+        seen_cats.setdefault(m["category"], set()).add(m["asset"])
 
     return json.dumps({
         "query": asset_name,
         "results": [
-            {"category": cat, "matching_assets": assets}
+            {"category": cat, "matching_assets": sorted(assets)}
             for cat, assets in seen_cats.items()
         ],
     })

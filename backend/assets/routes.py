@@ -10,7 +10,7 @@ from db import get_db
 from utils.ids import get_now_iso
 from utils.is_demo_video import is_demo
 from utils.rbac import role_required
-from utils.response import mongo_response
+from utils.response import mongo_response, fast_mongo_response
 
 assets_bp = Blueprint("assets", __name__)
 
@@ -312,7 +312,9 @@ def get_master_asset_by_display_id(master_display_id: str):
 	master = db["master_assets"].find_one({"master_display_id": master_display_id})
 	if not master:
 		return mongo_response({"error": "Master asset not found"}, 404)
-	return mongo_response({"item": master})
+	# Exclude the heavy embedding vector — not needed by the frontend
+	master.pop("embedding", None)
+	return fast_mongo_response({"item": master})
 
 
 @assets_bp.post("/master", endpoint="assets_master_lib")
@@ -362,97 +364,36 @@ def get_master_assets():
 	          type: integer
 	"""
 	db = get_db()
-	route_id = request.args.get("route_id", type=int)
-	category = request.args.get("category")
-	condition = request.args.get("condition")
-	zone = request.args.get("zone")
-	road_side = request.args.get("side")
+	query = _build_master_filter(request.args)
 
-	# Build query on master_assets
-	query = {}
-	if route_id is not None:
-		query["route_id"] = route_id
-	if category:
-		query["category_id"] = category
-	if condition:
-		query["latest_condition"] = condition
-	if zone:
-		query["zone"] = zone
-	if road_side:
-		query["side"] = road_side
-
-	# Slim list pipeline: excludes survey_history (large array), embedding, and other heavy
-	# fields to minimize payload. video_id/frame_number/box are promoted from the latest
-	# asset record so the map and image-preview still work without the full history.
-	# The full survey_history is fetched on-demand via GET /api/assets/master/<id>.
+	# Slim list: route_name, road_side, latest_frame_number, latest_video_id, latest_box,
+	# latest_defect_id, and latest_description are denormalized onto master_assets
+	# (see asset_linker.py + migrate_denormalize_master_assets.py), so no $lookup needed.
 	pipeline = [
 		{"$match": query},
 		{
-			"$lookup": {
-				"from": "roads",
-				"localField": "route_id",
-				"foreignField": "route_id",
-				"as": "road_info"
-			}
-		},
-		# Fetch description, issue, and image-preview fields from the latest asset record.
-		# Uses idx_assets_master_survey compound index for fast lookup.
-		{
-			"$lookup": {
-				"from": "assets",
-				"let": {"ma_id": "$_id", "latest_sid": "$latest_survey_id"},
-				"pipeline": [
-					{
-						"$match": {
-							"$expr": {
-								"$and": [
-									{"$eq": ["$master_asset_id", "$$ma_id"]},
-									{"$eq": ["$survey_id", "$$latest_sid"]},
-								]
-							}
-						}
-					},
-					{"$project": {"description": 1, "issue": 1, "frame_number": 1, "video_id": 1, "box": 1, "defect_id": 1}},
-					{"$limit": 1},
-				],
-				"as": "latest_asset_data"
-			}
-		},
-		{
 			"$addFields": {
-				"route_name": {"$arrayElemAt": ["$road_info.road_name", 0]},
-				"road_side": {"$arrayElemAt": ["$road_info.road_side", 0]},
 				"condition": "$latest_condition",
 				"confidence": "$latest_confidence",
 				"location": "$canonical_location",
-				"description": {"$arrayElemAt": ["$latest_asset_data.description", 0]},
-				"issue": {
-					"$ifNull": [
-						{"$arrayElemAt": ["$latest_asset_data.issue", 0]},
-						"$issue",
-					]
-				},
-				# Promote image-preview fields to top level so the sidebar renders
-				# immediately without needing the full survey_history array.
-				"latest_frame_number": {"$arrayElemAt": ["$latest_asset_data.frame_number", 0]},
-				"latest_video_id": {"$arrayElemAt": ["$latest_asset_data.video_id", 0]},
-				"latest_box": {"$arrayElemAt": ["$latest_asset_data.box", 0]},
-				"latest_defect_id": {"$arrayElemAt": ["$latest_asset_data.defect_id", 0]},
+				"description": {"$ifNull": ["$latest_description", None]},
 				# survey_count replaces the full survey_history array for the list view
 				"survey_count": {"$size": "$survey_history"},
+				# Convert ObjectIds to strings so orjson can serialize them directly
+				# and the frontend skips the {$oid: "..."} unwrapping.
+				"_id": {"$toString": "$_id"},
+				"latest_survey_id": {"$toString": "$latest_survey_id"},
+				"latest_video_id": {"$toString": "$latest_video_id"},
 			}
 		},
 		{
 			"$project": {
-				"road_info": 0,
-				"latest_asset_data": 0,
 				"embedding": 0,        # no need to send 512-d vector to the browser
 				"modified_by": 0,      # legacy field, replaced by asset_condition_logs
 				"mark_good_history": 0, # legacy field, replaced by asset_condition_logs
 				"survey_history": 0,   # fetched on-demand via GET /api/assets/master/<id>
 			}
 		},
-		# { "$limit": 60000 }
 	]
 	all_assets = list(db.master_assets.aggregate(pipeline))
 
@@ -460,13 +401,264 @@ def get_master_assets():
 	all_roads = list(db.roads.find({}))
 	all_surveys = list(db.surveys.find({"is_latest": True}))
 
-	return mongo_response({
+	return fast_mongo_response({
 		"items": all_assets,
 		"asset_count": len(all_assets),
 		"routes": all_roads,
 		"route_count": len(all_roads),
 		"surveys": all_surveys,
 		"survey_count": len(all_surveys),
+	})
+
+
+# Damaged condition aliases — must match the frontend DAMAGED_CONDITIONS set
+_DAMAGED_CONDITIONS = [
+	"damaged", "overgrown", "fadedpaint", "dirty", "missing", "broken", "bent",
+]
+
+
+def _build_master_filter(args):
+	"""Build a MongoDB query dict from the shared filter params used by
+	paginated, map-points, and master library endpoints."""
+	query = {}
+	route_id = args.get("route_id", type=int)
+	if route_id is not None:
+		query["route_id"] = route_id
+	category = args.get("category")
+	if category:
+		query["category_id"] = category
+	condition = args.get("condition")
+	if condition:
+		# "damaged" in the UI means any of the damaged aliases
+		if condition == "damaged":
+			query["latest_condition"] = {"$in": _DAMAGED_CONDITIONS}
+		else:
+			query["latest_condition"] = condition
+	zone = args.get("zone")
+	if zone:
+		query["zone"] = zone
+	side = args.get("side")
+	if side:
+		query["side"] = side
+	asset_type = args.get("asset_type")
+	if asset_type:
+		# Frontend sends group_id (display name from label map).
+		# master_assets stores this in the group_id field.
+		query["group_id"] = asset_type
+	search = (args.get("search") or "").strip()
+	if search:
+		regex = {"$regex": re.escape(search), "$options": "i"}
+		query["$or"] = [
+			{"master_display_id": regex},
+			{"asset_type": regex},
+			{"route_name": regex},
+			{"asset_id": regex},
+		]
+	return query
+
+
+@assets_bp.get("/master/map-points", endpoint="assets_master_map_points")
+@role_required(["super_admin", "admin", "surveyor", "viewer"])
+def get_master_map_points():
+	"""
+	Lightweight endpoint returning only the fields needed for map rendering.
+	~6 fields per asset → ~300-500KB gzipped for 70k records.
+	---
+	tags:
+	  - Assets
+	security:
+	  - Bearer: []
+	parameters:
+	  - name: route_id
+	    in: query
+	    type: integer
+	  - name: category
+	    in: query
+	    type: string
+	  - name: condition
+	    in: query
+	    type: string
+	  - name: side
+	    in: query
+	    type: string
+	  - name: zone
+	    in: query
+	    type: string
+	  - name: asset_type
+	    in: query
+	    type: string
+	  - name: search
+	    in: query
+	    type: string
+	responses:
+	  200:
+	    description: Map points retrieved successfully
+	"""
+	db = get_db()
+	query = _build_master_filter(request.args)
+
+	projection = {
+		"_id": 0,
+		"master_display_id": 1,
+		"asset_type": 1,
+		"asset_id": 1,
+		"canonical_location": 1,
+		"latest_condition": 1,
+		"group_id": 1,
+		"side": 1,
+		"zone": 1,
+		"route_id": 1,
+		"category_id": 1,
+	}
+
+	cursor = db.master_assets.find(query, projection)
+	points = []
+	for doc in cursor:
+		coords = (doc.get("canonical_location") or {}).get("coordinates", [0, 0])
+		points.append({
+			"master_display_id": doc.get("master_display_id", ""),
+			"asset_type": doc.get("asset_type", ""),
+			"asset_id": doc.get("asset_id", ""),
+			"lat": coords[1] if len(coords) > 1 else 0,
+			"lng": coords[0] if len(coords) > 0 else 0,
+			"condition": doc.get("latest_condition", "unknown"),
+			"group_id": doc.get("group_id"),
+			"side": doc.get("side", "Unknown"),
+			"zone": doc.get("zone", "Unknown"),
+			"route_id": doc.get("route_id"),
+			"category_id": doc.get("category_id", ""),
+		})
+
+	return fast_mongo_response({"points": points, "count": len(points)})
+
+
+# Valid sort keys and their corresponding MongoDB field names
+_SORT_KEY_MAP = {
+	"assetDisplayId": "master_display_id",
+	"assetType": "asset_type",
+	"condition": "latest_condition",
+	"roadName": "route_name",
+	"side": "side",
+	"zone": "zone",
+	"lastSurveyDate": "last_seen_date",
+}
+
+
+@assets_bp.get("/master/paginated", endpoint="assets_master_paginated")
+@role_required(["super_admin", "admin", "surveyor", "viewer"])
+def get_master_assets_paginated():
+	"""
+	Paginated master assets for the table view.  Also returns sorted_ids
+	(all matching master_display_ids in sort order) so the frontend can
+	compute which page a map-clicked asset is on.
+	---
+	tags:
+	  - Assets
+	security:
+	  - Bearer: []
+	parameters:
+	  - name: page
+	    in: query
+	    type: integer
+	    default: 1
+	  - name: limit
+	    in: query
+	    type: integer
+	    default: 10
+	  - name: sort_key
+	    in: query
+	    type: string
+	  - name: sort_dir
+	    in: query
+	    type: string
+	    enum: [asc, desc]
+	  - name: route_id
+	    in: query
+	    type: integer
+	  - name: category
+	    in: query
+	    type: string
+	  - name: condition
+	    in: query
+	    type: string
+	  - name: side
+	    in: query
+	    type: string
+	  - name: zone
+	    in: query
+	    type: string
+	  - name: asset_type
+	    in: query
+	    type: string
+	  - name: search
+	    in: query
+	    type: string
+	responses:
+	  200:
+	    description: Paginated master assets retrieved successfully
+	"""
+	db = get_db()
+	query = _build_master_filter(request.args)
+
+	page = max(1, request.args.get("page", 1, type=int))
+	limit = min(100, max(1, request.args.get("limit", 10, type=int)))
+	skip = (page - 1) * limit
+
+	# Determine sort
+	sort_key_param = request.args.get("sort_key", "lastSurveyDate")
+	sort_dir_param = request.args.get("sort_dir", "desc")
+	mongo_sort_key = _SORT_KEY_MAP.get(sort_key_param, "last_seen_date")
+	mongo_sort_dir = DESCENDING if sort_dir_param == "desc" else ASCENDING
+
+	# Projection: exclude heavy fields
+	projection = {
+		"embedding": 0,
+		"survey_history": 0,
+		"modified_by": 0,
+		"mark_good_history": 0,
+	}
+
+	total_count = db.master_assets.count_documents(query)
+	total_pages = math.ceil(total_count / limit) if total_count > 0 else 1
+
+	# Fetch paginated items
+	items_cursor = db.master_assets.find(query, projection) \
+		.sort(mongo_sort_key, mongo_sort_dir) \
+		.skip(skip) \
+		.limit(limit)
+
+	items = []
+	for doc in items_cursor:
+		# Convert ObjectIds to strings inline
+		doc["_id"] = str(doc["_id"])
+		if doc.get("latest_survey_id"):
+			doc["latest_survey_id"] = str(doc["latest_survey_id"])
+		if doc.get("latest_video_id"):
+			doc["latest_video_id"] = str(doc["latest_video_id"])
+		# Promote canonical_location to location for frontend compat
+		doc["location"] = doc.get("canonical_location")
+		doc["condition"] = doc.get("latest_condition", "unknown")
+		doc["confidence"] = doc.get("latest_confidence")
+		doc["survey_count"] = doc.get("total_surveys_detected", 0)
+		# Description from denormalized field
+		doc["description"] = doc.get("latest_description")
+		items.append(doc)
+
+	# Fetch sorted_ids: all matching master_display_ids in sort order.
+	# This is a lightweight query (~70k short strings ≈ 700KB raw, ~80KB gzipped).
+	sorted_ids = [
+		d["master_display_id"]
+		for d in db.master_assets.find(query, {"master_display_id": 1, "_id": 0})
+			.sort(mongo_sort_key, mongo_sort_dir)
+	]
+
+	return fast_mongo_response({
+		"items": items,
+		"total_count": total_count,
+		"total_pages": total_pages,
+		"page": page,
+		"limit": limit,
+		"sorted_ids": sorted_ids,
 	})
 
 

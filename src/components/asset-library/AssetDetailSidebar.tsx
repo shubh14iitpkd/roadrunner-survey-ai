@@ -112,10 +112,18 @@ function FullscreenViewer({
     return () => obs.disconnect();
   }, [drawAnnotation]);
 
-  // Wheel zoom
-  const handleWheel = useCallback((e: React.WheelEvent) => {
-    e.preventDefault();
-    setScale((s) => Math.min(10, Math.max(0.5, s - e.deltaY * 0.001)));
+  // Wheel zoom — must be attached imperatively with { passive: false }
+  // so preventDefault() works (React's onWheel registers as passive).
+  const zoomAreaRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = zoomAreaRef.current;
+    if (!el) return;
+    const handler = (e: WheelEvent) => {
+      e.preventDefault();
+      setScale((s) => Math.min(10, Math.max(0.5, s - e.deltaY * 0.001)));
+    };
+    el.addEventListener("wheel", handler, { passive: false });
+    return () => el.removeEventListener("wheel", handler);
   }, []);
 
   // Mouse drag
@@ -174,9 +182,9 @@ function FullscreenViewer({
 
       {/* Image + annotation */}
       <div
+        ref={zoomAreaRef}
         className="w-full h-full flex items-center justify-center overflow-hidden select-none"
         style={{ cursor: dragging ? "grabbing" : "grab" }}
-        onWheel={handleWheel}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
@@ -571,7 +579,7 @@ export default function AssetDetailSidebar({
                 onClick={onFullView}
               >
                 <Maximize2 className="h-3 w-3" />
-                Full View
+                Detailed View
               </Button>
               <Button
                 variant="outline"

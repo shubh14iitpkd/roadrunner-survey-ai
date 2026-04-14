@@ -209,6 +209,12 @@ def _update_master_asset(db, master_doc: dict, asset_doc: dict,
                 "issue":                   None if asset_doc.get("condition") == "good"
                                            else "Defective",
                 "updated_at":              datetime.now(timezone.utc),
+                # Denormalized fields for fast list queries (avoid $lookup)
+                "latest_frame_number":     asset_doc.get("frame_number"),
+                "latest_video_id":         asset_doc.get("video_id"),
+                "latest_box":              asset_doc.get("box"),
+                "latest_defect_id":        asset_doc.get("defect_id"),
+                "latest_description":      asset_doc.get("description"),
             },
             "$inc": {"total_surveys_detected": 1},
         },
@@ -218,7 +224,8 @@ def _update_master_asset(db, master_doc: dict, asset_doc: dict,
 def _create_master_asset(db, asset_doc: dict, embedding: np.ndarray,
                           survey_id, survey_display_id: str,
                           survey_date, match_confidence: float,
-                          route_id) -> ObjectId:
+                          route_id, route_name: str = "",
+                          road_side: str = "") -> ObjectId:
     """Insert a brand-new master_assets document."""
     entry = _build_survey_history_entry(
         asset_doc, survey_id, survey_display_id, survey_date, match_confidence
@@ -233,6 +240,9 @@ def _create_master_asset(db, asset_doc: dict, embedding: np.ndarray,
         "side":                    asset_doc.get("side"),
         "zone":                    asset_doc.get("zone"),
         "route_id":                route_id,
+        # Denormalized from roads collection (avoid $lookup at query time)
+        "route_name":              route_name,
+        "road_side":               road_side,
         "canonical_location":      asset_doc.get("location"),
         "embedding":               embedding.tolist(),
         "first_seen_date":         survey_date,
@@ -245,6 +255,12 @@ def _create_master_asset(db, asset_doc: dict, embedding: np.ndarray,
         "survey_history":          [entry],
         "issue":                   None if asset_doc.get("condition") == "good"
                                    else "Defective",
+        # Denormalized from latest asset observation (avoid $lookup at query time)
+        "latest_frame_number":     asset_doc.get("frame_number"),
+        "latest_video_id":         asset_doc.get("video_id"),
+        "latest_box":              asset_doc.get("box"),
+        "latest_defect_id":        asset_doc.get("defect_id"),
+        "latest_description":      asset_doc.get("description"),
         "created_at":              datetime.now(timezone.utc),
         "updated_at":              datetime.now(timezone.utc),
     }
@@ -272,6 +288,12 @@ def link_assets_for_video(
     Returns a summary dict with counts.
     """
     log.info("[LINKER] Starting asset linking for video %s", video_id)
+
+    # Look up road name once for denormalization onto master_assets
+    road_doc = db.roads.find_one({"route_id": route_id}, {"road_name": 1, "road_side": 1})
+    _route_name = road_doc.get("road_name", "") if road_doc else ""
+    _road_side = road_doc.get("road_side", "") if road_doc else ""
+
     # Fetch all assets for this video.
     assets = list(db.assets.find(
         {"video_id": video_id},
@@ -379,6 +401,8 @@ def link_assets_for_video(
                 survey_id, survey_display_id, survey_date,
                 match_confidence=best_similarity if best_similarity > 0 else 0.0,
                 route_id=route_id,
+                route_name=_route_name,
+                road_side=_road_side,
             )
             created += 1
             print(f"[LINKER] Asset {asset_id} → new master {master_id}")
