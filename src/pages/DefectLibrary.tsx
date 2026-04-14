@@ -220,8 +220,8 @@ export default function DefectLibrary() {
   const [directionFilter, setDirectionFilter] = useState<"all" | "LHS" | "RHS">("all");
   const [zoneFilter, setZoneFilter] = useState<"all" | "shoulder" | "median" | "pavement" | "overhead">("all");
 
-  const [sortKey, setSortKey] = useState<string | null>("lastSurveyDate");
-  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+  const [sortKey, setSortKey] = useState<string | null>("defectId");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
 
   const [selectedDefect, setSelectedDefect] = useState<AssetRecord | null>(null);
   const [selectedSurveyIdx, setSelectedSurveyIdx] = useState(0);
@@ -808,6 +808,7 @@ export default function DefectLibrary() {
     opts.sort((a, b) => a.name.localeCompare(b.name));
     return opts
   }, [labelMapData]);
+  categoryOptionsRef.current = categoryOptions;
 
   const clearFilters = useCallback(() => {
     setCategoryFilter("all");

@@ -194,7 +194,7 @@ export const api = {
 			const q = qs.toString();
 			return apiFetch(`/api/assets/${q ? `?${q}` : ""}`);
 		},
-		getMaster: (params?: { survey_id?: string; route_id?: number; category?: string; condition?: string; zone?: string; side?: string }) => {
+		getMaster: (params?: { survey_id?: string; route_id?: number; category?: string; condition?: string; zone?: string; side?: string; asset_type?: string; search?: string }) => {
 			const qs = new URLSearchParams();
 			if (params?.survey_id) qs.set("survey_id", params.survey_id);
 			if (params?.route_id != null) qs.set("route_id", String(params.route_id));
@@ -202,6 +202,8 @@ export const api = {
 			if (params?.condition) qs.set("condition", params.condition);
 			if (params?.zone) qs.set("zone", params.zone);
 			if (params?.side) qs.set("side", params.side);
+			if (params?.asset_type) qs.set("asset_type", params.asset_type);
+			if (params?.search) qs.set("search", params.search);
 			const q = qs.toString();
 			return apiFetch(`/api/assets/master${q ? `?${q}` : ""}`, { method: "POST" });
 		},
@@ -253,6 +255,15 @@ export const api = {
 			box: { x: number; y: number; width: number; height: number };
 		}) => apiFetch(`/api/assets/master/${masterDisplayId}/qc-update`, {
 			method: "PATCH", body: JSON.stringify(payload),
+		}),
+		saveManualAnnotations: (payload: {
+			video_id: string; name: string; user_id: string;
+			annotations: Array<{
+				frame_number: number; box: { x: number; y: number; width: number; height: number };
+				group_id: string; category_id: string; condition: string; timestamp: number;
+			}>;
+		}) => apiFetch("/api/assets/manual-annotations", {
+			method: "POST", body: JSON.stringify(payload),
 		}),
 		updateIssue: (asset_id: string, issue: string) =>
 			apiFetch(`/api/assets/${asset_id}/issue`, { method: "PATCH", body: JSON.stringify({ issue }) }),

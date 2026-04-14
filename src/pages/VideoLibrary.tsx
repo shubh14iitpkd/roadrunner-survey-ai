@@ -5,7 +5,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Play, Download, Search, ArrowLeft, Video as VideoIcon, Columns2, X, MapPin, Loader2, Database } from "lucide-react";
+import { Play, Download, Search, ArrowLeft, Video as VideoIcon, Columns2, X, MapPin, Loader2, Database, Pencil } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Link } from "react-router-dom";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -14,6 +14,7 @@ import { Calendar } from "@/components/ui/calendar";
 import { format, parseISO } from "date-fns";
 import { CalendarIcon } from "lucide-react";
 import { api, API_BASE } from "@/lib/api";
+import { useAuth } from "@/contexts/AuthContext";
 import { cn } from "@/lib/utils";
 
 interface VideoData {
@@ -35,6 +36,8 @@ interface VideoData {
 }
 const VIDEOS_PER_PAGE = 9;
 export default function VideoLibrary() {
+  const { user } = useAuth();
+  const isViewer = user?.role === "Viewer";
   const [videos, setVideos] = useState<VideoData[]>([]);
   const [roads, setRoads] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -570,8 +573,16 @@ export default function VideoLibrary() {
         if (!open) { setPlayerSrc(""); setPlayerVideoId(""); }
       }}>
         <DialogContent className="max-w-[95vw] h-[90vh] p-0">
-          <DialogHeader className="p-6 pb-4">
+          <DialogHeader className="p-6 pb-4 flex flex-row items-center justify-between">
             <DialogTitle className="text-2xl font-bold">Video Viewer</DialogTitle>
+            {playerVideoId && !isViewer && (
+              <Link to={`/videos/${playerVideoId}/annotate`}>
+                <Button variant="outline" size="sm" className="gap-1.5 text-xs mr-6">
+                  <Pencil className="h-3.5 w-3.5" />
+                  Add Missing Annotations
+                </Button>
+              </Link>
+            )}
           </DialogHeader>
 
           {/* Side-by-side Video Display */}
