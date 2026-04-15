@@ -7,6 +7,8 @@ import {
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import type { AssetRecord } from "@/types/asset";
+import { useLabelMap, type ResolvedMap } from "@/contexts/LabelMapContext";
+import { isAssetIconExist, getAssetIconFromId } from "@/components/settings/iconConfig";
 
 /* ── Constants ──────────────────────────────────────────── */
 const POLYLINE_GROUP_ID = "Road Marking Line";
@@ -149,17 +151,25 @@ function CanvasMarkerLayer({
   polylineGroups,
   selectedId,
   onSelect,
+  wantsIcons,
+  labelMapData,
 }: {
   markerAssets: AssetRecord[];
   polylineGroups: { key: string; routeId: number | undefined; assets: AssetRecord[] }[];
   selectedId: string | null;
   onSelect: (asset: AssetRecord) => void;
+  wantsIcons: boolean;
+  labelMapData: ResolvedMap | null;
 }) {
   const map = useMap();
   const layerRef = useRef<L.LayerGroup>(L.layerGroup());
   const tooltipRef = useRef<L.Tooltip>(L.tooltip({ direction: "top", offset: [0, -8], opacity: 0.95 }));
-  // Map from assetDisplayId → L.CircleMarker for fast selection updates
+  // Map from assetDisplayId → L.CircleMarker for fast selection updates (circle markers only)
   const markerMapRef = useRef<Map<string, L.CircleMarker>>(new Map());
+  // Map from assetDisplayId → L.Marker for icon markers
+  const iconMarkerMapRef = useRef<Map<string, L.Marker>>(new Map());
+  // Selection highlight circle for icon markers
+  const iconHighlightRef = useRef<L.CircleMarker | null>(null);
   // Track previous selection to restore style
   const prevSelectedRef = useRef<string | null>(null);
   // Build a lookup from displayId → AssetRecord for click handling
@@ -170,54 +180,102 @@ function CanvasMarkerLayer({
     const layer = layerRef.current;
     const tooltip = tooltipRef.current;
     const markerMap = markerMapRef.current;
+    const iconMarkerMap = iconMarkerMapRef.current;
     const assetLookup = assetLookupRef.current;
 
     // Clear existing
     layer.clearLayers();
     markerMap.clear();
+    iconMarkerMap.clear();
     assetLookup.clear();
+    if (iconHighlightRef.current) {
+      iconHighlightRef.current = null;
+    }
 
     // Build asset lookup
     for (const a of markerAssets) {
       if (a.assetDisplayId) assetLookup.set(a.assetDisplayId, a);
     }
 
-    // Add regular circle markers
+    // Add markers (icon or circle depending on config)
     for (const asset of markerAssets) {
       const isSelected = asset.assetDisplayId === selectedId;
-      const marker = L.circleMarker([asset.lat, asset.lng], {
-        radius: isSelected ? SELECTED_RADIUS : DEFAULT_RADIUS,
-        color: "#fff",
-        weight: isSelected ? 1.8 : 1.5,
-        fillColor: isSelected ? SELECTED_COLOR : (asset.markerColor ?? "red"),
-        fillOpacity: isSelected ? 0.9 : 0.7,
-      });
+      const assetKey = asset.asset_id || asset.assetId;
+      const useIcon = wantsIcons && assetKey && isAssetIconExist(assetKey, labelMapData);
 
-      // Store displayId on the marker for click lookup
-      (marker as any)._assetDisplayId = asset.assetDisplayId;
+      if (useIcon) {
+        const icon = getAssetIconFromId(assetKey!, labelMapData);
+        const marker = L.marker([asset.lat, asset.lng], { icon });
 
-      marker.on("click", () => {
-        const a = assetLookup.get(asset.assetDisplayId ?? "");
-        if (a) onSelect(a);
-      });
+        marker.on("click", () => {
+          const a = assetLookup.get(asset.assetDisplayId ?? "");
+          if (a) onSelect(a);
+        });
 
-      marker.on("mouseover", (e) => {
-        tooltip.setLatLng(e.latlng);
-        tooltip.setContent(
-          `<div class="text-xs leading-tight">` +
-          `<div class="font-semibold">${asset.assetType}</div>` +
-          `<div class="text-[10px] text-muted-foreground font-mono">${asset.lat.toFixed(5)}, ${asset.lng.toFixed(5)}</div>` +
-          `</div>`
-        );
-        if (!map.hasLayer(tooltip)) tooltip.addTo(map);
-      });
+        marker.on("mouseover", (e) => {
+          tooltip.setLatLng(e.latlng);
+          tooltip.setContent(
+            `<div class="text-xs leading-tight">` +
+            `<div class="font-semibold">${asset.assetType}</div>` +
+            `<div class="text-[10px] text-muted-foreground font-mono">${asset.lat.toFixed(5)}, ${asset.lng.toFixed(5)}</div>` +
+            `</div>`
+          );
+          if (!map.hasLayer(tooltip)) tooltip.addTo(map);
+        });
 
-      marker.on("mouseout", () => {
-        if (map.hasLayer(tooltip)) map.removeLayer(tooltip);
-      });
+        marker.on("mouseout", () => {
+          if (map.hasLayer(tooltip)) map.removeLayer(tooltip);
+        });
 
-      layer.addLayer(marker);
-      if (asset.assetDisplayId) markerMap.set(asset.assetDisplayId, marker);
+        layer.addLayer(marker);
+        if (asset.assetDisplayId) iconMarkerMap.set(asset.assetDisplayId, marker);
+
+        // Add selection highlight ring under icon marker
+        if (isSelected) {
+          const highlight = L.circleMarker([asset.lat, asset.lng], {
+            radius: SELECTED_RADIUS,
+            color: SELECTED_COLOR,
+            fillColor: SELECTED_COLOR,
+            fillOpacity: 0.3,
+            weight: 2,
+          });
+          layer.addLayer(highlight);
+          iconHighlightRef.current = highlight;
+        }
+      } else {
+        const marker = L.circleMarker([asset.lat, asset.lng], {
+          radius: isSelected ? SELECTED_RADIUS : DEFAULT_RADIUS,
+          color: "#fff",
+          weight: isSelected ? 1.8 : 1.5,
+          fillColor: isSelected ? SELECTED_COLOR : (asset.markerColor ?? "red"),
+          fillOpacity: isSelected ? 0.9 : 0.7,
+        });
+
+        (marker as any)._assetDisplayId = asset.assetDisplayId;
+
+        marker.on("click", () => {
+          const a = assetLookup.get(asset.assetDisplayId ?? "");
+          if (a) onSelect(a);
+        });
+
+        marker.on("mouseover", (e) => {
+          tooltip.setLatLng(e.latlng);
+          tooltip.setContent(
+            `<div class="text-xs leading-tight">` +
+            `<div class="font-semibold">${asset.assetType}</div>` +
+            `<div class="text-[10px] text-muted-foreground font-mono">${asset.lat.toFixed(5)}, ${asset.lng.toFixed(5)}</div>` +
+            `</div>`
+          );
+          if (!map.hasLayer(tooltip)) tooltip.addTo(map);
+        });
+
+        marker.on("mouseout", () => {
+          if (map.hasLayer(tooltip)) map.removeLayer(tooltip);
+        });
+
+        layer.addLayer(marker);
+        if (asset.assetDisplayId) markerMap.set(asset.assetDisplayId, marker);
+      }
     }
 
     // Add polyline groups
@@ -308,16 +366,24 @@ function CanvasMarkerLayer({
       if (map.hasLayer(tooltip)) map.removeLayer(tooltip);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [markerAssets, polylineGroups, map, onSelect]);
+  }, [markerAssets, polylineGroups, map, onSelect, wantsIcons, labelMapData]);
 
   // Fast-path: update only selection styling without rebuilding all markers
   useEffect(() => {
     const markerMap = markerMapRef.current;
+    const iconMarkerMap = iconMarkerMapRef.current;
+    const layer = layerRef.current;
     const prev = prevSelectedRef.current;
 
     if (prev === selectedId) return;
 
-    // Restore previous marker
+    // Remove previous icon highlight
+    if (iconHighlightRef.current) {
+      layer.removeLayer(iconHighlightRef.current);
+      iconHighlightRef.current = null;
+    }
+
+    // Restore previous circle marker
     if (prev) {
       const prevMarker = markerMap.get(prev);
       if (prevMarker) {
@@ -333,15 +399,30 @@ function CanvasMarkerLayer({
 
     // Highlight new marker
     if (selectedId) {
-      const newMarker = markerMap.get(selectedId);
-      if (newMarker) {
-        newMarker.setRadius(SELECTED_RADIUS);
-        newMarker.setStyle({
+      const newCircle = markerMap.get(selectedId);
+      if (newCircle) {
+        newCircle.setRadius(SELECTED_RADIUS);
+        newCircle.setStyle({
           fillColor: SELECTED_COLOR,
           fillOpacity: 0.9,
           weight: 1.8,
         });
-        newMarker.bringToFront();
+        newCircle.bringToFront();
+      }
+
+      // Highlight icon marker with ring underneath
+      const iconMarker = iconMarkerMap.get(selectedId);
+      if (iconMarker) {
+        const latlng = iconMarker.getLatLng();
+        const highlight = L.circleMarker(latlng, {
+          radius: SELECTED_RADIUS,
+          color: SELECTED_COLOR,
+          fillColor: SELECTED_COLOR,
+          fillOpacity: 0.3,
+          weight: 2,
+        });
+        layer.addLayer(highlight);
+        iconHighlightRef.current = highlight;
       }
     }
 
@@ -357,6 +438,9 @@ export default function LibraryMapView({
   selectedId,
   onSelect,
 }: LibraryMapViewProps) {
+  const { data: labelMapData } = useLabelMap();
+  const wantsIcons = localStorage.getItem('wants_icons') === 'true';
+
   const center = useMemo<[number, number]>(() => {
     if (assets.length === 0) return [25.3548, 51.1839];
     return [assets[0].lat, assets[0].lng];
@@ -417,6 +501,8 @@ export default function LibraryMapView({
         polylineGroups={polylineGroups}
         selectedId={selectedId}
         onSelect={stableOnSelect}
+        wantsIcons={wantsIcons}
+        labelMapData={labelMapData}
       />
     </MapContainer>
   );

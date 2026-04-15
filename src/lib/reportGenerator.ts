@@ -43,8 +43,8 @@ function assetToRow(asset: any, labelMap?: ResolvedMap | null) {
     (label && (label.group_id || label.display_name)) ||
     asset.type ||
     "—";
-  const hist = asset.survey_history
-  const defectId = hist.length > 0 ? hist[hist.length-1]?.defect_id ?? asset.defect_id ?? mongoId : "-";
+  const defectId = asset.latest_defect_id ?? asset.defect_id ?? mongoId;
+  console.log(asset.master_display_id, defectId)
   return {
     id: mongoId.toUpperCase(),
     anomalyId: defectId,
@@ -59,7 +59,7 @@ function assetToRow(asset: any, labelMap?: ResolvedMap | null) {
     side: asset.side ?? "—",
     zone: asset.zone ?? "—",
     lastSurveyDate: asset.last_seen_date ?? asset.survey_date ?? asset.last_survey_date ?? asset.date ?? "—",
-    issueType: asset.issue ?? asset.condition_detail ?? asset.condition ?? "defective",
+    issueType: asset.issue ?? asset.condition_detail ?? "Defective",
   };
 }
 
