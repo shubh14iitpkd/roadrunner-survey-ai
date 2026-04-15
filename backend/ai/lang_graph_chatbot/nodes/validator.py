@@ -34,14 +34,28 @@ def validator_node(state: AgentState) -> dict:
     if response_type == ResponseType.VISUALIZATION and response and response.strip():
         return {"final_response": _validate_visualization(response)}
 
-    # Generic fallback: read from last AI message in state
+    # Generic fallback: read from last AI message in state, but skip history
+    # messages (those from prior turns). Only consider messages added during
+    # this graph invocation — i.e. messages after the last HumanMessage.
     if not response:
         logger.warning("Validator: no final_response, falling back to last AI message")
+        # Find the last HumanMessage index to avoid picking up history AI messages
+        last_human_idx = -1
+        for i in range(len(state["messages"]) - 1, -1, -1):
+            if hasattr(state["messages"][i], "type") and state["messages"][i].type == "human":
+                last_human_idx = i
+                break
         for msg in reversed(state["messages"]):
             if hasattr(msg, "type") and msg.type == "ai" and msg.content:
-                response = extract_text_content(msg.content)
-                logger.info(f"Validator: recovered response from AI message (len={len(response)})")
-                break
+                # Check this AI message comes after the last human message
+                try:
+                    msg_idx = list(state["messages"]).index(msg)
+                except ValueError:
+                    msg_idx = -1
+                if msg_idx > last_human_idx:
+                    response = extract_text_content(msg.content)
+                    logger.info(f"Validator: recovered response from AI message (len={len(response)})")
+                    break
 
     if isinstance(response, list):
         response = extract_text_content(response)

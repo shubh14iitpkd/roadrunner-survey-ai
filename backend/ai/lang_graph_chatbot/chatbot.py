@@ -6,7 +6,7 @@ Drop-in replacement for LangChatbot with the same interface.
 import logging
 import time
 from typing import Optional
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import HumanMessage, AIMessage
 
 from ai.lang_graph_chatbot.graph import get_graph
 from ai.lang_graph_chatbot.state import ResponseType, extract_text_content
@@ -41,7 +41,7 @@ class LangGraphChatbot:
         self.graph = get_graph()
         logger.info(f"Chatbot initialized | route_id={route_id} | chat_id={self.chat_id} | user_id={user_id}")
 
-    def ask(self, question: str, route_id: int = None, chat_id: str = None) -> str:
+    def ask(self, question: str, route_id: int = None, chat_id: str = None, history: list = None) -> str:
         """
         Ask a question to the chatbot.
 
@@ -49,6 +49,7 @@ class LangGraphChatbot:
             question: User's question
             route_id: Optional route ID override
             chat_id: Optional chat ID override for memory thread
+            history: Optional list of prior message dicts with 'role' and 'content'
 
         Returns:
             The chatbot's response string
@@ -56,11 +57,25 @@ class LangGraphChatbot:
         effective_route_id = route_id if route_id is not None else self.route_id
         effective_chat_id = chat_id or self.chat_id
 
-        logger.info(f"Question: '{question[:120]}' | route_id={effective_route_id} | chat_id={effective_chat_id}")
+        logger.info(f"Question: '{question[:120]}' | route_id={effective_route_id} | chat_id={effective_chat_id} | history_len={len(history or [])}")
+
+        # Build conversation messages: prior history + current question
+        messages = []
+        if history:
+            for msg in history:
+                role = msg.get("role", "")
+                text = msg.get("content", "")
+                if not text:
+                    continue
+                if role == "user":
+                    messages.append(HumanMessage(content=text))
+                elif role == "assistant":
+                    messages.append(AIMessage(content=text))
+        messages.append(HumanMessage(content=question))
 
         # Build the initial state
         input_state = {
-            "messages": [HumanMessage(content=question)],
+            "messages": messages,
             "intent": None,  # will be set by router
             "response_type": ResponseType.TEXT,  # will be set by router
             "route_id": effective_route_id,
@@ -68,17 +83,10 @@ class LangGraphChatbot:
             "final_response": None,
         }
 
-        # Config for memory persistence — thread_id enables chat history
-        config = {
-            "configurable": {
-                "thread_id": effective_chat_id,
-            }
-        }
-
         try:
             # Run the graph
             t0 = time.time()
-            result = self.graph.invoke(input_state, config)
+            result = self.graph.invoke(input_state)
             elapsed = time.time() - t0
 
             logger.info(f"Graph completed in {elapsed:.1f}s | messages_count={len(result.get('messages', []))}")

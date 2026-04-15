@@ -225,12 +225,19 @@ def add_message(chat_id: str):
     user_msg["user_id"] = user_id
 
     # 2. Get conversation history (last 10 messages for context)
-    history = list(
-        db.ai_messages.find({"chat_id": ObjectId(chat_id)})
+    history_cursor = (
+        db.ai_messages.find(
+            {"chat_id": ObjectId(chat_id), "_id": {"$ne": user_res.inserted_id}},
+            {"role": 1, "content": 1, "_id": 0},
+        )
         .sort("created_at", -1)
         .limit(10)
     )
+    history = list(history_cursor)
     history.reverse()  # Chronological order
+    print(f"[DEBUG] chat_id={chat_id} | question={content[:80]} | history_count={len(history)}")
+    for i, h in enumerate(history):
+        print(f"[DEBUG]   history[{i}]: role={h.get('role')} content={str(h.get('content',''))[:80]}")
 
     # 3. Generate AI response using LangChatbot
     try:
@@ -239,7 +246,7 @@ def add_message(chat_id: str):
             chat_id=chat_id, 
             user_id=user_id
         )
-        ai_response_text = chatbot.ask(content)
+        ai_response_text = chatbot.ask(content, history=history)
 
     except Exception as e:
         print(f"[routes] Chatbot error: {e}")
@@ -270,6 +277,151 @@ def add_message(chat_id: str):
     print({"user_message": user_msg, "assistant_message": ai_msg})
     return jsonify({"user_message": user_msg, "assistant_message": ai_msg}), 201
 
+
+
+@ai_bp.post("/chats/<chat_id>/edit-message")
+@jwt_required()
+def edit_message(chat_id: str):
+    """
+    Edit a previously sent user message and regenerate the AI response.
+    Deletes all messages from the edited message onward, saves the new
+    user message, and generates a fresh AI response.
+    ---
+    tags:
+      - AI
+    security:
+      - Bearer: []
+    parameters:
+      - name: chat_id
+        in: path
+        type: string
+        required: true
+      - name: body
+        in: body
+        required: true
+        schema:
+          type: object
+          required:
+            - message_id
+            - content
+          properties:
+            message_id:
+              type: string
+              description: The _id of the message to edit
+            content:
+              type: string
+              description: The new message content
+            route_id:
+              type: integer
+              description: Optional route ID
+    responses:
+      201:
+        description: Message edited and new response generated
+    """
+    body = request.get_json(silent=True) or {}
+    message_id = body.get("message_id")
+    content = body.get("content")
+    route_id = body.get("route_id")
+
+    if not message_id or not content:
+        return jsonify({"error": "message_id and content are required"}), 400
+
+    user_id = current_user_id_str()
+    if not user_id:
+        return jsonify({"error": "unauthorized"}), 401
+
+    db = get_db()
+    chat = db.ai_chats.find_one(
+        {"_id": ObjectId(chat_id), "user_id": ObjectId(user_id)}
+    )
+    if not chat:
+        return jsonify({"error": "not found"}), 404
+
+    # Find the original message to get its created_at
+    original_msg = db.ai_messages.find_one(
+        {"_id": ObjectId(message_id), "chat_id": ObjectId(chat_id)}
+    )
+    if not original_msg:
+        return jsonify({"error": "message not found"}), 404
+
+    # Delete this message and all messages after it
+    db.ai_messages.delete_many({
+        "chat_id": ObjectId(chat_id),
+        "created_at": {"$gte": original_msg["created_at"]},
+    })
+
+    # Use chat context if not provided
+    if not route_id and chat.get("route_id"):
+        route_id = chat.get("route_id")
+
+    # Save the new user message
+    user_msg = {
+        "chat_id": ObjectId(chat_id),
+        "user_id": ObjectId(user_id),
+        "role": "user",
+        "content": content,
+        "created_at": get_now_iso(),
+    }
+    user_res = db.ai_messages.insert_one(user_msg)
+    user_msg["_id"] = str(user_res.inserted_id)
+    user_msg["chat_id"] = chat_id
+    user_msg["user_id"] = user_id
+
+    # Get remaining history (messages before the edited one)
+    history_cursor = (
+        db.ai_messages.find(
+            {"chat_id": ObjectId(chat_id), "_id": {"$ne": user_res.inserted_id}},
+            {"role": 1, "content": 1, "_id": 0},
+        )
+        .sort("created_at", -1)
+        .limit(10)
+    )
+    history = list(history_cursor)
+    history.reverse()
+
+    # Generate AI response
+    try:
+        chatbot = LangGraphChatbot(
+            route_id=route_id,
+            chat_id=chat_id,
+            user_id=user_id
+        )
+        ai_response_text = chatbot.ask(content, history=history)
+    except Exception as e:
+        print(f"[routes] Chatbot error on edit: {e}")
+        import traceback
+        traceback.print_exc()
+        ai_response_text = "I apologize, but I encountered an error processing your request. Please try again."
+
+    # Save AI response
+    ai_msg = {
+        "chat_id": ObjectId(chat_id),
+        "user_id": ObjectId(user_id),
+        "role": "assistant",
+        "content": ai_response_text,
+        "created_at": get_now_iso(),
+    }
+    ai_res = db.ai_messages.insert_one(ai_msg)
+    ai_msg["_id"] = str(ai_res.inserted_id)
+    ai_msg["chat_id"] = chat_id
+    ai_msg["user_id"] = user_id
+
+    # Update chat metadata
+    db.ai_chats.update_one(
+        {"_id": ObjectId(chat_id)},
+        {"$set": {"updated_at": get_now_iso(), "last_message_preview": content[:200]}},
+    )
+
+    # Return all remaining messages so frontend can replace its state
+    all_msgs = list(
+        db.ai_messages.find({"chat_id": ObjectId(chat_id)}).sort("created_at", 1)
+    )
+    for m in all_msgs:
+        m["_id"] = str(m["_id"])
+        m["chat_id"] = chat_id
+        m["user_id"] = str(m.get("user_id", ""))
+
+    return jsonify({"messages": all_msgs}), 201
 
 @ai_bp.patch("/chats/<chat_id>")
 @jwt_required()

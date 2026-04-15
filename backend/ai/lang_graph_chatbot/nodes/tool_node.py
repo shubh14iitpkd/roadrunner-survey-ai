@@ -20,6 +20,13 @@ AGENT_PROMPT = """You are RoadSightAI — a friendly, helpful road survey assist
 
 Use the available tools when the user asks for specific data (assets, surveys, counts, conditions, locations). Do not invent results; always call a tool before answering when data is required.
 
+IMPORTANT: Always answer the user's LATEST question. The conversation history is provided for context only. Do NOT repeat a previous answer — read the latest message carefully and respond to it specifically. If data is needed, call the appropriate tool.
+
+## Tool selection — conversation history
+- Do NOT assume a route_id from conversation history unless the user explicitly says "this route" or "that route".
+- When the user asks a cross-route question like "which route has the most defects?", use a cross-route tool (e.g. `rank_routes_by_damage`) — do NOT narrow it to a single route from history.
+- Only use a route-specific tool when the user clearly specifies or references a particular route.
+
 ## Terminology
 - Always use the word **"defective"** (never "damaged") when describing asset condition in your responses.
   e.g. "12 defective assets", "defective guardrails", "defective rate".
@@ -30,6 +37,7 @@ Use the available tools when the user asks for specific data (assets, surveys, c
   ALWAYS use `get_asset_type_conditions_for_chart` — NOT `list_detected_assets`.
   This tool returns a flat, pre-sorted, top-N-capped list optimised for charting.
 - Use `list_detected_assets` only for text-based listings, not charts.
+- When the user asks to show data **on a map**, use `get_assets_for_map`. This tool returns a ready-made response with a ```map code block. When you receive the result from this tool, return it EXACTLY as-is — do not modify, summarize, or strip the ```map block.
 
 {context}
 
@@ -56,14 +64,16 @@ def _sanitize_messages_for_gemini(messages: list) -> list:
     - Function call (AIMessage with tool_calls) must immediately follow a HumanMessage or ToolMessage
     - No consecutive AIMessages without a HumanMessage or ToolMessage in between
 
-    Strategy: search the FULL message list for the last HumanMessage, then include all
-    messages from that point forward. This keeps the current turn's tool-calling loop
-    intact regardless of how many tool calls have been made in the current turn.
-
-    IMPORTANT: Always pass the full (or sufficiently large) message list here — do NOT
-    pre-slice before calling this function, or the HumanMessage anchor may be missed.
+    Strategy:
+    1. Keep conversation history (alternating Human/AI pairs) for context.
+    2. From the last HumanMessage onward, keep the current turn's tool-calling
+       loop intact.
+    3. Ensure the first message is always a HumanMessage.
     """
-    # Find the index of the last HumanMessage in the full list
+    if not messages:
+        return messages
+
+    # Find the index of the last HumanMessage (start of the current turn)
     last_human_idx = -1
     for i in range(len(messages) - 1, -1, -1):
         if isinstance(messages[i], HumanMessage):
@@ -71,24 +81,42 @@ def _sanitize_messages_for_gemini(messages: list) -> list:
             break
 
     if last_human_idx == -1:
-        # No human message found — return as-is (shouldn't happen normally)
         logger.warning("No HumanMessage found in messages during sanitization")
         return messages
 
-    # Keep everything from the last HumanMessage onward (the current turn's tool loop)
+    # Split: conversation history (before last HumanMessage) + current turn
+    history = messages[:last_human_idx]
     current_turn = messages[last_human_idx:]
 
-    # Validate: remove any stale AIMessages that aren't tool-call or tool-response related
-    sanitized = []
+    # Build sanitized history: keep alternating Human/AI pairs, skip tool-call messages
+    sanitized_history = []
+    for msg in history:
+        if isinstance(msg, ToolMessage):
+            continue  # Skip tool messages from prior turns
+        if isinstance(msg, AIMessage) and msg.tool_calls:
+            continue  # Skip tool-calling AI messages from prior turns
+        if isinstance(msg, AIMessage) and sanitized_history and isinstance(sanitized_history[-1], AIMessage):
+            continue  # Skip consecutive AI messages
+        sanitized_history.append(msg)
+
+    # Ensure history starts with a HumanMessage (Gemini requirement)
+    while sanitized_history and not isinstance(sanitized_history[0], HumanMessage):
+        sanitized_history.pop(0)
+
+    # Cap history to last 10 messages to stay within context limits
+    sanitized_history = sanitized_history[-10:]
+
+    # Sanitize current turn
+    sanitized_turn = []
     for msg in current_turn:
-        if isinstance(msg, AIMessage) and not msg.tool_calls and sanitized and isinstance(sanitized[-1], AIMessage):
-            # Skip consecutive non-tool AIMessages
+        if isinstance(msg, AIMessage) and not msg.tool_calls and sanitized_turn and isinstance(sanitized_turn[-1], AIMessage):
             logger.debug("Skipping consecutive non-tool AIMessage during sanitization")
             continue
-        sanitized.append(msg)
+        sanitized_turn.append(msg)
 
-    logger.debug(f"Sanitized messages: {len(messages)} → {len(sanitized)} (from HumanMessage at idx {last_human_idx})")
-    return sanitized
+    result = sanitized_history + sanitized_turn
+    logger.debug(f"Sanitized messages: {len(messages)} → {len(result)} (history={len(sanitized_history)}, turn={len(sanitized_turn)})")
+    return result
 
 
 def agent_node(state: AgentState) -> dict:
@@ -96,6 +124,11 @@ def agent_node(state: AgentState) -> dict:
     LLM call with tool bindings. The LLM may produce tool_calls
     in its response, which will be executed by the ToolNode downstream.
     """
+    # If a tool already set final_response (e.g. map passthrough), skip the LLM call
+    if state.get("final_response"):
+        logger.info("Agent skipping LLM call — final_response already set (map passthrough)")
+        return {"messages": []}
+
     llm = get_gemini_model()
     llm_with_tools = llm.bind_tools(ALL_TOOLS)
 
@@ -109,7 +142,7 @@ def agent_node(state: AgentState) -> dict:
 
     logger.info(f"Agent invocation | route_id={route_id} | message_count={len(history)}")
 
-    MAX_RETRIES = 3
+    MAX_RETRIES = 5
     response = None
     for attempt in range(1, MAX_RETRIES + 1):
         try:
@@ -136,6 +169,7 @@ def agent_node(state: AgentState) -> dict:
             break
         if attempt < MAX_RETRIES:
             logger.warning(f"Agent empty response on attempt {attempt}, retrying...")
+            import time as _time; _time.sleep(0.5)  # brief pause before retry
 
     has_tool_calls = bool(getattr(response, "tool_calls", None))
     result: dict = {"messages": [response]}
@@ -182,7 +216,7 @@ def _logged_tool_node(state: AgentState) -> dict:
         result = _raw_tool_node.invoke(state)
         elapsed = time.time() - t0
 
-        # Log tool results
+        # Log tool results and check for map passthrough
         result_messages = result.get("messages", [])
         for msg in result_messages:
             if isinstance(msg, ToolMessage):
@@ -192,6 +226,13 @@ def _logged_tool_node(state: AgentState) -> dict:
                     logger.error(f"Tool {tool_name} returned error | {elapsed:.1f}s | {content_preview}")
                 else:
                     logger.info(f"Tool {tool_name} completed | {elapsed:.1f}s | result_preview={content_preview}")
+
+                # If tool returned a ```map block, pass it through directly as final_response
+                # to prevent the agent LLM from rewriting/stripping the JSON
+                tool_content = str(msg.content)
+                if "```map" in tool_content:
+                    logger.info(f"Map passthrough: setting tool result as final_response")
+                    result["final_response"] = tool_content
 
         return result
 

@@ -5,6 +5,7 @@ import { type ChatItem } from "@/components/ChatHistorySidebar";
 // ── Types ────────────────────────────────────────────────────────────────────
 
 export interface Message {
+  _id?: string;
   role: "user" | "assistant";
   content: string;
   timestamp?: string;
@@ -67,6 +68,7 @@ interface ChatContextValue {
   handleSelectChat: (selectedChatId: string) => Promise<void>;
   handleNewChat: () => void;
   handleDeleteChat: (deletedChatId: string) => void;
+  handleEditMessage: (messageIndex: number, newContent: string) => Promise<void>;
 }
 
 const ChatContext = createContext<ChatContextValue | null>(null);
@@ -162,10 +164,22 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
     try {
       const routeId = selectedRouteId ? parseInt(selectedRouteId) : undefined;
-      const reply = await sendMessageToBackend(cid!, userInput, routeId);
+      const response = await api.ai.sendMessage(cid!, "user", userInput, undefined, routeId);
+      console.log(response);
+      const reply = response.assistant_message?.content || response.content || "(No response)";
 
-      const aiMessage: Message = { role: "assistant", content: reply };
-      setMessages((prev) => [...prev, aiMessage]);
+      const userMsgWithId: Message = {
+        _id: response.user_message?._id,
+        role: "user",
+        content: userInput,
+      };
+      const aiMessage: Message = {
+        _id: response.assistant_message?._id,
+        role: "assistant",
+        content: reply,
+      };
+      // Replace the optimistic user message (last one) with the one carrying _id
+      setMessages((prev) => [...prev.slice(0, -1), userMsgWithId, aiMessage]);
 
       if (isFirstMessage && cid) {
         const autoTitle = userInput.trim().slice(0, 60);
@@ -215,6 +229,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     try {
       const resp = await api.ai.listMessages(selectedChatId);
       const msgs: Message[] = (resp?.items || []).map((m: any) => ({
+        _id: m._id,
         role: m.role as "user" | "assistant",
         content: m.content,
         timestamp: m.created_at,
@@ -223,6 +238,40 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     } catch (err) {
       console.error("Failed to load messages:", err);
       setMessages([WELCOME_MESSAGE]);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+
+  const handleEditMessage = async (messageIndex: number, newContent: string) => {
+    if (!chatId || busy) return;
+    const targetMessage = messages[messageIndex];
+    if (!targetMessage || targetMessage.role !== "user" || !targetMessage._id) return;
+
+    // Immediately truncate: keep messages before the edited one + show the edited message
+    const editedUserMsg: Message = { ...targetMessage, content: newContent };
+    setMessages([...messages.slice(0, messageIndex), editedUserMsg]);
+    setBusy(true);
+
+    try {
+      const routeId = selectedRouteId ? parseInt(selectedRouteId) : undefined;
+      const resp = await api.ai.editMessage(chatId, targetMessage._id, newContent, routeId);
+
+      // Replace all messages with the server's authoritative list
+      const updatedMsgs: Message[] = (resp?.messages || []).map((m: any) => ({
+        _id: m._id,
+        role: m.role as "user" | "assistant",
+        content: m.content,
+        timestamp: m.created_at,
+      }));
+      setMessages(updatedMsgs.length > 0 ? [WELCOME_MESSAGE, ...updatedMsgs] : [WELCOME_MESSAGE]);
+    } catch (e: any) {
+      console.error("Failed to edit message:", e);
+      setMessages((prev) => [
+        ...prev,
+        { role: "assistant", content: `Error editing message: ${e?.message || e}` },
+      ]);
     } finally {
       setBusy(false);
     }
@@ -262,6 +311,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         handleSelectChat,
         handleNewChat,
         handleDeleteChat,
+        handleEditMessage,
       }}
     >
       {children}

@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { MessageSquare, Send, Sparkles, MapPin, Waypoints, Loader2, X, Database, Brain, BarChart2 } from "lucide-react";
+import { MessageSquare, Send, Sparkles, MapPin, Waypoints, Loader2, X, Database, Brain, BarChart2, Pencil, Check } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -14,6 +14,7 @@ import { MapBlock } from "@/components/MapBlock";
 import { ChatHistorySidebar } from "@/components/ChatHistorySidebar";
 import { useChatContext } from "@/contexts/ChatContext";
 import { useState } from "react";
+import { Textarea } from "@/components/ui/textarea";
 import { useTheme } from "next-themes";
 
 // ── Thinking indicator ────────────────────────────────────────────────────────
@@ -159,9 +160,14 @@ export default function AskAI() {
     handleSelectChat,
     handleNewChat,
     handleDeleteChat,
+    handleEditMessage,
   } = useChatContext();
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Edit state
+  const [editingIdx, setEditingIdx] = useState<number | null>(null);
+  const [editText, setEditText] = useState("");
 
   // Auto-scroll to bottom when messages change
   useEffect(() => {
@@ -266,18 +272,65 @@ export default function AskAI() {
                   </div>
                 )}
                 <div className={cn("space-y-2", message.role === "user" ? "max-w-[75%]" : hasChart ? "w-full" : "max-w-[82%]")}>
-                  <Card className={cn("ask-ai-markdown-container", "p-4", message.role === "user" ? "bg-primary text-primary-foreground" : "bg-card")}>
-                    {message.role === "user" ? (
-                      <p className="text-sm">{message.content}</p>
-                    ) : (
-                      <ReactMarkdown
-                        remarkPlugins={[remarkGfm]}
-                        components={markdownComponents}
-                      >
-                        {message.content}
-                      </ReactMarkdown>
-                    )}
-                  </Card>
+                  {message.role === "user" && editingIdx === idx ? (
+                    <Card className="p-3 bg-primary/90 space-y-2">
+                      <Textarea
+                        value={editText}
+                        onChange={(e) => { setEditText(e.target.value); e.target.style.height = "auto"; e.target.style.height = e.target.scrollHeight + "px"; }}
+                        ref={(el) => { if (el) { el.style.height = "auto"; el.style.height = el.scrollHeight + "px"; } }}
+                        className="bg-primary-foreground/10 text-primary-foreground text-sm border-primary-foreground/20 min-h-[40px] resize-none overflow-hidden"
+                        autoFocus
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" && !e.shiftKey) {
+                            e.preventDefault();
+                            if (editText.trim()) {
+                              handleEditMessage(idx, editText.trim());
+                              setEditingIdx(null);
+                            }
+                          }
+                          if (e.key === "Escape") setEditingIdx(null);
+                        }}
+                      />
+                      <div className="flex justify-end gap-1">
+                        <Button size="sm" variant="ghost" className="h-7 text-xs text-primary-foreground/70 hover:text-primary-foreground" onClick={() => setEditingIdx(null)}>
+                          Cancel
+                        </Button>
+                        <Button
+                          size="sm"
+                          className="h-7 text-xs bg-primary-foreground/20 hover:bg-primary-foreground/30 text-primary-foreground"
+                          disabled={!editText.trim() || editText.trim() === message.content}
+                          onClick={() => { handleEditMessage(idx, editText.trim()); setEditingIdx(null); }}
+                        >
+                          <Check className="h-3 w-3 mr-1" />
+                          Save & Resend
+                        </Button>
+                      </div>
+                    </Card>
+                  ) : (
+                    <Card className={cn("ask-ai-markdown-container", "p-4", message.role === "user" ? "bg-primary text-primary-foreground" : "bg-card")}>
+                      {message.role === "user" ? (
+                        <div className="flex items-start gap-2">
+                          <p className="text-sm flex-1">{message.content}</p>
+                          {message._id && !busy && (
+                            <button
+                              className="flex-shrink-0 rounded-md p-1 hover:bg-primary-foreground/20 transition-colors"
+                              title="Edit message"
+                              onClick={() => { setEditingIdx(idx); setEditText(message.content); }}
+                            >
+                              <Pencil className="h-3.5 w-3.5 text-primary-foreground/70" />
+                            </button>
+                          )}
+                        </div>
+                      ) : (
+                        <ReactMarkdown
+                          remarkPlugins={[remarkGfm]}
+                          components={markdownComponents}
+                        >
+                          {message.content}
+                        </ReactMarkdown>
+                      )}
+                    </Card>
+                  )}
                 </div>
                 {message.role === "user" && (
                   <div className="w-8 h-8 rounded-full bg-accent/10 flex items-center justify-center flex-shrink-0">

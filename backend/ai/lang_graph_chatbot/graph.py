@@ -6,7 +6,6 @@ Wires together all nodes into a StateGraph with conditional edges.
 import logging
 
 from langgraph.graph import StateGraph, END
-from langgraph.checkpoint.memory import MemorySaver
 
 from ai.lang_graph_chatbot.state import AgentState
 from ai.lang_graph_chatbot.nodes.router import router_node, get_route
@@ -26,9 +25,6 @@ if not _chatbot_logger.handlers:
     _chatbot_logger.addHandler(_handler)
     _chatbot_logger.setLevel(logging.DEBUG)
     _chatbot_logger.propagate = False
-
-# Global memory saver for conversation persistence across chat_ids
-_memory_saver = MemorySaver()
 
 
 def build_graph():
@@ -82,7 +78,7 @@ def build_graph():
     # Formatter → validator → END
     graph.add_edge("formatter", "validator")
     graph.add_edge("validator", END)
-    g = graph.compile(checkpointer=_memory_saver)
+    g = graph.compile()
     # img = g.get_graph().draw_ascii()
     # print(img)
     return g

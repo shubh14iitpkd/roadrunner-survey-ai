@@ -1,4 +1,4 @@
-import { useMemo, memo, useEffect } from "react";
+import { useMemo, memo, useEffect, useState, useRef, useCallback } from "react";
 import { MapContainer, TileLayer, CircleMarker, Marker, Popup, useMap } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
@@ -25,6 +25,11 @@ interface MapMarker {
   info?: string;
   color?: string;
   radius?: number;
+  popup?: string;
+  frame_url?: string;
+  video_id?: string;
+  frame_number?: number;
+  box?: { x: number; y: number; w: number; h: number };
 }
 
 interface MapData {
@@ -77,6 +82,77 @@ function FitBounds({ markers }: { markers: MapMarker[] }) {
     map.fitBounds(bounds, { padding: [40, 40], maxZoom: 16 });
   }, [markers, map]);
   return null;
+}
+
+
+// ---------- lazy frame loader ----------
+
+function FrameImage({ videoId, frameNumber, defectBox }: { videoId: string; frameNumber: number; defectBox?: { x: number; y: number; w: number; h: number } }) {
+  const [src, setSrc] = useState<string | null>(null);
+  const [frameDims, setFrameDims] = useState({ w: 1, h: 1 });
+  const [loading, setLoading] = useState(true);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const DISPLAY_W = 360;
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const { apiFetch } = await import("@/lib/api");
+        const data = await apiFetch(
+          `/api/videos/${videoId}/frame_annotated?frame_number=${frameNumber}`
+        );
+        if (!cancelled && data?.image_data) {
+          setSrc(data.image_data);
+          setFrameDims({ w: data.width || 1920, h: data.height || 1080 });
+        }
+      } catch (e) {
+        console.error("Frame load error:", e);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [videoId, frameNumber]);
+
+  const drawAnnotation = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || !src) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    const img = new Image();
+    img.onload = () => {
+      const scale = DISPLAY_W / frameDims.w;
+      const displayH = frameDims.h * scale;
+      canvas.width = DISPLAY_W;
+      canvas.height = displayH;
+      ctx.drawImage(img, 0, 0, DISPLAY_W, displayH);
+
+      // Draw only the defect bounding box
+      if (defectBox) {
+        const sx = defectBox.x * scale;
+        const sy = defectBox.y * scale;
+        const sw = defectBox.w * scale;
+        const sh = defectBox.h * scale;
+
+        ctx.strokeStyle = "#ef4444";
+        ctx.lineWidth = 2.5;
+        ctx.strokeRect(sx, sy, sw, sh);
+      }
+    };
+    img.src = src;
+  }, [src, defectBox, frameDims]);
+
+  useEffect(() => {
+    if (src) drawAnnotation();
+  }, [src, drawAnnotation]);
+
+  if (loading) {
+    return <div style={{ padding: "12px 0", textAlign: "center", fontSize: "12px", color: "#999" }}>Loading frame...</div>;
+  }
+  if (!src) return null;
+  return <canvas ref={canvasRef} style={{ width: "100%", borderRadius: "6px", marginTop: "4px" }} />;
 }
 
 // ---------- component ----------
@@ -138,21 +214,29 @@ export const MapBlock = memo(function MapBlock({ jsonString }: { jsonString: str
                   fillOpacity: 0.8,
                 }}
               >
-                {(m.label || m.info) && (
-                  <Popup>
-                    {m.label && <div className="font-semibold text-sm">{m.label}</div>}
-                    {m.info && <div className="text-xs text-muted-foreground mt-1">{m.info}</div>}
-                  </Popup>
-                )}
+                <Popup minWidth={m.video_id ? 320 : 120} maxWidth={400}>
+                  <div>
+                    {m.label && <div style={{ fontWeight: 600, fontSize: "13px", marginBottom: "4px" }}>{m.label}</div>}
+                    {m.popup && <div style={{ fontSize: "12px", color: "#666", marginBottom: m.frame_url ? "8px" : "0" }}>{m.popup}</div>}
+                    {m.info && <div style={{ fontSize: "12px", color: "#666" }}>{m.info}</div>}
+                    {m.video_id && m.frame_number != null && (
+                      <FrameImage videoId={m.video_id} frameNumber={m.frame_number} defectBox={m.box} />
+                    )}
+                  </div>
+                </Popup>
               </CircleMarker>
             ) : (
               <Marker key={i} position={[m.lat, m.lng]} icon={makeColoredIcon(m.color || "blue")}>
-                {(m.label || m.info) && (
-                  <Popup>
-                    {m.label && <div className="font-semibold text-sm">{m.label}</div>}
-                    {m.info && <div className="text-xs text-muted-foreground mt-1">{m.info}</div>}
-                  </Popup>
-                )}
+                <Popup minWidth={m.video_id ? 320 : 120} maxWidth={400}>
+                  <div>
+                    {m.label && <div style={{ fontWeight: 600, fontSize: "13px", marginBottom: "4px" }}>{m.label}</div>}
+                    {m.popup && <div style={{ fontSize: "12px", color: "#666", marginBottom: m.frame_url ? "8px" : "0" }}>{m.popup}</div>}
+                    {m.info && <div style={{ fontSize: "12px", color: "#666" }}>{m.info}</div>}
+                    {m.video_id && m.frame_number != null && (
+                      <FrameImage videoId={m.video_id} frameNumber={m.frame_number} defectBox={m.box} />
+                    )}
+                  </div>
+                </Popup>
               </Marker>
             )
           )}

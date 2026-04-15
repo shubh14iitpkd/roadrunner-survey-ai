@@ -606,7 +606,7 @@ def get_asset_locations(asset_name: str = "", category_name: str = "", route_id:
         limit: Max results (default 20)
 
     Returns:
-        JSON array of assets with lat/lng, condition, and confidence
+        JSON array of assets with lat/lng and condition
 
     Instruction: if response contains list of data, format result in tabular form and include the message if provided.
     """
@@ -651,7 +651,6 @@ def get_asset_locations(asset_name: str = "", category_name: str = "", route_id:
                 "condition": a.get("latest_condition"),
                 "lng": coords[0],
                 "lat": coords[1],
-                "confidence": a.get("latest_confidence"),
             })
 
     result = {
@@ -1536,6 +1535,695 @@ def get_asset_type_route_risk(asset_name: str, top_n: int = 5) -> str:
 
 
 
+
+
+# =============================================================================
+# GAP #1: SURVEY COMPARISON (TEMPORAL CHANGE)
+# =============================================================================
+
+@tool
+def compare_surveys_on_route(route_id: int) -> str:
+    """
+    Compare asset condition between surveys on the same route.
+    Shows what changed: new assets, condition changes, overall trend.
+    Use for "How has route X changed?", "Compare surveys on route X",
+    "What's different since last survey?", "Show changes over time on this route".
+
+    Args:
+        route_id: The route to compare surveys on
+
+    Returns:
+        JSON with survey-by-survey comparison, condition changes, and new detections
+    """
+    db = get_db()
+
+    surveys = list(db.surveys.find({"route_id": route_id}).sort("survey_date", 1))
+    if not surveys:
+        return json.dumps({"error": f"No surveys found for route {route_id}"})
+    if len(surveys) < 2:
+        # Single survey — show summary instead
+        s = surveys[0]
+        sid = s["_id"]
+        total = db.assets.count_documents({"survey_id": sid})
+        good = db.assets.count_documents({"survey_id": sid, "condition": "good"})
+        damaged = total - good
+        return json.dumps({
+            "route_id": route_id,
+            "note": "Only one survey exists for this route — comparison not possible yet.",
+            "single_survey": {
+                "survey_id": s.get("survey_display_id", str(sid)),
+                "date": s.get("survey_date"),
+                "total_assets": total,
+                "good": good,
+                "damaged": damaged,
+            }
+        })
+
+    # Compare the two most recent surveys
+    older = surveys[-2]
+    newer = surveys[-1]
+
+    def _survey_stats(survey):
+        sid = survey["_id"]
+        obs = list(db.assets.find({"survey_id": sid}, {"master_asset_id": 1, "condition": 1, "group_id": 1, "asset_id": 1}))
+        total = len(obs)
+        good = sum(1 for o in obs if o.get("condition") == "good")
+        damaged = total - good
+        by_master = {}
+        for o in obs:
+            mid = o.get("master_asset_id")
+            if mid:
+                by_master[str(mid)] = o.get("condition", "unknown")
+        return {"total": total, "good": good, "damaged": damaged, "by_master": by_master}
+
+    old_stats = _survey_stats(older)
+    new_stats = _survey_stats(newer)
+
+    # Find condition changes
+    improved = 0
+    worsened = 0
+    unchanged = 0
+    for mid, new_cond in new_stats["by_master"].items():
+        old_cond = old_stats["by_master"].get(mid)
+        if old_cond is None:
+            continue  # new detection
+        old_is_good = old_cond == "good"
+        new_is_good = new_cond == "good"
+        if old_is_good and not new_is_good:
+            worsened += 1
+        elif not old_is_good and new_is_good:
+            improved += 1
+        else:
+            unchanged += 1
+
+    new_detections = len([mid for mid in new_stats["by_master"] if mid not in old_stats["by_master"]])
+    missing = len([mid for mid in old_stats["by_master"] if mid not in new_stats["by_master"]])
+
+    road = db.roads.find_one({"route_id": route_id})
+    road_name = road.get("road_name", f"Route {route_id}") if road else f"Route {route_id}"
+
+    return json.dumps({
+        "route_id": route_id,
+        "road_name": road_name,
+        "older_survey": {
+            "survey_id": older.get("survey_display_id", str(older["_id"])),
+            "date": older.get("survey_date"),
+            "total_assets": old_stats["total"],
+            "good": old_stats["good"],
+            "damaged": old_stats["damaged"],
+        },
+        "newer_survey": {
+            "survey_id": newer.get("survey_display_id", str(newer["_id"])),
+            "date": newer.get("survey_date"),
+            "total_assets": new_stats["total"],
+            "good": new_stats["good"],
+            "damaged": new_stats["damaged"],
+        },
+        "changes": {
+            "improved": improved,
+            "worsened": worsened,
+            "unchanged": unchanged,
+            "new_detections": new_detections,
+            "no_longer_detected": missing,
+        },
+    })
+
+
+# =============================================================================
+# GAP #2: INDIVIDUAL ASSET DETAILS / HISTORY
+# =============================================================================
+
+@tool
+def get_asset_details(master_display_id: str) -> str:
+    """
+    Get full details of a specific master asset by its display ID.
+    Use for "Show me asset MAST-000125", "Details of MAST-000125",
+    "What is the condition history of MAST-000125?".
+
+    Args:
+        master_display_id: The master display ID (e.g. "MAST-000125")
+
+    Returns:
+        JSON with asset details, location, survey history, and condition logs
+    """
+    db = get_db()
+    ma = db.master_assets.find_one({"master_display_id": master_display_id.upper().strip()})
+    if not ma:
+        return json.dumps({"error": f"Asset '{master_display_id}' not found"})
+
+    # Get observation history from assets collection
+    observations = list(
+        db.assets.find(
+            {"master_asset_id": ma["_id"]},
+            {"condition": 1, "confidence": 1, "survey_display_id": 1, "survey_id": 1, "created_at": 1, "frame_number": 1, "video_id": 1, "location": 1}
+        ).sort("created_at", 1)
+    )
+
+    obs_list = []
+    for o in observations:
+        loc = o.get("location", {})
+        coords = loc.get("coordinates", [])
+        obs_list.append({
+            "survey_id": o.get("survey_display_id", str(o.get("survey_id", ""))),
+            "condition": o.get("condition"),
+            "confidence": round(o.get("confidence", 0), 3) if o.get("confidence") else None,
+            "date": o.get("created_at"),
+            "frame_number": o.get("frame_number"),
+            "lat": coords[1] if len(coords) >= 2 else None,
+            "lng": coords[0] if len(coords) >= 2 else None,
+        })
+
+    loc = ma.get("canonical_location", {})
+    coords = loc.get("coordinates", [])
+
+    return json.dumps({
+        "master_display_id": ma.get("master_display_id"),
+        "asset_type": _label_name(ma.get("asset_id", "")),
+        "group": ma.get("group_id"),
+        "category": _cat_name(ma.get("category_id", "")),
+        "current_condition": ma.get("latest_condition"),
+        "route_id": ma.get("route_id"),
+        "route_name": ma.get("route_name"),
+        "zone": ma.get("zone"),
+        "side": ma.get("side"),
+        "lat": coords[1] if len(coords) >= 2 else None,
+        "lng": coords[0] if len(coords) >= 2 else None,
+        "first_seen": ma.get("first_seen_date"),
+        "last_seen": ma.get("last_seen_date"),
+        "total_surveys_detected": ma.get("total_surveys_detected", 1),
+        "issue": ma.get("issue"),
+        "observation_history": obs_list,
+    })
+
+
+# =============================================================================
+# GAP #3: VIDEO & FRAME DATA
+# =============================================================================
+
+@tool
+def get_video_details(video_id: str = "", route_id: Optional[int] = None) -> str:
+    """
+    Get detailed information about a video including processing status,
+    frame count, and detection statistics.
+    Use for "Show me video details", "What's the status of the latest video?",
+    "How many frames had detections?", "Video processing status for route X".
+
+    Args:
+        video_id: Optional specific video ID
+        route_id: Optional route ID to get the latest video for
+
+    Returns:
+        JSON with video metadata, processing status, and frame/detection stats
+    """
+    db = get_db()
+
+    if video_id:
+        from bson import ObjectId as ObjId
+        try:
+            video = db.videos.find_one({"_id": ObjId(video_id)})
+        except Exception:
+            video = None
+    elif route_id is not None:
+        video = db.videos.find_one({"route_id": route_id}, sort=[("created_at", -1)])
+    else:
+        video = db.videos.find_one({}, sort=[("created_at", -1)])
+
+    if not video:
+        return json.dumps({"error": "No video found"})
+
+    vid = str(video["_id"])
+    # Frame stats
+    total_frames = db.assets.distinct("frame_number", {"video_id": vid})
+    frames_with_detections = len(total_frames)
+    total_detections = db.assets.count_documents({"video_id": vid})
+
+    return json.dumps({
+        "video_id": vid,
+        "title": video.get("title"),
+        "route_id": video.get("route_id"),
+        "survey_id": video.get("survey_display_id", str(video.get("survey_id", ""))),
+        "status": video.get("status"),
+        "progress": video.get("progress"),
+        "duration_seconds": video.get("duration_seconds"),
+        "size_bytes": video.get("size_bytes"),
+        "created_at": str(video.get("created_at", "")),
+        "frames_with_detections": frames_with_detections,
+        "total_detections": total_detections,
+    })
+
+
+# =============================================================================
+# GAP #4: USER & WORKFLOW DATA
+# =============================================================================
+
+@tool
+def get_surveyor_stats() -> str:
+    """
+    Get statistics about surveyors: who surveyed what, how many surveys each did.
+    Use for "Who surveyed route X?", "Which surveyor did the most surveys?",
+    "Show me surveyor activity", "List all surveyors".
+
+    Returns:
+        JSON with surveyor statistics
+    """
+    db = get_db()
+
+    pipeline = [
+        {"$group": {
+            "_id": "$surveyor_name",
+            "survey_count": {"$sum": 1},
+            "routes": {"$addToSet": "$route_id"},
+            "latest_date": {"$max": "$survey_date"},
+        }},
+        {"$sort": {"survey_count": -1}},
+    ]
+    results = list(db.surveys.aggregate(pipeline))
+
+    surveyors = []
+    for r in results:
+        name = r["_id"] or "Unknown"
+        surveyors.append({
+            "surveyor": name,
+            "surveys_completed": r["survey_count"],
+            "routes_covered": len(r["routes"]),
+            "latest_survey_date": r["latest_date"],
+        })
+
+    return json.dumps({
+        "total_surveyors": len(surveyors),
+        "surveyors": surveyors,
+    })
+
+
+# =============================================================================
+# GAP #5: GEOGRAPHIC / SPATIAL QUERIES (zone, side)
+# =============================================================================
+
+@tool
+def get_assets_by_zone_and_side(route_id: Optional[int] = None, zone: str = "", side: str = "", condition: str = "") -> str:
+    """
+    Filter and count assets by zone and/or side of the road.
+    Use for "Defects in zone 3", "Assets on the left side", "What's on the RHS?",
+    "Condition by zone", "Which zone has the most defects?",
+    "List assets on the left side of route 235".
+
+    Args:
+        route_id: Optional route ID
+        zone: Optional zone filter (e.g. "overhead", "roadside", "pavement")
+        side: Optional side filter (e.g. "LHS", "RHS", "median", "center")
+        condition: Optional "good" or "damaged"
+
+    Returns:
+        JSON with asset counts grouped by zone and side
+    """
+    db = get_db()
+    query: dict = {}
+    if route_id is not None:
+        query["route_id"] = route_id
+    if zone:
+        query["zone"] = {"$regex": zone, "$options": "i"}
+    if side:
+        query["side"] = {"$regex": side, "$options": "i"}
+    if condition:
+        norm = condition.strip().lower()
+        if norm == "damaged":
+            query["latest_condition"] = {"$ne": "good"}
+        elif norm == "good":
+            query["latest_condition"] = "good"
+
+    # If no zone/side filter, group by zone and side
+    if not zone and not side:
+        pipeline = [
+            {"$match": query},
+            {"$group": {
+                "_id": {"zone": {"$ifNull": ["$zone", "unknown"]}, "side": {"$ifNull": ["$side", "unknown"]}},
+                "total": {"$sum": 1},
+                "good": {"$sum": {"$cond": [{"$eq": ["$latest_condition", "good"]}, 1, 0]}},
+                "damaged": {"$sum": {"$cond": [{"$ne": ["$latest_condition", "good"]}, 1, 0]}},
+            }},
+            {"$sort": {"_id.zone": 1, "_id.side": 1}},
+        ]
+        results = list(db.master_assets.aggregate(pipeline))
+        breakdown = []
+        for r in results:
+            breakdown.append({
+                "zone": r["_id"]["zone"],
+                "side": r["_id"]["side"],
+                "total": r["total"],
+                "good": r["good"],
+                "damaged": r["damaged"],
+                "damage_rate_pct": round(r["damaged"] / r["total"] * 100, 1) if r["total"] else 0,
+            })
+        return json.dumps({
+            "route_id": route_id,
+            "filter": {"zone": zone or None, "side": side or None, "condition": condition or None},
+            "breakdown": breakdown,
+            "total": sum(b["total"] for b in breakdown),
+        })
+    else:
+        # Specific filter — return counts and top asset types
+        total = db.master_assets.count_documents(query)
+        pipeline = [
+            {"$match": query},
+            {"$group": {
+                "_id": {"$ifNull": ["$group_id", "$asset_id"]},
+                "count": {"$sum": 1},
+                "damaged": {"$sum": {"$cond": [{"$ne": ["$latest_condition", "good"]}, 1, 0]}},
+            }},
+            {"$sort": {"count": -1}},
+            {"$limit": 15},
+        ]
+        types = list(db.master_assets.aggregate(pipeline))
+        asset_types = [{"asset_type": _label_name(t["_id"]), "count": t["count"], "damaged": t["damaged"]} for t in types]
+
+        return json.dumps({
+            "route_id": route_id,
+            "filter": {"zone": zone or None, "side": side or None, "condition": condition or None},
+            "total_matching": total,
+            "top_asset_types": asset_types,
+        })
+
+
+# =============================================================================
+# GAP #7: SPECIFIC CONDITION TYPES
+# =============================================================================
+
+@tool
+def get_assets_by_specific_condition(condition_type: str, route_id: Optional[int] = None, asset_name: str = "", limit: int = 20) -> str:
+    """
+    Find assets with a specific damage condition type (not just good/damaged).
+    Use for "How many missing signs?", "List bent guardrails",
+    "Show overgrown assets", "Find all broken assets on route 235",
+    "How many dirty signs are there?".
+
+    Supported conditions: broken, bent, missing, damaged, dirty, overgrown, fadedpaint, good.
+
+    Args:
+        condition_type: The specific condition (e.g. "missing", "bent", "broken", "dirty", "overgrown", "fadedpaint")
+        route_id: Optional route filter
+        asset_name: Optional asset type filter (e.g. "Guardrail", "Traffic Sign")
+        limit: Max results (default 20)
+
+    Returns:
+        JSON with count and list of assets matching the specific condition
+    """
+    db = get_db()
+    query: dict = {"latest_condition": {"$regex": condition_type.strip(), "$options": "i"}}
+
+    if route_id is not None:
+        query["route_id"] = route_id
+
+    if asset_name:
+        aids = _resolve_asset_ids(asset_name)
+        if aids:
+            query["asset_id"] = {"$in": aids}
+
+    total = db.master_assets.count_documents(query)
+    assets = list(db.master_assets.find(query).limit(limit))
+
+    items = []
+    for a in assets:
+        loc = a.get("canonical_location", {})
+        coords = loc.get("coordinates", [])
+        items.append({
+            "master_display_id": a.get("master_display_id"),
+            "asset_type": _label_name(a.get("asset_id", "")),
+            "condition": a.get("latest_condition"),
+            "route_id": a.get("route_id"),
+            "lat": coords[1] if len(coords) >= 2 else None,
+            "lng": coords[0] if len(coords) >= 2 else None,
+        })
+
+    result = {
+        "condition_filter": condition_type,
+        "route_id": route_id,
+        "asset_name": asset_name or None,
+        "total_matching": total,
+        "showing": len(items),
+        "assets": items,
+    }
+    if total > limit:
+        result["message"] = f"Showing {limit} of {total} total. Use the Asset Library for the full list."
+    return json.dumps(result)
+
+
+# =============================================================================
+# GAP #8: CROSS-ROUTE AGGREGATION WITH ASSET/CATEGORY FILTER
+# =============================================================================
+
+@tool
+def rank_routes_by_asset_damage(asset_name: str = "", category_name: str = "", limit: int = 10) -> str:
+    """
+    Rank routes by damage count filtered by a specific asset type or category.
+    Use for "Which routes have the most defective traffic signs?",
+    "Compare guardrail condition across routes",
+    "Rank routes by defective street lights",
+    "Routes with most defective pavement assets".
+
+    Args:
+        asset_name: Optional specific asset type (e.g. "Guardrail", "Street Light Pole")
+        category_name: Optional category (e.g. "Roadway Lighting", "Signage")
+        limit: Max routes to return (default 10)
+
+    Returns:
+        JSON with routes ranked by damaged count for the filtered asset type/category
+    """
+    db = get_db()
+    query: dict = {}
+
+    if asset_name:
+        aids = _resolve_asset_ids(asset_name)
+        if aids:
+            query["asset_id"] = {"$in": aids}
+        else:
+            return json.dumps({"error": f"Asset type '{asset_name}' not found"})
+
+    if category_name:
+        cid = _resolve_category_id(category_name)
+        if cid:
+            query["category_id"] = cid
+        else:
+            return json.dumps({"error": f"Category '{category_name}' not found"})
+
+    pipeline = [
+        {"$match": query},
+        {"$group": {
+            "_id": "$route_id",
+            "total": {"$sum": 1},
+            "good": {"$sum": {"$cond": [{"$eq": ["$latest_condition", "good"]}, 1, 0]}},
+            "damaged": {"$sum": {"$cond": [{"$ne": ["$latest_condition", "good"]}, 1, 0]}},
+        }},
+        {"$sort": {"damaged": -1}},
+    ]
+    results = list(db.master_assets.aggregate(pipeline))
+
+    route_ids = [r["_id"] for r in results if r["_id"] is not None]
+    roads = {r["route_id"]: r for r in db.roads.find({"route_id": {"$in": route_ids}})}
+
+    ranked = []
+    for r in results:
+        rid = r["_id"]
+        if rid is None:
+            continue
+        road = roads.get(rid, {})
+        ranked.append({
+            "route_id": rid,
+            "road_name": road.get("road_name", f"Route {rid}"),
+            "damaged": r["damaged"],
+            "good": r["good"],
+            "total": r["total"],
+            "damage_rate_pct": round(r["damaged"] / r["total"] * 100, 1) if r["total"] else 0,
+        })
+
+    return json.dumps({
+        "filter": {"asset_name": asset_name or None, "category_name": category_name or None},
+        "routes": ranked[:limit],
+        "total_routes": len(ranked),
+    })
+
+
+# =============================================================================
+# GAP #9: TREND / TIME-SERIES ANALYSIS
+# =============================================================================
+
+@tool
+def get_detection_trend(route_id: Optional[int] = None, group_by: str = "month") -> str:
+    """
+    Show asset detection trend over time — how many assets were detected per time period.
+    Use for "Detection trend over last 6 months", "How many assets detected each month?",
+    "Are we finding more defects over time?", "Show monthly survey activity".
+
+    Args:
+        route_id: Optional route filter
+        group_by: Time bucket — "day", "week", or "month" (default "month")
+
+    Returns:
+        JSON with time-series data of asset detections
+    """
+    db = get_db()
+    query: dict = {}
+    if route_id is not None:
+        query["route_id"] = route_id
+
+    # Group surveys by time period
+    if group_by == "day":
+        date_format = "%Y-%m-%d"
+    elif group_by == "week":
+        date_format = "%Y-W%V"
+    else:
+        date_format = "%Y-%m"
+
+    surveys = list(db.surveys.find(query, {"survey_date": 1, "route_id": 1, "_id": 1}).sort("survey_date", 1))
+
+    if not surveys:
+        return json.dumps({"route_id": route_id, "trend": [], "note": "No surveys found"})
+
+    # Build time buckets
+    from collections import defaultdict
+    buckets = defaultdict(lambda: {"surveys": 0, "routes": set()})
+
+    for s in surveys:
+        date_str = s.get("survey_date", "")
+        if not date_str:
+            continue
+        # Parse to get bucket key
+        try:
+            from datetime import datetime as dt
+            d = dt.strptime(date_str[:10], "%Y-%m-%d")
+            key = d.strftime(date_format)
+        except Exception:
+            key = date_str[:7]  # fallback to YYYY-MM
+        buckets[key]["surveys"] += 1
+        buckets[key]["routes"].add(s.get("route_id"))
+
+    # Get asset counts per survey
+    survey_ids = [s["_id"] for s in surveys]
+
+    trend = []
+    for key in sorted(buckets.keys()):
+        b = buckets[key]
+        trend.append({
+            "period": key,
+            "surveys": b["surveys"],
+            "routes_surveyed": len(b["routes"]),
+        })
+
+    # Also get overall asset detection trend from master_assets.first_seen_date
+    asset_pipeline = [
+        {"$match": {**query, "first_seen_date": {"$exists": True}}},
+        {"$group": {
+            "_id": {"$substr": ["$first_seen_date", 0, 7]},  # YYYY-MM
+            "new_assets": {"$sum": 1},
+            "new_damaged": {"$sum": {"$cond": [{"$ne": ["$latest_condition", "good"]}, 1, 0]}},
+        }},
+        {"$sort": {"_id": 1}},
+    ]
+    asset_trend = list(db.master_assets.aggregate(asset_pipeline))
+
+    # Merge into trend
+    asset_by_period = {a["_id"]: a for a in asset_trend}
+    for t in trend:
+        period_key = t["period"][:7]  # match YYYY-MM
+        at = asset_by_period.get(period_key, {})
+        t["new_assets_detected"] = at.get("new_assets", 0)
+        t["new_defective"] = at.get("new_damaged", 0)
+
+    return json.dumps({
+        "route_id": route_id,
+        "group_by": group_by,
+        "trend": trend,
+    })
+
+
+# =============================================================================
+# GAP #10: MAP OUTPUT FOR SPATIAL QUERIES
+# =============================================================================
+
+@tool
+def get_assets_for_map(asset_name: str = "", category_name: str = "", route_id: Optional[int] = None, condition: str = "", limit: int = 50) -> str:
+    """
+    Get asset locations formatted for map display. Returns data with a ```map code block.
+    Use for "Show guardrails on the map", "Map all defective assets on route 235",
+    "Show me defects on a map", "Map all assets in this category".
+
+    Args:
+        asset_name: Optional specific asset type name
+        category_name: Optional category name
+        route_id: Optional route filter
+        condition: Optional "good" or "damaged"
+        limit: Max markers (default 50)
+
+    Returns:
+        Markdown with a map code block containing markers
+    """
+    db = get_db()
+    query: dict = {"canonical_location": {"$exists": True}}
+
+    if asset_name:
+        aids = _resolve_asset_ids(asset_name)
+        if aids:
+            query["asset_id"] = {"$in": aids}
+    if category_name:
+        cid = _resolve_category_id(category_name)
+        if cid:
+            query["category_id"] = cid
+    if route_id is not None:
+        query["route_id"] = route_id
+    if condition:
+        norm = condition.strip().lower()
+        if norm == "damaged":
+            query["latest_condition"] = {"$ne": "good"}
+        elif norm == "good":
+            query["latest_condition"] = "good"
+
+    total = db.master_assets.count_documents(query)
+    assets = list(db.master_assets.find(query).limit(limit))
+
+    markers = []
+    for a in assets:
+        loc = a.get("canonical_location", {})
+        coords = loc.get("coordinates", [])
+        if len(coords) >= 2:
+            cond = a.get("latest_condition", "unknown")
+            color = "green" if cond == "good" else "red"
+            marker = {
+                "lat": coords[1],
+                "lng": coords[0],
+                "label": _label_name(a.get("asset_id", "")),
+                "color": color,
+                "popup": f"{_label_name(a.get('asset_id', ''))} — {cond} ({a.get('master_display_id', '')})",
+            }
+            # Add video/frame info for popup image
+            vid_id = a.get("latest_video_id")
+            frame_num = a.get("latest_frame_number")
+            box = a.get("latest_box")
+            if vid_id and frame_num is not None:
+                marker["video_id"] = str(vid_id)
+                marker["frame_number"] = frame_num
+                if box:
+                    marker["box"] = {"x": box.get("x", 0), "y": box.get("y", 0), "w": box.get("width", 0), "h": box.get("height", 0)}
+            markers.append(marker)
+
+    description = []
+    if asset_name:
+        description.append(asset_name)
+    if category_name:
+        description.append(category_name)
+    if condition:
+        description.append(f"{condition} condition")
+    if route_id:
+        road = db.roads.find_one({"route_id": route_id})
+        rname = road.get("road_name", f"Route {route_id}") if road else f"Route {route_id}"
+        description.append(f"on {rname}")
+    desc = " ".join(description) if description else "assets"
+
+    intro = f"Here are {len(markers)} {desc} shown on the map."
+    if total > limit:
+        intro += f" (Showing {limit} of {total} total.)"
+
+    map_data = json.dumps({"type": "circle", "markers": markers}, indent=2)
+    return f"{intro}\n\n```map\n{map_data}\n```"
+
 # =============================================================================
 # TOOL REGISTRY
 # =============================================================================
@@ -1568,4 +2256,14 @@ ALL_TOOLS = [
     # Analytics & risk tools
     get_category_route_risk,
     get_asset_type_route_risk,
+    # Gap-fill tools
+    compare_surveys_on_route,
+    get_asset_details,
+    get_video_details,
+    get_surveyor_stats,
+    get_assets_by_zone_and_side,
+    get_assets_by_specific_condition,
+    rank_routes_by_asset_damage,
+    get_detection_trend,
+    get_assets_for_map,
 ]
