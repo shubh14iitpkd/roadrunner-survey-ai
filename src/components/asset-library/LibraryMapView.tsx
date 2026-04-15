@@ -358,7 +358,7 @@ export default function LibraryMapView({
   onSelect,
 }: LibraryMapViewProps) {
   const center = useMemo<[number, number]>(() => {
-    if (assets.length === 0) return [25.2, 55.27]; // Dubai fallback
+    if (assets.length === 0) return [25.3548, 51.1839];
     return [assets[0].lat, assets[0].lng];
   }, [assets]);
 
@@ -397,7 +397,7 @@ export default function LibraryMapView({
   return (
     <MapContainer
       center={center}
-      zoom={12}
+      zoom={14}
       className="h-full w-full"
       style={{ minHeight: 200 }}
       zoomControl={true}
