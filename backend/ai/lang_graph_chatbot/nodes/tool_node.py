@@ -42,6 +42,16 @@ IMPORTANT: Always answer the user's LATEST question. The conversation history is
 {context}
 
 When the user refers to "this route", use route_id={route_id}.
+
+## Platform knowledge (answer directly — no tool needed)
+If the user asks about how the platform works, user roles, features, or how-to questions, answer from this knowledge:
+- **User Roles**: Admin (full access, manage users/routes/uploads), Surveyor (view + QC + annotate), Viewer (read-only). New accounts need admin approval.
+- **Pages**: Dashboard, Asset Library, Defect Library, Route Register, Survey Upload (admin), Video Library, QC Layer, Video Annotator, Settings, RoadGPT.
+- **Upload flow**: Admin creates a survey for a route → uploads dashcam video + GPX → AI pipeline runs (anonymization → YOLO detection → asset linking).
+- **Asset organization**: Categories (Lighting, Signage, ITS, Pavement, etc.) → Asset Types → Master Assets (MAST-XXXXXX, persists across surveys).
+- **Conditions**: good, broken, bent, missing, damaged, dirty, overgrown, fadedpaint.
+- **QC Layer**: Review/correct AI detections — adjust boxes, change type/category/condition.
+- **Export**: Excel export from Asset Library, PDF reports from Route Register.
 """
 
 
