@@ -47,6 +47,18 @@ const CATEGORY_COLORS = [
   "hsl(330, 70%, 55%)",   // BEAUTIFICATION - pink
 ];
 
+// Format percentage helper
+const formatPercent = (p: number) => {
+  const percentage = p * 100;
+  
+  // If it's effectively zero to two decimal places, find the first significant digit
+  if (percentage > 0 && percentage < 0.01) {
+    return percentage.toPrecision(1); 
+  }
+  
+  return percentage.toFixed(2);
+};
+
 // Active shape renderer for interactive donut
 const renderActiveShape = (props: any) => {
   const { cx, cy, innerRadius, outerRadius, startAngle, endAngle, fill, payload, value, percent } = props;
@@ -61,7 +73,7 @@ const renderActiveShape = (props: any) => {
         {payload.category}
       </text>
       <text x={cx} y={cy + 22} textAnchor="middle" fill="currentColor" className="text-muted-foreground" fontSize={10}>
-        {(percent * 100).toFixed(0)}%
+        {formatPercent(percent)}%
       </text>
     </g>
   );
@@ -81,7 +93,7 @@ const renderActiveConditionShape = (props: any) => {
         {payload.condition}
       </text>
       <text x={cx} y={cy + 22} textAnchor="middle" fill="currentColor" className="text-muted-foreground" fontSize={10}>
-        {(percent * 100).toFixed(0)}%
+        {formatPercent(percent)}%
       </text>
     </g>
   );

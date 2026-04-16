@@ -152,7 +152,7 @@ export default function AssetLibrary() {
   const [directionFilter, setDirectionFilter] = useState<"all" | "LHS" | "RHS">("all");
   const [conditionFilter, setConditionFilter] = useState<"all" | "good"| "damaged">(() => {
     const c = searchParams.get("condition");
-    return (c === "good" || c === "damaged") ? c : "all";
+    return c==="defective" ? "damaged" : (c === "good" || c === "damaged") ? c : "all";
   });
   const [zoneFilter, setZoneFilter] = useState<"all" | "shoulder" | "median" | "pavement" | "overhead">("all");
   const [attributes, setAttributes] = useState<Record<string, readonly string[]>>({});

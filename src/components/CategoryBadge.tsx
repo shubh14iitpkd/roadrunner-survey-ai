@@ -5,8 +5,27 @@ const BADGE_STYLES = [
   "bg-amber-500/15 text-amber-700 dark:text-amber-300",
   "bg-purple-500/15 text-purple-700 dark:text-purple-300",
   "bg-pink-500/15 text-pink-700 dark:text-pink-300",
-  "bg-red-500/15 text-red-700 dark:text-red-300",
+  "bg-rose-500/15 text-rose-700 dark:text-rose-300",
 ];
+const DOT_COLORS = [
+  "bg-blue-500",
+  "bg-cyan-500",
+  "bg-emerald-500",
+  "bg-amber-500",
+  "bg-purple-500",
+  "bg-pink-500",
+  "bg-rose-500",
+];
+const COLORS = [
+  "#3B82F6", // blue-500
+  "#06B6D4", // cyan-500
+  "#10B981", // emerald-500
+  "#F59E0B", // amber-500
+  "#A855F7", // purple-500
+  "#EC4899", // pink-500
+  "#F43F5E", // rose-500
+];
+
 const cid = []
 
 const getCategoryColour = (category_id: string) => {
@@ -27,24 +46,6 @@ export function getCategoryBadgeStyle(category_id: string): string {
   const idx =  cid.indexOf(category_id)
   return BADGE_STYLES[idx % BADGE_STYLES.length];
 }
-
-const DOT_COLORS = [
-  "bg-blue-500",
-  "bg-cyan-500",
-  "bg-emerald-500",
-  "bg-amber-500",
-  "bg-purple-500",
-  "bg-pink-500",
-];
-
-const COLORS = [
-  "#3B82F6", // blue-500
-  "#06B6D4", // cyan-500
-  "#10B981", // emerald-500
-  "#F59E0B", // amber-500
-  "#A855F7", // purple-500
-  "#EC4899"  // pink-500
-];
 
 export function getCategoryDotColor(category_id: string): string {
   if (!category_id) return "bg-gray-500"
