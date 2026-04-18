@@ -12,8 +12,15 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import {
   ArrowLeft, Square, Save, Layers, Search, Play, Pause,
-  Undo2, MousePointer, Trash2,
+  Undo2, Redo2, MousePointer, Trash2, Eye, EyeOff,
+  ZoomIn, ZoomOut, RotateCcw, Pencil,
 } from "lucide-react";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
 
 // ─── Types ───────────────────────────────────────────────────────────
 interface Annotation {
@@ -92,6 +99,7 @@ export default function VideoAnnotator() {
   // Video state
   const videoRef = useRef<HTMLVideoElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
+  const baseContainerRef = useRef<HTMLDivElement>(null);
   const [videoSrc, setVideoSrc] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -109,19 +117,63 @@ export default function VideoAnnotator() {
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
+  // History (undo/redo)
+  const [history, setHistory] = useState<Annotation[][]>([[]]);
+  const [historyIndex, setHistoryIndex] = useState(0);
+
   // Drawing state
   const [activeTool, setActiveTool] = useState<"select" | "rectangle">("select");
   const [isDrawing, setIsDrawing] = useState(false);
   const [drawStart, setDrawStart] = useState<{ x: number; y: number } | null>(null);
   const [drawCurrent, setDrawCurrent] = useState<{ x: number; y: number } | null>(null);
 
+  // Drag / resize on user annotations (new, pre-save only)
+  const [dragState, setDragState] = useState<{ id: string; startX: number; startY: number; origX: number; origY: number } | null>(null);
+  const [resizeState, setResizeState] = useState<{ id: string; handle: string; startX: number; startY: number; orig: { x: number; y: number; width: number; height: number } } | null>(null);
+
+  // Zoom & visibility
+  const [zoom, setZoom] = useState(1);
+  const [showLabels, setShowLabels] = useState(true);
+
   // Label selection
   const [labelSearch, setLabelSearch] = useState("");
   const [selectedLabel, setSelectedLabel] = useState("");
   const [selectedCondition, setSelectedCondition] = useState("");
 
+  // Edit dialog
+  const [editingAnnotation, setEditingAnnotation] = useState<Annotation | null>(null);
+  const [editCategoryId, setEditCategoryId] = useState("");
+  const [editLabel, setEditLabel] = useState("");
+  const [editCondition, setEditCondition] = useState("");
+
   // Saving
   const [saving, setSaving] = useState(false);
+
+  // ─── History helpers ─────────────────────────────────────────────
+  const pushHistory = useCallback((list: Annotation[]) => {
+    setHistory(prev => {
+      const newHist = prev.slice(0, historyIndex + 1);
+      newHist.push(JSON.parse(JSON.stringify(list)));
+      return newHist;
+    });
+    setHistoryIndex(prev => prev + 1);
+  }, [historyIndex]);
+
+  const undo = useCallback(() => {
+    if (historyIndex <= 0) return;
+    const newIdx = historyIndex - 1;
+    setHistoryIndex(newIdx);
+    setAnnotations(JSON.parse(JSON.stringify(history[newIdx])));
+    setSelectedId(null);
+  }, [history, historyIndex]);
+
+  const redo = useCallback(() => {
+    if (historyIndex >= history.length - 1) return;
+    const newIdx = historyIndex + 1;
+    setHistoryIndex(newIdx);
+    setAnnotations(JSON.parse(JSON.stringify(history[newIdx])));
+    setSelectedId(null);
+  }, [history, historyIndex]);
 
   // ─── Label map helpers ────────────────────────────────────────────
   const { categories, labelsByCategory, allLabels, labelToCategoryId } = useMemo(() => {
@@ -172,7 +224,6 @@ export default function VideoAnnotator() {
 
   // ─── Load video data ─────────────────────────────────────────────
   useEffect(() => {
-    console.log("Loading video data for ID:", videoId);
     if (!videoId) return;
     let cancelled = false;
     (async () => {
@@ -183,18 +234,15 @@ export default function VideoAnnotator() {
           api.videos.getFramesDetectionsOnly(videoId),
         ]);
         if (cancelled) return;
-        console.log(`${API_BASE}${videoResp.storage_url}`);
         if (videoResp?.storage_url) {
           const url = videoResp.storage_url.startsWith("http")
             ? videoResp.storage_url
             : `${API_BASE}${videoResp.storage_url}`;
           setVideoSrc(url);
-          console.log("Video URL set:", url);
         } else {
           setError("Video not found");
         }
 
-        // Build existing detections map
         const map = new Map<number, ExistingDetection[]>();
         for (const frame of detectionsResp.items ?? []) {
           const dets: ExistingDetection[] = frame.detections ?? [];
@@ -262,11 +310,12 @@ export default function VideoAnnotator() {
   const drawExisting = useCallback(() => {
     const video = videoRef.current;
     const canvas = canvasRef.current;
-    if (!video || !canvas) return;
+    const base = baseContainerRef.current;
+    if (!video || !canvas || !base) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    const rect = canvas.getBoundingClientRect();
+    const rect = base.getBoundingClientRect();
     const displayW = Math.round(rect.width);
     const displayH = Math.round(rect.height);
     if (canvas.width !== displayW || canvas.height !== displayH) {
@@ -306,12 +355,14 @@ export default function VideoAnnotator() {
       ctx.strokeRect(x, y, w, h);
       ctx.setLineDash([]);
 
-      const label = getDetectionDisplayName(d);
-      ctx.font = "bold 10px Inter, Arial, sans-serif";
-      ctx.fillStyle = "rgba(255,255,255,0.6)";
-      ctx.fillText(label, x + 3, y > 14 ? y - 4 : y + h + 12);
+      if (showLabels) {
+        const label = getDetectionDisplayName(d);
+        ctx.font = "bold 10px Inter, Arial, sans-serif";
+        ctx.fillStyle = "rgba(255,255,255,0.6)";
+        ctx.fillText(label, x + 3, y > 14 ? y - 4 : y + h + 12);
+      }
     }
-  }, [existingFrameMap, videoDims, getDetectionDisplayName]);
+  }, [existingFrameMap, videoDims, getDetectionDisplayName, showLabels]);
 
   useEffect(() => {
     drawExisting();
@@ -328,17 +379,15 @@ export default function VideoAnnotator() {
     return () => window.removeEventListener("resize", onResize);
   }, [drawExisting]);
 
-  // ─── Overlay position helper ─────────────────────────────────────
-  // The overlay div sits exactly over the rendered video area (handling letterboxing)
+  // ─── Overlay position helper (letterbox-aware) ───────────────────
   const [overlayStyle, setOverlayStyle] = useState<React.CSSProperties>({});
 
   const updateOverlayStyle = useCallback(() => {
-    const video = videoRef.current;
-    const container = video?.parentElement;
-    if (!video || !container) return;
-    const containerRect = container.getBoundingClientRect();
-    const displayW = containerRect.width;
-    const displayH = containerRect.height;
+    const container = baseContainerRef.current;
+    if (!container) return;
+    const rect = container.getBoundingClientRect();
+    const displayW = rect.width;
+    const displayH = rect.height;
     const videoAspect = videoDims.w / videoDims.h;
     const containerAspect = displayW / displayH;
     let renderW: number, renderH: number, offsetX: number, offsetY: number;
@@ -362,75 +411,165 @@ export default function VideoAnnotator() {
     return () => window.removeEventListener("resize", updateOverlayStyle);
   }, [updateOverlayStyle]);
 
-  // Also update when video metadata loads
   useEffect(() => { updateOverlayStyle(); }, [videoDims, updateOverlayStyle]);
 
   // ─── Relative position on overlay ────────────────────────────────
   const getRelativePos = (e: React.MouseEvent) => {
     const rect = overlayRef.current?.getBoundingClientRect();
-    if (!rect) return { x: 0, y: 0 };
+    if (!rect || rect.width === 0 || rect.height === 0) return { x: 0, y: 0 };
     return {
       x: Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width)),
       y: Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height)),
     };
   };
 
-  // ─── Drawing handlers ────────────────────────────────────────────
-  const handleMouseDown = (e: React.MouseEvent) => {
-    if (activeTool !== "rectangle" || isPlaying) return;
-    const pos = getRelativePos(e);
-    setIsDrawing(true);
-    setDrawStart(pos);
-    setDrawCurrent(pos);
+  // ─── Mouse handlers ──────────────────────────────────────────────
+  const handleOverlayMouseDown = (e: React.MouseEvent) => {
+    if (activeTool === "rectangle" && !isPlaying) {
+      const pos = getRelativePos(e);
+      setIsDrawing(true);
+      setDrawStart(pos);
+      setDrawCurrent(pos);
+    } else if (activeTool === "select" && e.target === e.currentTarget) {
+      setSelectedId(null);
+    }
   };
 
   const handleMouseMove = (e: React.MouseEvent) => {
-    if (!isDrawing) return;
-    setDrawCurrent(getRelativePos(e));
+    if (isDrawing) {
+      setDrawCurrent(getRelativePos(e));
+      return;
+    }
+    if (dragState) {
+      const ann = annotations.find(a => a.id === dragState.id);
+      if (!ann) return;
+      const pos = getRelativePos(e);
+      const dx = pos.x - dragState.startX;
+      const dy = pos.y - dragState.startY;
+      const nx = Math.max(0, Math.min(1 - ann.width, dragState.origX + dx));
+      const ny = Math.max(0, Math.min(1 - ann.height, dragState.origY + dy));
+      setAnnotations(prev => prev.map(a => a.id === dragState.id ? { ...a, x: nx, y: ny } : a));
+      return;
+    }
+    if (resizeState) {
+      const pos = getRelativePos(e);
+      const { orig, handle, startX, startY, id } = resizeState;
+      const dx = pos.x - startX;
+      const dy = pos.y - startY;
+      let newX = orig.x, newY = orig.y, newW = orig.width, newH = orig.height;
+      if (handle.includes("e")) newW = Math.max(0.01, orig.width + dx);
+      if (handle.includes("w")) { newX = orig.x + dx; newW = Math.max(0.01, orig.width - dx); }
+      if (handle.includes("s")) newH = Math.max(0.01, orig.height + dy);
+      if (handle.includes("n")) { newY = orig.y + dy; newH = Math.max(0.01, orig.height - dy); }
+      setAnnotations(prev => prev.map(a => a.id === id ? { ...a, x: newX, y: newY, width: newW, height: newH } : a));
+    }
   };
 
   const handleMouseUp = () => {
-    if (!isDrawing || !drawStart || !drawCurrent) return;
-    setIsDrawing(false);
+    if (isDrawing && drawStart && drawCurrent) {
+      setIsDrawing(false);
+      const x = Math.min(drawStart.x, drawCurrent.x);
+      const y = Math.min(drawStart.y, drawCurrent.y);
+      const w = Math.abs(drawCurrent.x - drawStart.x);
+      const h = Math.abs(drawCurrent.y - drawStart.y);
 
-    const x = Math.min(drawStart.x, drawCurrent.x);
-    const y = Math.min(drawStart.y, drawCurrent.y);
-    const w = Math.abs(drawCurrent.x - drawStart.x);
-    const h = Math.abs(drawCurrent.y - drawStart.y);
-
-    if (w > 0.01 && h > 0.01) {
-      if (!selectedLabel) {
-        toast.error("Please select a label from the sidebar first");
-      } else {
-        const catId = labelToCategoryId[selectedLabel] || "";
-        const cond = selectedCondition || "Good";
-        const newAnn: Annotation = {
-          id: generateId(),
-          frameNumber: currentFrameNumber,
-          timestamp: currentTime,
-          label: selectedLabel,
-          category_id: catId,
-          condition: cond,
-          x, y, width: w, height: h,
-          color: getCategoryColorCode(catId),
-        };
-        setAnnotations(prev => [...prev, newAnn]);
-        toast.success(`Added: ${selectedLabel} (${cond}) on frame ${currentFrameNumber}`);
+      if (w > 0.01 && h > 0.01) {
+        if (!selectedLabel) {
+          toast.error("Please select a label from the sidebar first");
+        } else {
+          const catId = labelToCategoryId[selectedLabel] || "";
+          const cond = selectedCondition || "Good";
+          const newAnn: Annotation = {
+            id: generateId(),
+            frameNumber: currentFrameNumber,
+            timestamp: currentTime,
+            label: selectedLabel,
+            category_id: catId,
+            condition: cond,
+            x, y, width: w, height: h,
+            color: getCategoryColorCode(catId),
+          };
+          const next = [...annotations, newAnn];
+          setAnnotations(next);
+          pushHistory(next);
+          toast.success(`Added: ${selectedLabel} (${cond})`);
+        }
+        setActiveTool("select");
       }
+      setDrawStart(null);
+      setDrawCurrent(null);
+      return;
     }
-    setDrawStart(null);
-    setDrawCurrent(null);
+    if (dragState) {
+      pushHistory(annotations);
+      setDragState(null);
+    }
+    if (resizeState) {
+      pushHistory(annotations);
+      setResizeState(null);
+    }
+  };
+
+  const handleContainerMouseLeave = () => {
+    if (isDrawing) { setIsDrawing(false); setDrawStart(null); setDrawCurrent(null); }
+    if (dragState) { pushHistory(annotations); setDragState(null); }
+    if (resizeState) { pushHistory(annotations); setResizeState(null); }
+  };
+
+  // ─── Drag / resize starters ──────────────────────────────────────
+  const startDrag = (e: React.MouseEvent, ann: Annotation) => {
+    if (activeTool !== "select") return;
+    e.stopPropagation();
+    const pos = getRelativePos(e);
+    setSelectedId(ann.id);
+    setDragState({ id: ann.id, startX: pos.x, startY: pos.y, origX: ann.x, origY: ann.y });
+  };
+
+  const startResize = (e: React.MouseEvent, ann: Annotation, handle: string) => {
+    e.stopPropagation();
+    const pos = getRelativePos(e);
+    setResizeState({ id: ann.id, handle, startX: pos.x, startY: pos.y, orig: { x: ann.x, y: ann.y, width: ann.width, height: ann.height } });
   };
 
   // ─── Annotation actions ──────────────────────────────────────────
   const handleDeleteAnnotation = (id: string) => {
-    setAnnotations(prev => prev.filter(a => a.id !== id));
+    const next = annotations.filter(a => a.id !== id);
+    setAnnotations(next);
+    pushHistory(next);
     if (selectedId === id) setSelectedId(null);
   };
 
-  const handleUndoLast = () => {
-    setAnnotations(prev => prev.slice(0, -1));
+  const handleDeleteSelected = () => {
+    if (!selectedId) return;
+    handleDeleteAnnotation(selectedId);
   };
+
+  const openEditDialog = (ann: Annotation) => {
+    setEditingAnnotation(ann);
+    setEditCategoryId(ann.category_id);
+    setEditLabel(ann.label);
+    setEditCondition(ann.condition);
+  };
+
+  const saveEdit = () => {
+    if (!editingAnnotation) return;
+    const next = annotations.map(a =>
+      a.id === editingAnnotation.id
+        ? { ...a, label: editLabel, category_id: editCategoryId, condition: editCondition, color: getCategoryColorCode(editCategoryId) }
+        : a
+    );
+    setAnnotations(next);
+    pushHistory(next);
+    setEditingAnnotation(null);
+    toast.success("Annotation updated");
+  };
+
+  const categoryIds = useMemo(() => Object.keys(categories), [categories]);
+
+  // ─── Zoom handlers ───────────────────────────────────────────────
+  const handleZoomIn = () => setZoom(z => Math.min(5, z + 0.25));
+  const handleZoomOut = () => setZoom(z => Math.max(0.5, z - 0.25));
+  const handleZoomReset = () => setZoom(1);
 
   // ─── Annotations for current frame ──────────────────────────────
   const currentFrameAnnotations = useMemo(
@@ -438,7 +577,6 @@ export default function VideoAnnotator() {
     [annotations, currentFrameNumber]
   );
 
-  // ─── Frame indicator markers on scrubber ─────────────────────────
   const annotatedFrameSet = useMemo(
     () => new Set(annotations.map(a => a.frameNumber)),
     [annotations]
@@ -470,7 +608,7 @@ export default function VideoAnnotator() {
       const resp = await api.assets.saveManualAnnotations(payload);
       toast.success(`Saved ${resp.assets_created} annotation${resp.assets_created !== 1 ? "s" : ""}`);
 
-      // Merge saved annotations into existingFrameMap so they show as dashed detections
+      // Merge saved annotations into existingFrameMap so they show as dashed (read-only) detections
       setExistingFrameMap(prev => {
         const next = new Map(prev);
         for (const a of annotations) {
@@ -491,6 +629,9 @@ export default function VideoAnnotator() {
         return next;
       });
       setAnnotations([]);
+      setHistory([[]]);
+      setHistoryIndex(0);
+      setSelectedId(null);
     } catch {
       toast.error("Failed to save annotations");
     } finally {
@@ -522,13 +663,20 @@ export default function VideoAnnotator() {
 
         <div className="h-5 w-px bg-border mx-1" />
 
-        {/* Undo last */}
+        {/* Undo / Redo */}
         <Button
           variant="ghost" size="icon" className="h-8 w-8"
-          onClick={handleUndoLast} disabled={annotations.length === 0}
-          title="Undo last annotation"
+          onClick={undo} disabled={historyIndex <= 0}
+          title="Undo"
         >
           <Undo2 className="h-4 w-4" />
+        </Button>
+        <Button
+          variant="ghost" size="icon" className="h-8 w-8"
+          onClick={redo} disabled={historyIndex >= history.length - 1}
+          title="Redo"
+        >
+          <Redo2 className="h-4 w-4" />
         </Button>
 
         <div className="h-5 w-px bg-border mx-1" />
@@ -547,7 +695,7 @@ export default function VideoAnnotator() {
         <Button
           variant={activeTool === "rectangle" ? "default" : "ghost"}
           size="icon" className="h-8 w-8"
-          onClick={() => { setActiveTool("rectangle"); if (isPlaying) { videoRef.current?.pause(); } }}
+          onClick={() => { setActiveTool("rectangle"); if (isPlaying) videoRef.current?.pause(); }}
           title="Draw Rectangle (pauses video)"
         >
           <Square className="h-4 w-4" />
@@ -555,11 +703,39 @@ export default function VideoAnnotator() {
 
         <div className="h-5 w-px bg-border mx-1" />
 
-        <span className="text-[10px] text-muted-foreground font-mono">
-          Frame {currentFrameNumber}
-        </span>
+        {/* Delete selected */}
+        <Button
+          variant="ghost" size="icon" className="h-8 w-8"
+          onClick={handleDeleteSelected} disabled={!selectedId}
+          title="Delete selected annotation"
+        >
+          <Trash2 className="h-4 w-4" />
+        </Button>
 
-        {/* Right side: count + save */}
+        {/* Hide labels */}
+        <Button
+          variant={showLabels ? "ghost" : "secondary"}
+          size="icon" className="h-8 w-8"
+          onClick={() => setShowLabels(!showLabels)}
+          title={showLabels ? "Hide Labels" : "Show Labels"}
+        >
+          {showLabels ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+        </Button>
+
+        <div className="h-5 w-px bg-border mx-1" />
+
+        {/* Zoom */}
+        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleZoomOut} title="Zoom Out">
+          <ZoomOut className="h-4 w-4" />
+        </Button>
+        <span className="text-[10px] text-muted-foreground w-10 text-center font-mono">{Math.round(zoom * 100)}%</span>
+        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleZoomIn} title="Zoom In">
+          <ZoomIn className="h-4 w-4" />
+        </Button>
+        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleZoomReset} title="Reset Zoom">
+          <RotateCcw className="h-3.5 w-3.5" />
+        </Button>
+
         <div className="flex-1" />
         {annotations.length > 0 && (
           <Badge variant="secondary" className="text-[10px] mr-2">
@@ -595,75 +771,114 @@ export default function VideoAnnotator() {
             </div>
           ) : (
             <>
-              {/* Video area */}
-              <div className="flex-1 relative min-h-0">
-                <video
-                  ref={videoRef}
-                  src={videoSrc}
-                  className="absolute inset-0 w-full h-full object-contain"
-                  onClick={() => { if (activeTool === "select") togglePlay(); }}
-                />
-                {/* Canvas for existing AI detections (dashed, read-only) */}
-                <canvas
-                  ref={canvasRef}
-                  className="absolute inset-0 w-full h-full pointer-events-none"
-                />
-
-                {/* Overlay div for drawing new annotations (positioned over rendered video) */}
+              {/* Video area (zoom wrapper inside) */}
+              <div
+                ref={baseContainerRef}
+                className="flex-1 relative min-h-0 overflow-hidden"
+                onWheel={(e) => {
+                  const delta = e.deltaY > 0 ? -0.15 : 0.15;
+                  setZoom(z => Math.min(5, Math.max(0.5, z + delta)));
+                }}
+                onMouseMove={handleMouseMove}
+                onMouseUp={handleMouseUp}
+                onMouseLeave={handleContainerMouseLeave}
+              >
                 <div
-                  ref={overlayRef}
-                  style={overlayStyle}
-                  className={cn(
-                    "z-10",
-                    activeTool === "rectangle" ? "cursor-crosshair" : ""
-                  )}
-                  onMouseDown={handleMouseDown}
-                  onMouseMove={handleMouseMove}
-                  onMouseUp={handleMouseUp}
-                  onMouseLeave={() => {
-                    if (isDrawing) { setIsDrawing(false); setDrawStart(null); setDrawCurrent(null); }
+                  style={{
+                    position: "absolute",
+                    inset: 0,
+                    transform: `scale(${zoom})`,
+                    transformOrigin: "center center",
+                    transition: "transform 0.15s ease",
                   }}
                 >
-                  {/* Render user annotations for current frame */}
-                  {currentFrameAnnotations.map(ann => (
-                    <div
-                      key={ann.id}
-                      className={cn(
-                        "absolute border-2 pointer-events-auto",
-                        selectedId === ann.id ? "ring-1 ring-white/50" : ""
-                      )}
-                      style={{
-                        left: `${ann.x * 100}%`, top: `${ann.y * 100}%`,
-                        width: `${ann.width * 100}%`, height: `${ann.height * 100}%`,
-                        borderColor: ann.color,
-                        backgroundColor: selectedId === ann.id ? `${ann.color}33` : `${ann.color}15`,
-                      }}
-                      onClick={(e) => { e.stopPropagation(); setSelectedId(ann.id); }}
-                    >
-                      <div
-                        className="absolute -top-4 -left-0.5 px-1.5 py-0.5 text-[9px] font-bold text-white whitespace-nowrap"
-                        style={{ backgroundColor: ann.color }}
-                      >
-                        {ann.label}
-                      </div>
-                    </div>
-                  ))}
+                  <video
+                    ref={videoRef}
+                    src={videoSrc}
+                    className="absolute inset-0 w-full h-full object-contain"
+                    onClick={() => { if (activeTool === "select") togglePlay(); }}
+                  />
+                  {/* Canvas for existing AI detections (dashed, read-only) */}
+                  <canvas
+                    ref={canvasRef}
+                    className="absolute inset-0 w-full h-full pointer-events-none"
+                  />
 
-                  {/* Drawing rectangle preview */}
-                  {isDrawing && drawStart && drawCurrent && (
-                    <div
-                      className="absolute border-2 border-dashed border-primary bg-primary/10 pointer-events-none"
-                      style={{
-                        left: `${Math.min(drawStart.x, drawCurrent.x) * 100}%`,
-                        top: `${Math.min(drawStart.y, drawCurrent.y) * 100}%`,
-                        width: `${Math.abs(drawCurrent.x - drawStart.x) * 100}%`,
-                        height: `${Math.abs(drawCurrent.y - drawStart.y) * 100}%`,
-                      }}
-                    />
-                  )}
+                  {/* Overlay for drawing + user annotations (positioned over rendered video) */}
+                  <div
+                    ref={overlayRef}
+                    style={overlayStyle}
+                    className={cn(
+                      "z-10",
+                      activeTool === "rectangle" ? "cursor-crosshair" : ""
+                    )}
+                    onMouseDown={handleOverlayMouseDown}
+                  >
+                    {currentFrameAnnotations.map(ann => {
+                      const isSelected = selectedId === ann.id;
+                      return (
+                        <div
+                          key={ann.id}
+                          className={cn(
+                            "absolute border-2 pointer-events-auto",
+                            !isSelected && "hover:ring-1 hover:ring-white/30",
+                            !showLabels && "border-opacity-50",
+                            activeTool === "select" ? "cursor-move" : ""
+                          )}
+                          style={{
+                            left: `${ann.x * 100}%`, top: `${ann.y * 100}%`,
+                            width: `${ann.width * 100}%`, height: `${ann.height * 100}%`,
+                            borderColor: ann.color,
+                            backgroundColor: isSelected ? `${ann.color}33` : `${ann.color}15`,
+                          }}
+                          onMouseDown={e => startDrag(e, ann)}
+                          onClick={e => { e.stopPropagation(); setSelectedId(ann.id); }}
+                        >
+                          {showLabels && (
+                            <div
+                              className="absolute -top-4 -left-0.5 px-1.5 py-0.5 text-[9px] select-none font-bold text-white whitespace-nowrap"
+                              style={{ backgroundColor: ann.color }}
+                            >
+                              {ann.label}
+                            </div>
+                          )}
+                          {/* Resize handles (only when selected in select mode) */}
+                          {isSelected && activeTool === "select" && (
+                            <>
+                              {["nw","ne","sw","se","n","s","e","w"].map(h => (
+                                <div
+                                  key={h}
+                                  className="absolute w-2 h-2 rounded-full bg-white border border-gray-600 z-10"
+                                  style={{
+                                    cursor: h === "nw" || h === "se" ? "nwse-resize" : h === "ne" || h === "sw" ? "nesw-resize" : h === "n" || h === "s" ? "ns-resize" : "ew-resize",
+                                    top: h.includes("n") ? "-4px" : h.includes("s") ? "calc(100% - 4px)" : "calc(50% - 4px)",
+                                    left: h.includes("w") ? "-4px" : h.includes("e") ? "calc(100% - 4px)" : "calc(50% - 4px)",
+                                  }}
+                                  onMouseDown={e => startResize(e, ann, h)}
+                                />
+                              ))}
+                            </>
+                          )}
+                        </div>
+                      );
+                    })}
+
+                    {/* Drawing preview */}
+                    {isDrawing && drawStart && drawCurrent && (
+                      <div
+                        className="absolute border-2 border-dashed border-primary bg-primary/10 pointer-events-none"
+                        style={{
+                          left: `${Math.min(drawStart.x, drawCurrent.x) * 100}%`,
+                          top: `${Math.min(drawStart.y, drawCurrent.y) * 100}%`,
+                          width: `${Math.abs(drawCurrent.x - drawStart.x) * 100}%`,
+                          height: `${Math.abs(drawCurrent.y - drawStart.y) * 100}%`,
+                        }}
+                      />
+                    )}
+                  </div>
                 </div>
 
-                {/* Drawing mode indicator */}
+                {/* Drawing mode indicator (outside zoom wrapper) */}
                 {activeTool === "rectangle" && (
                   <div className="absolute bottom-14 left-1/2 -translate-x-1/2 bg-primary text-primary-foreground px-3 py-1.5 rounded-full text-xs font-medium shadow-lg flex items-center gap-2 z-20">
                     <Square className="h-3.5 w-3.5" />
@@ -705,7 +920,6 @@ export default function VideoAnnotator() {
                               [&::-webkit-slider-thumb]:bg-blue-500
                               [&::-webkit-slider-thumb]:-mt-1"
                   />
-                  {/* Annotation markers on scrubber */}
                   {duration > 0 && Array.from(annotatedFrameSet).map(fn => (
                     <div
                       key={fn}
@@ -797,13 +1011,13 @@ export default function VideoAnnotator() {
           </ScrollArea>
 
           {/* ─── Annotations list ─── */}
-          <div className="border-t border-border">
-            <div className="px-3 py-2 border-b border-border flex items-center justify-between">
+          <div className="border-t border-border flex flex-col shrink-0" style={{ height: "40%", minHeight: 180 }}>
+            <div className="px-3 py-2 border-b border-border flex items-center justify-between shrink-0">
               <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
                 Annotations ({annotations.length})
               </span>
             </div>
-            <ScrollArea className="max-h-[240px]">
+            <ScrollArea className="flex-1 min-h-0">
               <div className="p-2 space-y-1">
                 {annotations.length === 0 && (
                   <p className="text-[10px] text-muted-foreground text-center py-4">
@@ -821,7 +1035,6 @@ export default function VideoAnnotator() {
                     )}
                     onClick={() => {
                       setSelectedId(ann.id);
-                      // Seek to annotation frame
                       const v = videoRef.current;
                       if (v) v.currentTime = ann.frameNumber / FPS;
                     }}
@@ -829,16 +1042,22 @@ export default function VideoAnnotator() {
                     <div className="flex items-center gap-2">
                       <div className="w-2.5 h-2.5 rounded-sm flex-shrink-0" style={{ backgroundColor: ann.color }} />
                       <span className="text-[11px] font-medium truncate flex-1">{ann.label}</span>
-                      <span className="text-[8px] text-muted-foreground font-mono">F{ann.frameNumber}</span>
+                    </div>
+                    <div className="flex items-center gap-1 mt-1 ml-4">
+                      <span className="text-[9px] text-muted-foreground">{ann.condition}</span>
+                      <span className="flex-1" />
+                      <button
+                        className="text-[9px] text-muted-foreground hover:bg-muted rounded px-1 py-0.5"
+                        onClick={e => { e.stopPropagation(); openEditDialog(ann); }}
+                      >
+                        <Pencil className="h-3 w-3 inline mr-0.5" />Edit
+                      </button>
                       <button
                         className="text-[9px] text-destructive hover:bg-destructive/10 rounded px-1 py-0.5"
                         onClick={e => { e.stopPropagation(); handleDeleteAnnotation(ann.id); }}
                       >
-                        <Trash2 className="h-3 w-3" />
+                        <Trash2 className="h-3 w-3 inline mr-0.5" />Del
                       </button>
-                    </div>
-                    <div className="text-[9px] text-muted-foreground mt-0.5 ml-4">
-                      {ann.condition}
                     </div>
                   </div>
                 ))}
@@ -847,6 +1066,65 @@ export default function VideoAnnotator() {
           </div>
         </div>
       </div>
+
+      {/* ─── Edit Annotation Dialog ─── */}
+      <Dialog open={!!editingAnnotation} onOpenChange={open => { if (!open) setEditingAnnotation(null); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-sm">Edit Annotation</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 pt-2">
+            <div>
+              <label className="text-[10px] font-semibold text-muted-foreground uppercase mb-1 block">Category</label>
+              <Select value={editCategoryId} onValueChange={v => { setEditCategoryId(v); setEditLabel(""); }}>
+                <SelectTrigger className="h-8 text-[11px]"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {categoryIds.map(catId => (
+                    <SelectItem key={catId} value={catId} className="text-[11px]">
+                      <div className="flex items-center gap-2">
+                        <div className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: getCategoryColorCode(catId) }} />
+                        {categories[catId]}
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <label className="text-[10px] font-semibold text-muted-foreground uppercase mb-1 block">Asset Type</label>
+              <Select value={editLabel} onValueChange={setEditLabel}>
+                <SelectTrigger className="h-8 text-[11px]"><SelectValue placeholder="Select type..." /></SelectTrigger>
+                <SelectContent className="max-h-52">
+                  {(labelsByCategory[editCategoryId] || []).map(l => (
+                    <SelectItem key={l} value={l} className="text-[11px]">{l}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <label className="text-[10px] font-semibold text-muted-foreground uppercase mb-1 block">Condition</label>
+              <div className="flex gap-2 flex-wrap">
+                {getConditionsForLabel(editLabel).map(c => (
+                  <button
+                    key={c}
+                    className={cn(
+                      "flex-1 rounded-md py-1.5 text-[11px] font-semibold border transition-all",
+                      editCondition === c ? (CONDITION_COLORS_ACTIVE[c] || "bg-primary text-white") : (CONDITION_COLORS[c] || "bg-muted")
+                    )}
+                    onClick={() => setEditCondition(c)}
+                  >
+                    {c}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="outline" size="sm" onClick={() => setEditingAnnotation(null)}>Cancel</Button>
+              <Button size="sm" onClick={saveEdit} disabled={!editLabel}>Save</Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
