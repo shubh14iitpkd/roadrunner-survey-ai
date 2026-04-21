@@ -213,6 +213,21 @@ def _build_survey_history_entry(asset_doc: dict, survey_id, survey_display_id: s
     }
 
 
+_LINEAR_FIELDS = ("kind", "classification", "geometry", "keypoints",
+                  "first_frame", "last_frame", "frames")
+
+
+def _merge_linear_fields(target: dict, asset_doc: dict) -> None:
+    """Copy linear-asset fields from `asset_doc` onto `target` only when the
+    source doc carries them (kind == "line"). Point assets untouched."""
+    if asset_doc.get("kind") != "line":
+        return
+    for f in _LINEAR_FIELDS:
+        v = asset_doc.get(f)
+        if v is not None:
+            target[f] = v
+
+
 def _update_master_asset(db, master_doc: dict, asset_doc: dict,
                           embedding: np.ndarray,
                           survey_id, survey_display_id: str,
@@ -229,28 +244,33 @@ def _update_master_asset(db, master_doc: dict, asset_doc: dict,
     # avg_lon = (old_coords[0] * existing_count + new_coords[0]) / (existing_count + 1)
     # avg_lat = (old_coords[1] * existing_count + new_coords[1]) / (existing_count + 1)
 
+    set_fields = {
+        "canonical_location":      {"type": "Point", "coordinates": new_coords},
+        "last_seen_date":          survey_date,
+        "latest_condition":        asset_doc.get("condition"),
+        "latest_survey_id":        ObjectId(survey_id) if survey_id else None,
+        "latest_survey_display_id": survey_display_id,
+        "latest_confidence":       asset_doc.get("confidence"),
+        "embedding":               embedding.tolist(),  # update to latest observation
+        "issue":                   None if asset_doc.get("condition") == "good"
+                                   else "Defective",
+        "updated_at":              datetime.now(timezone.utc),
+        # Denormalized fields for fast list queries (avoid $lookup)
+        "latest_frame_number":     asset_doc.get("frame_number"),
+        "latest_video_id":         asset_doc.get("video_id"),
+        "latest_box":              asset_doc.get("box"),
+        "latest_defect_id":        asset_doc.get("defect_id"),
+        "latest_description":      asset_doc.get("description"),
+    }
+    # Refresh linear geometry from latest observation (if any) so the map
+    # renders the newest polyline for this master asset.
+    _merge_linear_fields(set_fields, asset_doc)
+
     db.master_assets.update_one(
         {"_id": master_doc["_id"]},
         {
             "$push": {"survey_history": entry},
-            "$set": {
-                "canonical_location":      {"type": "Point", "coordinates": new_coords},
-                "last_seen_date":          survey_date,
-                "latest_condition":        asset_doc.get("condition"),
-                "latest_survey_id":        ObjectId(survey_id) if survey_id else None,
-                "latest_survey_display_id": survey_display_id,
-                "latest_confidence":       asset_doc.get("confidence"),
-                "embedding":               embedding.tolist(),  # update to latest observation
-                "issue":                   None if asset_doc.get("condition") == "good"
-                                           else "Defective",
-                "updated_at":              datetime.now(timezone.utc),
-                # Denormalized fields for fast list queries (avoid $lookup)
-                "latest_frame_number":     asset_doc.get("frame_number"),
-                "latest_video_id":         asset_doc.get("video_id"),
-                "latest_box":              asset_doc.get("box"),
-                "latest_defect_id":        asset_doc.get("defect_id"),
-                "latest_description":      asset_doc.get("description"),
-            },
+            "$set": set_fields,
             "$inc": {"total_surveys_detected": 1},
         },
     )
@@ -300,6 +320,11 @@ def _create_master_asset(db, asset_doc: dict, embedding: np.ndarray,
         "updated_at":              datetime.now(timezone.utc),
     }
 
+    # Linear-asset fields (only populated for kind == "line"). Carrying
+    # these onto master_assets lets the map view render the polyline
+    # directly from the lightweight /master/map-points endpoint.
+    _merge_linear_fields(doc, asset_doc)
+
     result = db.master_assets.insert_one(doc)
     return result.inserted_id
 
@@ -339,6 +364,10 @@ def link_assets_for_video(
             "frame_number": 1, "timestamp": 1, "box": 1,
             "condition": 1, "confidence": 1, "defect_id": 1,
             "embedding": 1,
+            # Linear-asset fields — carried onto master_assets so the map
+            # view can render polylines directly.
+            "kind": 1, "classification": 1, "geometry": 1, "keypoints": 1,
+            "first_frame": 1, "last_frame": 1, "frames": 1,
         }
     ))
 

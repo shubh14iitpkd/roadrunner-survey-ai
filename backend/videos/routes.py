@@ -1518,6 +1518,78 @@ def get_video_frame_annotated(video_id: str):
         return jsonify({"error": f"Failed to extract frame: {str(e)}"}), 500
 
 
+@videos_bp.get("/test/frame_by_key")
+def test_frame_by_key():
+    """
+    Test endpoint for asset-preview map:
+    Resolve video by stem directly from UPLOAD_DIR/video_library/<stem>.<ext>
+    and return a single frame as base64 JPEG + original dimensions.
+    No DB lookup, no detections.
+
+    Query params:
+      video_key    (required) stem, e.g. "2025_0805_151353_F"
+      frame_number (required) int
+      resize       optional bool ("true" default) — downscales to width 640
+    """
+    video_key = request.args.get("video_key")
+    frame_number = request.args.get("frame_number", type=int)
+    if not video_key or frame_number is None:
+        return jsonify({"error": "video_key and frame_number are required"}), 400
+
+    # Resolve file directly from uploads/video_library/<stem>.<ext>
+    upload_root = Path(
+        os.getenv("UPLOAD_DIR", Path(__file__).resolve().parents[1] / "uploads")
+    )
+    library_dir = upload_root / "video_library"
+    video_path = None
+    for ext in ("MP4", "mp4", "mov", "MOV"):
+        p = library_dir / f"{video_key}.{ext}"
+        if p.exists():
+            video_path = p
+            break
+    if video_path is None:
+        return jsonify({
+            "error": f"Video '{video_key}' not found in {library_dir}"
+        }), 404
+
+    try:
+        cap = cv2.VideoCapture(str(video_path))
+        if not cap.isOpened():
+            return jsonify({"error": "Failed to open video file"}), 500
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        if frame_number < 0 or frame_number >= total_frames:
+            frame_number = max(0, total_frames - 2)
+        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_number)
+        ret, frame = cap.read()
+        cap.release()
+        if not ret or frame is None:
+            return jsonify({"error": "Failed to read frame from video"}), 500
+
+        frame_height, frame_width = frame.shape[:2]
+        if request.args.get("resize", "true").lower() == "true":
+            resize_width = 640
+            new_height = int(frame_height * (resize_width / frame_width))
+            frame = cv2.resize(frame, (resize_width, new_height))
+
+        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        pil_image = Image.fromarray(frame_rgb)
+        img_io = io.BytesIO()
+        pil_image.save(img_io, "JPEG", quality=85)
+        img_io.seek(0)
+        base64_image = base64.b64encode(img_io.read()).decode("utf-8")
+
+        return jsonify({
+            "frame_number": frame_number,
+            "width": frame_width,           # original dims (for bbox scaling)
+            "height": frame_height,
+            "video_key": video_key,
+            "image_data": f"data:image/jpeg;base64,{base64_image}",
+        })
+    except Exception as e:
+        print(f"[test_frame_by_key] Error for key '{video_key}': {e}")
+        return jsonify({"error": f"Failed to extract frame: {e}"}), 500
+
+
 @videos_bp.get("/<video_id>/frames")
 def get_video_frames(video_id: str, detections_only=False):
     """

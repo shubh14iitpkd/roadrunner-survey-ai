@@ -131,6 +131,19 @@ interface MapPoint {
   zone: string;
   route_id?: number;
   category_id: string;
+  // Linear-asset fields
+  kind?: "point" | "line";
+  classification?: "point" | "linear_sided" | "linear_unsided";
+  geometry?: { type: "LineString"; coordinates: [number, number][] };
+  keypoints?: {
+    frame: number;
+    lat: number;
+    lng: number;
+    side?: string | null;
+    box?: { x: number; y: number; width: number; height: number };
+  }[];
+  first_frame?: number;
+  last_frame?: number;
 }
 
 export default function AssetLibrary() {
@@ -409,18 +422,42 @@ export default function AssetLibrary() {
       lastSurveyDate: '',
       issue: '',
       severity: 'Low',
+      kind: p.kind ?? (p.classification === 'linear_sided' || p.classification === 'linear_unsided' ? 'line' : 'point'),
+      classification: p.classification,
+      geometry: p.geometry,
+      keypoints: p.keypoints,
+      firstFrame: p.first_frame,
+      lastFrame: p.last_frame,
     }));
   }, [mapPoints]);
 
   // ── Lazy detail loader ──
   // Fetches survey_history + full description/issue for one selected asset.
   // Results are cached in detailCacheRef so repeated clicks are instant.
+  // For a line asset, the user's click on the polyline already supplied
+  // frameNumber/box/lat/lng from the nearest keypoint. The lazy detail
+  // loader returns latest_frame_number / latest_box (the anchor frame),
+  // which would otherwise clobber that override. Strip those fields out of
+  // the merge when the selection is a line.
+  const mergeDetailIntoSelection = useCallback((
+    prev: AssetRecord | null,
+    masterDisplayId: string,
+    detail: Partial<AssetRecord>,
+  ): AssetRecord | null => {
+    if (prev?.masterDisplayId !== masterDisplayId) return prev;
+    if (prev.kind === "line") {
+      const { frameNumber: _f, box: _b, ...rest } = detail;
+      return { ...prev, ...rest } as AssetRecord;
+    }
+    return { ...prev, ...detail } as AssetRecord;
+  }, []);
+
   const fetchAndMergeDetail = useCallback(async (asset: AssetRecord) => {
     if (!asset.masterDisplayId) return;
     const cached = detailCacheRef.current[asset.masterDisplayId];
     if (cached) {
       setSelectedAsset(prev =>
-        prev?.masterDisplayId === asset.masterDisplayId ? { ...prev, ...cached } : prev
+        mergeDetailIntoSelection(prev, asset.masterDisplayId!, cached)
       );
       return;
     }
@@ -469,7 +506,7 @@ export default function AssetLibrary() {
         };
         detailCacheRef.current[asset.masterDisplayId] = detail;
         setSelectedAsset(prev =>
-          prev?.masterDisplayId === asset.masterDisplayId ? { ...prev, ...detail } : prev
+          mergeDetailIntoSelection(prev, asset.masterDisplayId!, detail)
         );
       }
     } catch {

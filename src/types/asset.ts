@@ -26,6 +26,19 @@ export interface AssetRecord {
   category_id?: string;
   groupId?: string;
   box?: { x: number; y: number; width: number; height: number };
+  /** Linear-asset fields (optional, populated for kind === "line") */
+  kind?: "point" | "line";
+  classification?: "point" | "linear_sided" | "linear_unsided";
+  geometry?: { type: "LineString"; coordinates: [number, number][] }; // GeoJSON [lng,lat]
+  keypoints?: {
+    frame: number;
+    lat: number;
+    lng: number;
+    side?: string | null;
+    box?: { x: number; y: number; width: number; height: number };
+  }[];
+  firstFrame?: number;
+  lastFrame?: number;
   /** UI-only: true when this asset has been marked as good in this session */
   isGood?: boolean;
   /** Cross-survey timeline from master_assets.survey_history */

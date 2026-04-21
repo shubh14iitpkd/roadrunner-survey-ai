@@ -77,3 +77,4 @@ db_dock
 *.sh
 **/*.md
 !**/README.md
+public/assets.json

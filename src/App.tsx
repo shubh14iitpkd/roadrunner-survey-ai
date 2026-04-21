@@ -30,6 +30,7 @@ const AnomalyLibrary = lazy(() => import("./pages/DefectLibrary"));
 const AssetLibrary = lazy(() => import("./pages/AssetLibrary"));
 const QCLayer = lazy(() => import("./pages/QCLayer"));
 const VideoAnnotator = lazy(() => import("./pages/VideoAnnotator"));
+import AssetPreviewMap from "./AssetPreviewMap";
 
 const queryClient = new QueryClient();
 
@@ -72,6 +73,7 @@ const App = () => (
                             <Route path="/settings" element={<Settings />} />
                             <Route path="/:masterDisplayId/edit" element={<NonViewerRoute><QCLayer /></NonViewerRoute>} />
                             <Route path="/videos/:videoId/annotate" element={<NonViewerRoute><VideoAnnotator /></NonViewerRoute>} />
+                            <Route path="/preview" element={<AssetPreviewMap src="/assets.json" />} />
                             <Route path="*" element={<NotFound />} />
                           </Routes>
                         </Layout>

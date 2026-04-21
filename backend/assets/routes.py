@@ -509,13 +509,21 @@ def get_master_map_points():
 		"zone": 1,
 		"route_id": 1,
 		"category_id": 1,
+		# Linear-asset fields (only populated for kind="line" docs)
+		"kind": 1,
+		"classification": 1,
+		"geometry": 1,
+		"keypoints": 1,
+		"first_frame": 1,
+		"last_frame": 1,
 	}
 
 	cursor = db.master_assets.find(query, projection)
 	points = []
 	for doc in cursor:
 		coords = (doc.get("canonical_location") or {}).get("coordinates", [0, 0])
-		points.append({
+		kind = doc.get("kind") or "point"
+		item = {
 			"master_display_id": doc.get("master_display_id", ""),
 			"asset_type": doc.get("asset_type", ""),
 			"asset_id": doc.get("asset_id", ""),
@@ -527,7 +535,23 @@ def get_master_map_points():
 			"zone": doc.get("zone", "Unknown"),
 			"route_id": doc.get("route_id"),
 			"category_id": doc.get("category_id", ""),
-		})
+			"kind": kind,
+		}
+		classification = doc.get("classification")
+		if classification:
+			item["classification"] = classification
+		if kind == "line":
+			geom = doc.get("geometry")
+			if geom:
+				item["geometry"] = geom
+			kps = doc.get("keypoints")
+			if kps:
+				item["keypoints"] = kps
+			if doc.get("first_frame") is not None:
+				item["first_frame"] = doc.get("first_frame")
+			if doc.get("last_frame") is not None:
+				item["last_frame"] = doc.get("last_frame")
+		points.append(item)
 
 	return fast_mongo_response({"points": points, "count": len(points)})
 
