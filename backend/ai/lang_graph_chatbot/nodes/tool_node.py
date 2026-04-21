@@ -27,9 +27,38 @@ IMPORTANT: Always answer the user's LATEST question. The conversation history is
 - When the user asks a cross-route question like "which route has the most defects?", use a cross-route tool (e.g. `rank_routes_by_damage`) — do NOT narrow it to a single route from history.
 - Only use a route-specific tool when the user clearly specifies or references a particular route.
 
+## Resolving road NAMES to route_ids
+- If the user references a road by NAME (e.g. "Al Wakrah Road", "Corniche", "D-Ring"), FIRST call `find_routes_by_name` with that name to resolve it to route_id(s).
+- If `find_routes_by_name` returns exactly one match, call the data tool with that route_id.
+- If it returns multiple matches (ambiguous name — several roads scored similarly), call the data tool ONCE PER route_id and present the results grouped per road in your final answer. Do NOT ask the user to pick one — give them data for all matches.
+- If it returns zero matches, tell the user no road with that name was found and suggest they check the Route Register.
+- If the user provided a numeric route_id directly, skip `find_routes_by_name`.
+- NEVER reuse a route_id from earlier in the conversation when the user has just named a new road. Re-resolve every time a new road name is given.
+
+## Narration — stay faithful to the tool result
+- When describing results to the user, the `route_id` and `road_name` you mention MUST come verbatim from the most recent tool output for that data block. Do not guess, reuse, or carry them over from conversation history.
+- If you show data for multiple routes, repeat the `route_id` / `road_name` exactly as returned by each tool call, in the same grouping.
+- Never invent a route_id. If the tool result does not include one, omit it rather than guessing.
+
 ## Terminology
 - Always use the word **"defective"** (never "damaged") when describing asset condition in your responses.
   e.g. "12 defective assets", "defective guardrails", "defective rate".
+- The platform exposes ONLY two condition values: **"good"** and **"defective"**. Never name, list, or promise data for internal sub-labels (broken, bent, missing, damaged, dirty, overgrown, fadedpaint). If a tool result contains raw sub-labels, collapse them into "defective" in your response. If the user asks for something like "broken signs" or "missing poles", answer in terms of defective assets only — do NOT say "there are no assets with condition X" using X as a sub-label.
+
+## Category vs asset-type disambiguation
+Some names look similar but belong to different taxonomies. Pick the right tool:
+- "Directional Signage" → CATEGORY (use category-taking tools like `list_assets_in_category`, `get_category_condition_breakdown`, `get_inventory_counts_by_category`).
+- "Structures" → CATEGORY.
+- "Directional Structures" → ASSET TYPE (use asset-taking tools like `get_asset_type_condition`, `get_asset_type_route_risk`).
+If unsure whether a name is a category or an asset type, call `find_asset_category` first — it tells you which bucket the name belongs to — then route to the correct tool.
+Never substitute a category for an asset type or vice-versa; they return different answers.
+
+## Survey comparison
+- For any "compare surveys" question, call `compare_surveys`.
+  - If the user names specific survey IDs (e.g. "SURV-000005 vs SURV-000012"), pass them as `survey_display_ids`.
+  - If the user references a route instead ("compare surveys on route 216" / "how did Al Wakrah change"), pass `route_id`.
+  - Use `compare_surveys_on_route` ONLY for the simpler "what changed between the two latest surveys on a route" phrasing — for anything involving totals, top-K defects, or more than two surveys, use `compare_surveys`.
+- Default `top_k` is 3; raise it only if the user explicitly asks for more ("top 5 damaged types per survey").
 
 ## Tool selection rules
 - When the user asks for a **chart / bar chart / visualization of asset type conditions** on a route
@@ -49,7 +78,7 @@ If the user asks about how the platform works, user roles, features, or how-to q
 - **Pages**: Dashboard, Asset Library, Defect Library, Route Register, Survey Upload (admin), Video Library, QC Layer, Video Annotator, Settings, RoadGPT.
 - **Upload flow**: Admin creates a survey for a route → uploads dashcam video + GPX → AI pipeline runs (anonymization → YOLO detection → asset linking).
 - **Asset organization**: Categories (Lighting, Signage, ITS, Pavement, etc.) → Asset Types → Master Assets (MAST-XXXXXX, persists across surveys).
-- **Conditions**: good, broken, bent, missing, damaged, dirty, overgrown, fadedpaint.
+- **Conditions (user-facing)**: only "good" and "defective".
 - **QC Layer**: Review/correct AI detections — adjust boxes, change type/category/condition.
 - **Export**: Excel export from Asset Library, PDF reports from Route Register.
 """
@@ -152,34 +181,87 @@ def agent_node(state: AgentState) -> dict:
 
     logger.info(f"Agent invocation | route_id={route_id} | message_count={len(history)}")
 
-    MAX_RETRIES = 5
+    # Retry fewer times with tools (Gemini is deterministic at temp=0, so repeated
+    # calls with the same input waste time), then escalate to a tool-free retry so
+    # the model is forced to produce prose when no tool fits the question.
+    MAX_TOOL_RETRIES = 2
+    NUDGE = (
+        "Your previous response was empty. Respond now with EITHER a tool call "
+        "(if data is needed and a listed tool fits) OR a direct natural-language "
+        "answer. Do not return empty content."
+    )
+
+    def _is_empty(resp) -> bool:
+        if resp is None:
+            return True
+        if getattr(resp, "tool_calls", None):
+            return False
+        c = resp.content
+        if isinstance(c, str):
+            return not c.strip()
+        if isinstance(c, list):
+            for part in c:
+                if isinstance(part, dict):
+                    txt = part.get("text", "")
+                    if isinstance(txt, str) and txt.strip():
+                        return False
+                elif isinstance(part, str) and part.strip():
+                    return False
+            return True
+        return not bool(c)
+
     response = None
-    for attempt in range(1, MAX_RETRIES + 1):
+    messages_base = [system] + history
+
+    # Phase 1: try with tools bound; nudge on retry.
+    for attempt in range(1, MAX_TOOL_RETRIES + 1):
+        msgs = messages_base if attempt == 1 else messages_base + [HumanMessage(content=NUDGE)]
         try:
             t0 = time.time()
-            response = llm_with_tools.invoke([system] + history)
+            response = llm_with_tools.invoke(msgs)
             elapsed = time.time() - t0
         except Exception as e:
             logger.error(f"Agent LLM call failed on attempt {attempt}: {e}", exc_info=True)
-            if attempt == MAX_RETRIES:
-                raise
+            if attempt == MAX_TOOL_RETRIES:
+                response = None
             continue
 
         has_tool_calls = bool(getattr(response, "tool_calls", None))
-        raw_content = response.content
-        content_empty = not raw_content if isinstance(raw_content, str) else not any(raw_content)
-
         if has_tool_calls:
             tool_names = [tc.get("name", "?") for tc in response.tool_calls]
             logger.info(f"Agent attempt={attempt} | {elapsed:.1f}s | tool_calls={tool_names}")
         else:
-            logger.info(f"Agent attempt={attempt} | {elapsed:.1f}s | text response | content_empty={content_empty} | first_200={str(raw_content)[:200]}")
+            logger.info(f"Agent attempt={attempt} | {elapsed:.1f}s | text response | empty={_is_empty(response)} | first_200={str(response.content)[:200]}")
 
-        if has_tool_calls or not content_empty:
+        if not _is_empty(response):
             break
-        if attempt < MAX_RETRIES:
-            logger.warning(f"Agent empty response on attempt {attempt}, retrying...")
-            import time as _time; _time.sleep(0.5)  # brief pause before retry
+        logger.warning(f"Agent empty response on attempt {attempt} (with tools)")
+
+    # Phase 2: tool-bound attempts all empty → retry once without tools so Gemini
+    # is forced to answer in prose (root cause of empty responses is Gemini being
+    # stuck between tool-call and text-only modes).
+    if _is_empty(response):
+        logger.warning("All tool-bound attempts empty; retrying without tools to force a text answer")
+        try:
+            fallback_system = SystemMessage(content=prompt + (
+                "\n\nIMPORTANT: You cannot call tools this turn. Answer the user's "
+                "question directly in natural language using the information you "
+                "have. If you genuinely lack data, say so and suggest where on the "
+                "platform the user can find it."
+            ))
+            t0 = time.time()
+            response = llm.invoke([fallback_system] + history)
+            elapsed = time.time() - t0
+            logger.info(f"Agent fallback (no tools) | {elapsed:.1f}s | empty={_is_empty(response)} | first_200={str(response.content)[:200]}")
+        except Exception as e:
+            logger.error(f"Agent tool-free fallback failed: {e}", exc_info=True)
+
+    if response is None:
+        logger.error("Agent produced no response after all retries and fallback")
+        return {
+            "messages": [],
+            "final_response": "I'm sorry, I wasn't able to generate a response. Please try rephrasing your question.",
+        }
 
     has_tool_calls = bool(getattr(response, "tool_calls", None))
     result: dict = {"messages": [response]}

@@ -18,7 +18,7 @@ ROUTER_PROMPT = """You are an intent classifier for a road survey assistant.
 Classify the user's latest message into exactly one of: expert, tool, or visualization.
 
 - expert: general knowledge, definitions, advice, platform help ("how do I...", "what is...", "where can I..."), or anything that does not require querying the database.
-- tool: requires fetching or computing specific data (lists, counts, conditions, survey results, locations). Also use "tool" when the user asks to show data on a MAP — map requests are handled by tools, not visualization.
+- tool: requires fetching or computing specific data (lists, counts, conditions, survey results, locations). Also use "tool" when the user asks to show data on a MAP — map requests are handled by tools, not visualization. Also use "tool" whenever the user references a specific ROAD BY NAME (e.g. "Al Wakrah Road", "Corniche") and is asking for data about it — road-name resolution happens via a tool.
 - visualization: explicitly asks for a chart, graph, bar chart, pie chart, or doughnut — but NOT maps.
 
 Respond with ONLY one word: expert, tool, or visualization."""
