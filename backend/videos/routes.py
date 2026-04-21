@@ -32,6 +32,43 @@ from config import Config
 config = Config()
 
 
+def _recompute_survey_totals(db, survey_id) -> Optional[dict]:
+    """
+    Recalculate `surveys.totals` from scratch by aggregating every asset doc
+    belonging to the survey. Counts anything with condition != "good" as
+    damaged (catches local-flow specific conditions like "broken",
+    "fadedpaint", "overgrown" as well as library's literal "damaged").
+    Returns the totals dict written, or None when no survey_id was provided.
+    """
+    if not survey_id:
+        return None
+    try:
+        sid = ObjectId(survey_id) if not isinstance(survey_id, ObjectId) else survey_id
+    except Exception:
+        print(f"[TOTALS] invalid survey_id: {survey_id!r}")
+        return None
+
+    pipeline = [
+        {"$match": {"survey_id": sid}},
+        {"$group": {
+            "_id": None,
+            "total_assets": {"$sum": 1},
+            "good": {"$sum": {"$cond": [{"$eq": ["$condition", "good"]}, 1, 0]}},
+            "damaged": {"$sum": {"$cond": [{"$ne": ["$condition", "good"]}, 1, 0]}},
+        }},
+    ]
+    agg = list(db.assets.aggregate(pipeline))
+    r = agg[0] if agg else {}
+    totals = {
+        "total_assets": int(r.get("total_assets", 0)),
+        "good": int(r.get("good", 0)),
+        "damaged": int(r.get("damaged", 0)),
+    }
+    db.surveys.update_one({"_id": sid}, {"$set": {"totals": totals}})
+    print(f"[TOTALS] survey {survey_id} → {totals}")
+    return totals
+
+
 def _snap_gpx_alongside(raw_gpx_path: Path, upload_root: Path) -> tuple[Optional[str], Optional[dict]]:
     """
     Run road-snap on `raw_gpx_path`, write snapped copy to
@@ -383,32 +420,17 @@ def _run_demo_ai_processing(app, video_id: str, payload: dict):
             )
             print(f"[PROCESS] Demo processing complete for {video_id}")
 
-            # Demo-specific: aggregate pre-computed asset counts for the survey
+            # Recompute survey totals from every asset on the survey (not
+            # just this video) so repeated demo processing accumulates.
             try:
-                if filename_no_ext:
-                    pipeline = [
-                        {"$match": {"video_key": filename_no_ext}},
-                        {"$group": {
-                            "_id": None,
-                            "total_assets": {"$sum": 1},
-                            "good": {"$sum": {"$cond": [{"$eq": ["$condition", "good"]}, 1, 0]}},
-                            "damaged": {"$sum": {"$cond": [{"$eq": ["$condition", "damaged"]}, 1, 0]}}
-                        }}
-                    ]
-                    agg_res = list(mongo_db.assets.aggregate(pipeline))
-                    totals = {"total_assets": 0, "good": 0, "damaged": 0}
-                    if agg_res:
-                        r = agg_res[0]
-                        totals["total_assets"] = r.get("total_assets", 0)
-                        totals["good"] = r.get("good", 0)
-                        totals["damaged"] = r.get("damaged", 0)
-                    if survey_id:
-                        mongo_db.surveys.update_one(
-                            {"_id": ObjectId(survey_id)},
-                            {"$set": {"totals": totals, "status": "processed"}}
-                        )
+                if survey_id:
+                    mongo_db.surveys.update_one(
+                        {"_id": ObjectId(survey_id)},
+                        {"$set": {"status": "processed"}},
+                    )
+                    _recompute_survey_totals(mongo_db, survey_id)
             except Exception as agge:
-                print(f"[PROCESS] Error calculating demo aggregates: {agge}")
+                print(f"[PROCESS] Error recomputing survey totals: {agge}")
 
             # Enqueue asset linking as a separate, independently-rate-limited job
             print(f"[DEMO ASSET LINKING] Enqueuing asset linking for video {video_path}")
@@ -475,6 +497,10 @@ def _run_asset_linking(app, video_id: str, payload: dict):
                 {"_id": ObjectId(survey_id)},
                 {"$set": {"status": "processed", "updated_at": get_now_iso()}},
             )
+            try:
+                _recompute_survey_totals(mongo_db, survey_id)
+            except Exception as tot_err:
+                print(f"[QUEUE] Warning: totals recompute failed for survey {survey_id}: {tot_err}")
 
 
 @videos_bp.get("/status-batch")
@@ -2073,9 +2099,15 @@ def upload_library_video():
         
     if assets_to_insert:
         db.assets.insert_many(assets_to_insert)
-    
+
     if frames_to_insert:
         db.frames.insert_many(frames_to_insert)
+
+    # Refresh survey totals now that this library video's assets are live.
+    try:
+        _recompute_survey_totals(db, sid)
+    except Exception as tot_err:
+        print(f"[LIBRARY UPLOAD] totals recompute failed: {tot_err}")
 
     if video_id:
         res = db.videos.find_one_and_update(
