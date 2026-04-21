@@ -7,6 +7,7 @@ import time
 from datetime import datetime
 import base64
 from pathlib import Path
+from typing import Optional
 from werkzeug.utils import secure_filename
 from flask import Blueprint, jsonify, request, Response, send_file, current_app
 from bson import ObjectId, json_util
@@ -23,11 +24,37 @@ from utils.rbac import role_required
 from utils.extract_gpx import extract_gpx
 from utils.is_demo_video import DEMO_VIDEOS
 from services.job_queue import job_queue
+from services.gpx_snapper import snap_gpx_file
 
 videos_bp = Blueprint("videos", __name__)
 from config import Config
 
 config = Config()
+
+
+def _snap_gpx_alongside(raw_gpx_path: Path, upload_root: Path) -> tuple[Optional[str], Optional[dict]]:
+    """
+    Run road-snap on `raw_gpx_path`, write snapped copy to
+    `<upload_root>/gpx_snapped/<stem>_snapped.gpx`. Returns (url, stats) on
+    success, (None, stats) on any failure — caller falls back to raw GPX.
+    """
+    try:
+        snapped_dir = upload_root / "gpx_snapped"
+        dst = snapped_dir / f"{raw_gpx_path.stem}_snapped.gpx"
+        ok, stats = snap_gpx_file(str(raw_gpx_path), str(dst))
+        if not ok:
+            print(f"[GPX-SNAP] skipped ({stats.get('reason')}) for {raw_gpx_path.name}")
+            return None, stats
+        try:
+            rel = dst.relative_to(upload_root)
+            url = f"/uploads/{rel}"
+        except ValueError:
+            url = f"/uploads/gpx_snapped/{dst.name}"
+        print(f"[GPX-SNAP] ok for {raw_gpx_path.name}: {stats}")
+        return url, stats
+    except Exception as e:
+        print(f"[GPX-SNAP] error for {raw_gpx_path.name}: {e}")
+        return None, {"reason": "exception", "error": str(e)}
 
 # ── Anonymization helpers ─────────────────────────────────────────────────────
 
@@ -200,6 +227,7 @@ def _run_real_ai_processing(app, video_id: str, payload: dict):
 
     storage_url = payload["storage_url"]
     gpx_file_url = payload.get("gpx_file_url")
+    snapped_gpx_file_url = payload.get("snapped_gpx_file_url")
     route_id = payload.get("route_id")
     survey_id = payload.get("survey_id")
     upload_root = Path(payload["upload_root"])
@@ -233,7 +261,17 @@ def _run_real_ai_processing(app, video_id: str, payload: dict):
                 )
                 print(f"[PROCESS] {message} ({progress}%)")
 
-            gpx_path = upload_root / gpx_file_url.lstrip("/uploads/") if gpx_file_url else None
+            # Prefer snapped GPX; fall back to raw if the snap step was
+            # skipped or the snapped file has vanished from disk.
+            chosen_gpx_url = snapped_gpx_file_url or gpx_file_url
+            gpx_path = None
+            if chosen_gpx_url:
+                candidate = upload_root / chosen_gpx_url.lstrip("/uploads/")
+                if not candidate.exists() and snapped_gpx_file_url and gpx_file_url:
+                    candidate = upload_root / gpx_file_url.lstrip("/uploads/")
+                    print(f"[PROCESS] Snapped GPX missing, using raw: {candidate}")
+                gpx_path = candidate
+                print(f"[PROCESS] Using GPX: {gpx_path} (snapped={bool(snapped_gpx_file_url)})")
             result = processor.process_video(
                 video_path=video_path,
                 output_dir=upload_root,
@@ -963,6 +1001,15 @@ def upload_direct():
     gpx_file_url = f"/uploads/{os.path.basename(gpx_file)}" if gpx_file else None
     file_size = save_path.stat().st_size
 
+    # Road-snap the raw GPX (best-effort). Raw path stays in gpx_file_url as
+    # the fallback; snapped path lives in snapped_gpx_file_url.
+    snapped_gpx_file_url = None
+    gpx_snap_stats = None
+    if gpx_file and gpx_created:
+        snapped_gpx_file_url, gpx_snap_stats = _snap_gpx_alongside(
+            Path(gpx_file), upload_root
+        )
+
     # NOW update database with successful upload
     if video_id:
         # Look up the survey_display_id for the existing video's survey
@@ -976,6 +1023,8 @@ def upload_direct():
         update_fields = {
             "storage_url": storage_url,
             "gpx_file_url": gpx_file_url,
+            "snapped_gpx_file_url": snapped_gpx_file_url,
+            "gpx_snap_stats": gpx_snap_stats,
             "size_bytes": file_size,
             "status": "queued" if gpx_created else "failed",
             "progress": 0,
@@ -1034,6 +1083,8 @@ def upload_direct():
         "title": title,
         "storage_url": storage_url,
         "gpx_file_url": gpx_file_url,
+        "snapped_gpx_file_url": snapped_gpx_file_url,
+        "gpx_snap_stats": gpx_snap_stats,
         "size_bytes": file_size,
         "status": "queued" if gpx_created else "failed",
         "progress": 0,
@@ -1154,12 +1205,24 @@ def upload_gpx():
 
     gpx_url = f"/uploads/{filename}"
 
+    # Re-snap for the new GPX (best-effort). Old snapped file is left in
+    # place on disk but the URL reference is replaced.
+    snapped_gpx_url, snap_stats = _snap_gpx_alongside(save_path, upload_root)
+
     db = get_db()
     db.videos.find_one_and_update(
         {"_id": ObjectId(video_id)},
-        {"$set": {"gpx_file_url": gpx_url, "updated_at": get_now_iso()}},
+        {"$set": {
+            "gpx_file_url": gpx_url,
+            "snapped_gpx_file_url": snapped_gpx_url,
+            "gpx_snap_stats": snap_stats,
+            "updated_at": get_now_iso(),
+        }},
     )
-    return jsonify({"gpx_file_url": gpx_url}), 200
+    return jsonify({
+        "gpx_file_url": gpx_url,
+        "snapped_gpx_file_url": snapped_gpx_url,
+    }), 200
 
 
 @videos_bp.post("/thumbnail-upload")
@@ -1275,6 +1338,7 @@ def process_video_with_ai(video_id: str):
             {"$set": {"status": "failed", "error": "No GPS data found. Upload a GPX file to enable processing.", "updated_at": get_now_iso()}},
         )
         return jsonify({"error": "No GPS data found. Upload a GPX file to enable processing."}), 400
+    snapped_gpx_file_url = video.get("snapped_gpx_file_url")
     route_id = video.get("route_id")
     survey_id = video.get("survey_id")
 
@@ -1344,6 +1408,7 @@ def process_video_with_ai(video_id: str):
         "is_demo": False,
         "storage_url": storage_url,
         "gpx_file_url": gpx_file_url,
+        "snapped_gpx_file_url": snapped_gpx_file_url,
         "route_id": route_id,
         "survey_id": str(survey_id) if survey_id else None,
         "upload_root": str(upload_root),
@@ -1949,6 +2014,14 @@ def upload_library_video():
             gpx_file_url = f"/uploads/{rel_gpx}"
         except ValueError:
             gpx_file_url = f"/uploads/{gpx_path.name}"
+
+    # Road-snap raw GPX (best-effort). Raw stays in gpx_file_url as fallback.
+    snapped_gpx_file_url = None
+    gpx_snap_stats = None
+    if gpx_file and gpx_created:
+        snapped_gpx_file_url, gpx_snap_stats = _snap_gpx_alongside(
+            Path(gpx_file), upload_root
+        )
     # 5. Look up survey_display_id from the survey
     survey_display_id = None
     survey_sid = survey_id["$oid"] if isinstance(survey_id, dict) else survey_id
@@ -1960,6 +2033,8 @@ def upload_library_video():
     update_doc = {
         "storage_url": storage_url,
         "gpx_file_url": gpx_file_url,
+        "snapped_gpx_file_url": snapped_gpx_file_url,
+        "gpx_snap_stats": gpx_snap_stats,
         "thumbnail_url": thumbnail_url,
         "size_bytes": file_size,
         "status": "queued",
