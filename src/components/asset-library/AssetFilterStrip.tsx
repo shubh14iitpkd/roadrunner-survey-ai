@@ -72,7 +72,8 @@ export default function AssetFilterStrip({
     directionFilter !== "all" ||
     zoneFilter !== "all" ||
     searchQuery !== "" ||
-    selectedRouteId !== null;
+    selectedRouteId !== null ||
+    (conditionFilter !== undefined && conditionFilter !== "all");
 
   const zoneOptions = ["all", "shoulder", "median", "pavement", "overhead"] as const;
   const zoneLabels: Record<string, string> = { all: "all", shoulder: "shoulder", median: "median", pavement: "pavement", overhead: "overhead" };
@@ -97,20 +98,20 @@ export default function AssetFilterStrip({
           {filteredCount}
         </span>
         <span className={cn("text-sm capitalize", countLabel === "defects" ? "text-destructive" : "text-primary dark:text-muted-secondary")}>{countLabel}</span>
-        {(directionFilter !== "all" || zoneFilter !== "all") && (
+        {/* {(directionFilter !== "all" || zoneFilter !== "all") && (
           <div className="flex items-center gap-1 ml-1">
             {directionFilter !== "all" && (
               <span className="inline-flex items-center capitalize rounded-full bg-primary/10 text-primary px-1.5 py-0.5 text-[9px] font-semibold border border-primary/20">
                 {directionFilter}
               </span>
             )}
-            {/* {zoneFilter !== "all" && (
+            {zoneFilter !== "all" && (
               <span className="inline-flex capitalize items-center rounded-full bg-primary/10 text-primary px-1.5 py-0.5 text-[9px] font-semibold border border-primary/20">
                 {zoneFilter}
               </span>
-            )} */}
+            )}
           </div>
-        )}
+        )} */}
       </div>
 
       <div className="h-5 w-px bg-border/60 shrink-0" />

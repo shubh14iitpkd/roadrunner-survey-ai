@@ -747,8 +747,9 @@ export default function AssetLibrary() {
     setDirectionFilter("all");
     setZoneFilter("all");
     setSearchQuery("");
-    setAttributes({})
+    setAttributes({});
     setSelectedRouteId(null);
+    setConditionFilter("all");
   }, []);
 
   return (
