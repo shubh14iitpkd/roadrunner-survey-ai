@@ -317,7 +317,7 @@ export default function AssetLibrary() {
         height: asset.latest_box.height ?? asset.latest_box.h ?? 0,
       } : undefined,
       surveyHistory: [],
-      totalSurveysDetected: asset.survey_count ?? 0,
+      totalSurveysDetected: asset.total_surveys_detected ?? asset.survey_count ?? 0,
     };
   }, []);
 
@@ -336,18 +336,39 @@ export default function AssetLibrary() {
     if (resp) {
       const mapped = (resp.items || []).map((a: any, i: number) => mapRawToAssetRecord(a, (page - 1) * pageSize + i));
       setTableItems(mapped);
-      setSortedIds(resp.sorted_ids || []);
+      if (resp.sorted_ids && resp.sorted_ids.length) setSortedIds(resp.sorted_ids);
       setTotalCount(resp.total_count ?? 0);
       setTotalPages(resp.total_pages ?? 1);
       setTablePage(resp.page ?? page);
     }
   }, [mapRawToAssetRecord]);
 
+  // Lazily fetch full sorted_ids list (used for map→page jump + prev/next nav).
+  // Kept out of the initial paginated response because it scans the whole
+  // filtered set — cheap to skip when the user never opens a row.
+  const ensureSortedIds = useCallback(async (): Promise<string[]> => {
+    if (sortedIds.length > 0) return sortedIds;
+    const filters = buildFilterParams();
+    const resp = await api.assets.getMasterPaginated({
+      ...filters,
+      page: 1,
+      limit: 1,
+      sort_key: sortKey || "lastSurveyDate",
+      sort_dir: sortDir,
+      include_sorted_ids: true,
+    });
+    const ids: string[] = resp?.sorted_ids || [];
+    setSortedIds(ids);
+    return ids;
+  }, [sortedIds, buildFilterParams, sortKey, sortDir]);
+
   // ── Initial + filter/sort data loading ──
   const loadData = useCallback(async (filters?: Record<string, any>, page = 1) => {
     try {
       setLoading(true);
       setLoadError(false);
+      // Invalidate cached sorted_ids — filters/sort may have changed.
+      setSortedIds([]);
       const effectiveFilters = filters ?? buildFilterParams();
 
       const [roadsResp, mapResp] = await Promise.all([
@@ -487,7 +508,7 @@ export default function AssetLibrary() {
           })),
           totalSurveysDetected: raw.total_surveys_detected ?? history.length,
           issue: raw.issue || '',
-          ...(raw.description && typeof raw.description === 'object' ? { description: raw.description } : {}),
+          ...((raw.description ?? raw.latest_description) && typeof (raw.description ?? raw.latest_description) === 'object' ? { description: raw.description ?? raw.latest_description } : {}),
           // Fields that map-point assets lack — fill from the full document
           // so clicking a map point loads the frame image just like a table click.
           id: raw._id ? String(raw._id) : undefined,
@@ -530,13 +551,15 @@ export default function AssetLibrary() {
 
   // Navigate to prev/next asset within the sorted list
   const navigateAsset = useCallback(async (direction: 'prev' | 'next') => {
-    if (!selectedAsset || !sortedIds.length) return;
-    const currentIdx = sortedIds.indexOf(selectedAsset.assetDisplayId ?? '');
+    if (!selectedAsset) return;
+    const ids = await ensureSortedIds();
+    if (!ids.length) return;
+    const currentIdx = ids.indexOf(selectedAsset.assetDisplayId ?? '');
     if (currentIdx === -1) return;
     const nextIdx = direction === 'prev' ? currentIdx - 1 : currentIdx + 1;
-    if (nextIdx < 0 || nextIdx >= sortedIds.length) return;
+    if (nextIdx < 0 || nextIdx >= ids.length) return;
 
-    const nextDisplayId = sortedIds[nextIdx];
+    const nextDisplayId = ids[nextIdx];
     const targetPage = Math.floor(nextIdx / tablePageSize) + 1;
 
     // If the target is on a different page, fetch it
@@ -560,7 +583,7 @@ export default function AssetLibrary() {
         return prev;
       });
     }, 50);
-  }, [selectedAsset, sortedIds, tablePage, tablePageSize, tableItems, buildFilterParams, fetchTablePage, sortKey, sortDir, fetchAndMergeDetail]);
+  }, [selectedAsset, ensureSortedIds, tablePage, tablePageSize, tableItems, buildFilterParams, fetchTablePage, sortKey, sortDir, fetchAndMergeDetail]);
 
   const handleRowClick = useCallback(async (asset: AssetRecord) => {
     setSelectedAsset(asset);
@@ -573,9 +596,11 @@ export default function AssetLibrary() {
     mapTransitionTimer.current = setTimeout(() => setMapTransitioning(false), 400);
 
     // If this is a map click (asset from mapAssets, may not be on current table page),
-    // navigate the table to the page containing this asset
-    if (asset.assetDisplayId && sortedIds.length > 0) {
-      const idx = sortedIds.indexOf(asset.assetDisplayId);
+    // navigate the table to the page containing this asset.
+    // Lazily fetches sorted_ids on first row click to keep the initial page load light.
+    if (asset.assetDisplayId) {
+      const ids = await ensureSortedIds();
+      const idx = ids.indexOf(asset.assetDisplayId);
       if (idx !== -1) {
         const targetPage = Math.floor(idx / tablePageSize) + 1;
         if (targetPage !== tablePage) {
@@ -584,7 +609,7 @@ export default function AssetLibrary() {
         }
       }
     }
-  }, [fetchAndMergeDetail, sortedIds, tablePage, tablePageSize, buildFilterParams, fetchTablePage, sortKey, sortDir]);
+  }, [fetchAndMergeDetail, ensureSortedIds, tablePage, tablePageSize, buildFilterParams, fetchTablePage, sortKey, sortDir]);
 
   const [exporting, setExporting] = useState(false);
   const handleExportExcel = async () => {

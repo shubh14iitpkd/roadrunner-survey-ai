@@ -447,12 +447,15 @@ def _build_master_filter(args):
 		query["group_id"] = asset_type
 	search = (args.get("search") or "").strip()
 	if search:
-		regex = {"$regex": re.escape(search), "$options": "i"}
+		pattern = ".*".join(re.escape(w) for w in search.split())
+		regex = {"$regex": pattern, "$options": "i"}
 		query["$or"] = [
 			{"master_display_id": regex},
 			{"asset_type": regex},
 			{"route_name": regex},
 			{"asset_id": regex},
+			{"issue": regex},
+			{"latest_defect_id": regex},
 		]
 	return query
 
@@ -634,13 +637,32 @@ def get_master_assets_paginated():
 	sort_dir_param = request.args.get("sort_dir", "desc")
 	mongo_sort_dir = DESCENDING if sort_dir_param == "desc" else ASCENDING
 
-	# Projection: exclude heavy fields
+	# Table-only inclusion projection. Viewer-only fields (latest_box,
+	# latest_frame_number, latest_video_id, latest_description) are fetched
+	# on demand via GET /master/<display_id> when the user opens a row.
 	projection = {
-		"embedding": 0,
-		"survey_history": 0,
-		"modified_by": 0,
-		"mark_good_history": 0,
+		"_id": 1,
+		"master_display_id": 1,
+		"asset_id": 1,
+		"asset_type": 1,
+		"group_id": 1,
+		"category_id": 1,
+		"side": 1,
+		"zone": 1,
+		"route_id": 1,
+		"route_name": 1,
+		"road_side": 1,
+		"canonical_location": 1,
+		"latest_condition": 1,
+		"latest_survey_id": 1,
+		"latest_survey_display_id": 1,
+		"latest_defect_id": 1,
+		"issue": 1,
+		"last_seen_date": 1,
+		"total_surveys_detected": 1,
 	}
+
+	include_sorted_ids = request.args.get("include_sorted_ids", "0") == "1"
 
 	total_count = db.master_assets.count_documents(query)
 	total_pages = math.ceil(total_count / limit) if total_count > 0 else 1
@@ -669,16 +691,17 @@ def get_master_assets_paginated():
 			{"$project": {"_cat_sort": 0}},
 		])
 
-		# Sorted IDs via aggregation
-		sorted_ids = [
-			d["master_display_id"]
-			for d in db.master_assets.aggregate([
-				{"$match": query},
-				add_sort_field,
-				{"$sort": {"_cat_sort": mongo_sort_dir}},
-				{"$project": {"master_display_id": 1, "_id": 0}},
-			])
-		]
+		sorted_ids = []
+		if include_sorted_ids:
+			sorted_ids = [
+				d["master_display_id"]
+				for d in db.master_assets.aggregate([
+					{"$match": query},
+					add_sort_field,
+					{"$sort": {"_cat_sort": mongo_sort_dir}},
+					{"$project": {"master_display_id": 1, "_id": 0}},
+				])
+			]
 	else:
 		mongo_sort_key = _SORT_KEY_MAP.get(sort_key_param, "last_seen_date")
 
@@ -688,28 +711,19 @@ def get_master_assets_paginated():
 			.skip(skip) \
 			.limit(limit)
 
-		# Fetch sorted_ids: all matching master_display_ids in sort order.
-		sorted_ids = [
-			d["master_display_id"]
-			for d in db.master_assets.find(query, {"master_display_id": 1, "_id": 0})
-				.sort(mongo_sort_key, mongo_sort_dir)
-		]
+		sorted_ids = []
+		if include_sorted_ids:
+			sorted_ids = [
+				d["master_display_id"]
+				for d in db.master_assets.find(query, {"master_display_id": 1, "_id": 0})
+					.sort(mongo_sort_key, mongo_sort_dir)
+			]
 
 	items = []
 	for doc in items_cursor:
-		# Convert ObjectIds to strings inline
 		doc["_id"] = str(doc["_id"])
 		if doc.get("latest_survey_id"):
 			doc["latest_survey_id"] = str(doc["latest_survey_id"])
-		if doc.get("latest_video_id"):
-			doc["latest_video_id"] = str(doc["latest_video_id"])
-		# Promote canonical_location to location for frontend compat
-		doc["location"] = doc.get("canonical_location")
-		doc["condition"] = doc.get("latest_condition", "unknown")
-		doc["confidence"] = doc.get("latest_confidence")
-		doc["survey_count"] = doc.get("total_surveys_detected", 0)
-		# Description from denormalized field
-		doc["description"] = doc.get("latest_description")
 		items.append(doc)
 
 	return fast_mongo_response({

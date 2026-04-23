@@ -225,6 +225,7 @@ export const api = {
 			page?: number; limit?: number; sort_key?: string; sort_dir?: string;
 			route_id?: number; category?: string; condition?: string;
 			zone?: string; side?: string; asset_type?: string; search?: string;
+			include_sorted_ids?: boolean;
 		}) => {
 			const qs = new URLSearchParams();
 			if (params?.page != null) qs.set("page", String(params.page));
@@ -238,6 +239,7 @@ export const api = {
 			if (params?.side) qs.set("side", params.side);
 			if (params?.asset_type) qs.set("asset_type", params.asset_type);
 			if (params?.search) qs.set("search", params.search);
+			if (params?.include_sorted_ids) qs.set("include_sorted_ids", "1");
 			const q = qs.toString();
 			return apiFetch(`/api/assets/master/paginated${q ? `?${q}` : ""}`);
 		},
