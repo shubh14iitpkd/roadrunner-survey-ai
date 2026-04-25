@@ -1,7 +1,6 @@
 import { useState, useEffect } from "react";
 import { flushSync } from "react-dom";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import PageLoader from "./PageLoader";
 import {
   LayoutDashboard,
   Map,
@@ -271,11 +270,16 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           <main className="flex-1 overflow-auto relative">
             {children}
             {/* Nav transition overlay — covers main pane only so the sidebar
-                stays interactive. Visible from the moment a sidebar link is
-                clicked until the new route's pathname commits. */}
+                stays interactive. Inline spinner instead of <PageLoader/>:
+                PageLoader has a fixed-width gradient + min-h-screen meant for
+                full-page Suspense use, which renders as a narrow centered
+                column inside this overlay. */}
             {navigating && (
               <div className="absolute inset-0 z-50 bg-background flex items-center justify-center">
-                <PageLoader />
+                <div className="flex flex-col items-center gap-3">
+                  <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-primary" />
+                  <p className="text-sm font-medium text-muted-foreground">Loading...</p>
+                </div>
               </div>
             )}
           </main>
