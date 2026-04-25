@@ -1,14 +1,20 @@
-from werkzeug.security import generate_password_hash, check_password_hash
+import bcrypt
 
 
 def hash_password(password: str) -> str:
-	# TEMP: store plaintext for testing only
-	return password
+	if not isinstance(password, str):
+		password = str(password or "")
+	return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+
+
+def is_bcrypt_hash(value: str) -> bool:
+	return isinstance(value, str) and value.startswith(("$2a$", "$2b$", "$2y$"))
 
 
 def verify_password(password: str, password_hash: str) -> bool:
-	# TEMP: compare plaintext for testing only
-	if password_hash is None:
+	if not password_hash or not isinstance(password, str) or not isinstance(password_hash, str):
 		return False
-	return password_hash == password
-
+	try:
+		return bcrypt.checkpw(password.encode("utf-8"), password_hash.encode("utf-8"))
+	except (ValueError, TypeError):
+		return False
