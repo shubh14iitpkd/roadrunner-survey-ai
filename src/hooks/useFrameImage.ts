@@ -1,38 +1,42 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { api } from "@/lib/api";
 
 /**
- * Module-level cache: keyed by "videoId:frameNumber" → frame API response.
+ * Module-level cache: keyed by "videoId:frameNumber:variant" → frame API response.
  * Survives across component mounts so re-selecting the same asset is instant.
+ * Variant is part of the key so thumb and full coexist independently.
  */
 const frameDataCache = new Map<string, { image_data: string; width: number; height: number }>();
+
+type Variant = "thumb" | "full";
 
 interface UseFrameImageInput {
   videoId?: string;
   frameNumber?: number;
   box?: { x: number; y: number; width: number; height: number };
+  /**
+   * "thumb" — resized server-side (~800px wide JPEG), small payload, default.
+   * "full"  — original frame, used for the detail dialog where pixels matter.
+   */
+  variant?: Variant;
 }
 
 interface UseFrameImageResult {
-  /** Raw base64 image URL from the API (no annotations baked in) */
   imageUrl: string | null;
-  /** Original frame width in pixels */
+  /** Original frame width in pixels (always returned, used for bbox scaling) */
   frameWidth: number;
   /** Original frame height in pixels */
   frameHeight: number;
-  /** Whether the image is currently loading */
   loading: boolean;
 }
 
-function cacheKey(videoId: string, frameNumber: number): string {
-  return `${videoId}:${frameNumber}`;
+const THUMB_WIDTH = 1280;
+
+function cacheKey(videoId: string, frameNumber: number, variant: Variant): string {
+  return `${videoId}:${frameNumber}:${variant}`;
 }
 
-/**
- * Hook that fetches a frame image for an asset and caches the result.
- * Returns the raw image URL + dimensions so the consumer can draw annotations via a canvas overlay.
- */
-export function useFrameImage({ videoId, frameNumber }: UseFrameImageInput): UseFrameImageResult {
+export function useFrameImage({ videoId, frameNumber, variant = "thumb" }: UseFrameImageInput): UseFrameImageResult {
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [frameWidth, setFrameWidth] = useState(0);
   const [frameHeight, setFrameHeight] = useState(0);
@@ -46,9 +50,8 @@ export function useFrameImage({ videoId, frameNumber }: UseFrameImageInput): Use
       return;
     }
 
-    const key = cacheKey(videoId, frameNumber);
+    const key = cacheKey(videoId, frameNumber, variant);
 
-    // Cache hit — instant return, no loading state
     const cached = frameDataCache.get(key);
     if (cached) {
       setImageUrl(cached.image_data);
@@ -65,12 +68,13 @@ export function useFrameImage({ videoId, frameNumber }: UseFrameImageInput): Use
         setLoading(true);
         setImageUrl(null);
 
+        const isFull = variant === "full";
         const frameData = await api.videos.getFrameWithDetections(
           videoId,
           undefined,
           frameNumber,
-          undefined,
-          false,
+          isFull ? undefined : THUMB_WIDTH,
+          !isFull,
         );
 
         if (cancelled) return;
@@ -81,7 +85,6 @@ export function useFrameImage({ videoId, frameNumber }: UseFrameImageInput): Use
             width: frameData.width || 1920,
             height: frameData.height || 1080,
           };
-          // console.log(entry, "sdd");
           frameDataCache.set(key, entry);
           setImageUrl(entry.image_data);
           setFrameWidth(entry.width);
@@ -96,7 +99,7 @@ export function useFrameImage({ videoId, frameNumber }: UseFrameImageInput): Use
     })();
 
     return () => { cancelled = true; };
-  }, [videoId, frameNumber]);
+  }, [videoId, frameNumber, variant]);
 
   return { imageUrl, frameWidth, frameHeight, loading };
 }

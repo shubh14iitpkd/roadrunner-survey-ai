@@ -232,8 +232,14 @@ interface MarkerPopupData {
 interface AssetDetailSidebarProps {
   markerPopup: MarkerPopupData | null;
   selectedAsset: AssetRecord | null;
-  /** Raw base64 image URL (no annotations) */
+  /** Raw base64 image URL (no annotations) — thumb resolution */
   imageUrl: string | null;
+  /** Full-resolution variant. When present, used by the fullscreen viewer
+   *  (sidebar image expand). Falls back to thumb while in flight. */
+  fullImageUrl?: string | null;
+  /** Called when the user opens the fullscreen viewer — parent lazily
+   *  fetches the full-res frame in response. */
+  onRequestFullImage?: () => void;
   /** Original frame width in pixels */
   frameWidth: number;
   /** Original frame height in pixels */
@@ -254,6 +260,8 @@ export default function AssetDetailSidebar({
   markerPopup,
   selectedAsset,
   imageUrl,
+  fullImageUrl,
+  onRequestFullImage,
   frameWidth,
   frameHeight,
   imageLoading,
@@ -486,9 +494,9 @@ export default function AssetDetailSidebar({
         "border-l border-border bg-card flex flex-col shrink-0 transition-all duration-300 w-1/2 lg:w-2/5 ",
       )}
     >
-      {showFullscreen && imageUrl && selectedAsset && (
+      {showFullscreen && (fullImageUrl || imageUrl) && selectedAsset && (
         <FullscreenViewer
-          imageUrl={imageUrl}
+          imageUrl={fullImageUrl ?? imageUrl!}
           asset={selectedAsset}
           frameWidth={frameWidth}
           frameHeight={frameHeight}
@@ -511,7 +519,7 @@ export default function AssetDetailSidebar({
                 <span className="text-[9px] text-muted-foreground">Loading frame…</span>
               </div>
             ) : imageUrl ? (
-              <div className="relative w-full h-full cursor-pointer group" onClick={() => setShowFullscreen(true)}>
+              <div className="relative w-full h-full cursor-pointer group" onClick={() => { onRequestFullImage?.(); setShowFullscreen(true); }}>
                 <img
                   ref={imgRef}
                   src={imageUrl}

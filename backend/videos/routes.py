@@ -1525,7 +1525,8 @@ def get_video_frame_annotated(video_id: str):
         frame_height = frame.shape[0]
         frame_width = frame.shape[1]
         if request.args.get("resize", "true").lower() == "true":
-            resize_width = 640  # request.args.get("width", type=int)
+            resize_width = request.args.get("width", default=640, type=int)
+            resize_width = max(64, min(resize_width, frame_width))
             new_height = int(frame_height * (resize_width / frame_width))
             frame = cv2.resize(frame, (resize_width, new_height))
 

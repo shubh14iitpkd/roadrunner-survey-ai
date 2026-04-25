@@ -225,6 +225,18 @@ export default function AssetLibrary() {
     frameNumber: selectedAsset?.frameNumber,
   });
 
+  // Full-resolution frame, fetched lazily — only when the detail dialog
+  // opens or the user expands the sidebar image. Falls back to the thumb
+  // URL while the full payload is in flight.
+  const [requestFullRes, setRequestFullRes] = useState(false);
+  useEffect(() => { setRequestFullRes(false); }, [selectedAsset?.id]);
+  const fullEnabled = showFullView || requestFullRes;
+  const { imageUrl: fullImageUrl } = useFrameImage({
+    videoId: fullEnabled ? selectedAsset?.videoId : undefined,
+    frameNumber: fullEnabled ? selectedAsset?.frameNumber : undefined,
+    variant: "full",
+  });
+
   // Track which asset's image has actually finished loading.
   // Must be state (not a ref) so it triggers a re-render when updated.
   // Must be in an effect (not the render body) so it runs AFTER useFrameImage
@@ -855,6 +867,8 @@ export default function AssetLibrary() {
           markerPopup={markerPopup}
           selectedAsset={selectedAsset}
           imageUrl={pointImageLoading ? null : imageUrl}
+          fullImageUrl={fullImageUrl}
+          onRequestFullImage={() => setRequestFullRes(true)}
           frameWidth={frameWidth}
           frameHeight={frameHeight}
           imageLoading={pointImageLoading}
@@ -907,7 +921,7 @@ export default function AssetLibrary() {
               baseUrl: "",
               width: frameWidth ?? 0,
               height: frameHeight ?? 0,
-              image_data: imageUrl ?? undefined,
+              image_data: fullImageUrl ?? imageUrl ?? undefined,
               timestamp: selectedAsset.lastSurveyDate,
               gpx_point: { lat: selectedAsset.lat, lon: selectedAsset.lng },
               detections: selectedAsset.box ? [

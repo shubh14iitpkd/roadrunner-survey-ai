@@ -281,6 +281,18 @@ export default function DefectLibrary() {
     frameNumber: selectedDefect?.frameNumber,
   });
 
+  // Full-resolution frame, fetched lazily — only when the detail dialog
+  // opens or the user expands the sidebar image. Falls back to the thumb
+  // URL while the full payload is in flight.
+  const [requestFullRes, setRequestFullRes] = useState(false);
+  useEffect(() => { setRequestFullRes(false); }, [selectedDefect?.id]);
+  const fullEnabled = showFullView || requestFullRes;
+  const { imageUrl: fullImageUrl } = useFrameImage({
+    videoId: fullEnabled ? selectedDefect?.videoId : undefined,
+    frameNumber: fullEnabled ? selectedDefect?.frameNumber : undefined,
+    variant: "full",
+  });
+
   // Track which defect's image has actually finished loading.
   const [loadedForAssetId, setLoadedForAssetId] = useState<string | null>(null);
   useEffect(() => {
@@ -834,6 +846,8 @@ export default function DefectLibrary() {
           markerPopup={markerPopup}
           selectedAsset={selectedDefect}
           imageUrl={pointImageLoading ? null : imageUrl}
+          fullImageUrl={fullImageUrl}
+          onRequestFullImage={() => setRequestFullRes(true)}
           frameWidth={frameWidth}
           frameHeight={frameHeight}
           imageLoading={pointImageLoading}
@@ -887,7 +901,7 @@ export default function DefectLibrary() {
                   baseUrl: "",
                   width: frameWidth ?? 0,
                   height: frameHeight ?? 0,
-                  image_data: imageUrl ?? undefined,
+                  image_data: fullImageUrl ?? imageUrl ?? undefined,
                   timestamp: selectedDefect.lastSurveyDate,
                   gpx_point: { lat: selectedDefect.lat, lon: selectedDefect.lng },
                   detections: selectedDefect.box ? [
