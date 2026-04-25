@@ -209,7 +209,7 @@ export const api = {
 			const q = qs.toString();
 			return apiFetch(`/api/assets/master${q ? `?${q}` : ""}`, { method: "POST" });
 		},
-		getMasterMapPoints: (params?: { route_id?: number; category?: string; condition?: string; zone?: string; side?: string; asset_type?: string; search?: string }) => {
+		getMasterMapPoints: async (params?: { route_id?: number; category?: string; condition?: string; zone?: string; side?: string; asset_type?: string; search?: string; include_defect?: boolean }) => {
 			const qs = new URLSearchParams();
 			if (params?.route_id != null) qs.set("route_id", String(params.route_id));
 			if (params?.category) qs.set("category", params.category);
@@ -218,14 +218,58 @@ export const api = {
 			if (params?.side) qs.set("side", params.side);
 			if (params?.asset_type) qs.set("asset_type", params.asset_type);
 			if (params?.search) qs.set("search", params.search);
+			if (params?.include_defect) qs.set("include_defect", "1");
 			const q = qs.toString();
-			return apiFetch(`/api/assets/master/map-points${q ? `?${q}` : ""}`);
+			const resp = await apiFetch(`/api/assets/master/map-points${q ? `?${q}` : ""}`);
+			// Decode columnar response back into the array shape consumers expect.
+			if (resp?.format === "columnar" && resp.columns) {
+				const c = resp.columns;
+				const n = c.ids?.length ?? 0;
+				const extras = resp.line_extras || {};
+				const points = new Array(n);
+				for (let i = 0; i < n; i++) {
+					const id = c.ids[i];
+					const kind = c.kinds?.[i] ?? "point";
+					const p: any = {
+						master_display_id: id,
+						asset_id: c.asset_ids?.[i] ?? "",
+						asset_type: c.types?.[i] ?? "",
+						lat: c.lats?.[i] ?? 0,
+						lng: c.lngs?.[i] ?? 0,
+						condition: c.conditions?.[i] ?? "unknown",
+						group_id: c.group_ids?.[i] ?? undefined,
+						side: c.sides?.[i] ?? "Unknown",
+						zone: c.zones?.[i] ?? "Unknown",
+						route_id: c.route_ids?.[i] ?? undefined,
+						route_name: c.route_names?.[i] ?? "",
+						category_id: c.category_ids?.[i] ?? "",
+						last_seen_date: c.last_seen_dates?.[i] ?? "",
+						kind,
+					};
+					// Optional defect columns — only present when caller passed include_defect.
+					if (c.defect_ids) p.latest_defect_id = c.defect_ids[i] ?? "";
+					if (c.issues) p.issue = c.issues[i] ?? "";
+					if (kind === "line" && extras[id]) Object.assign(p, extras[id]);
+					points[i] = p;
+				}
+				return { points, count: resp.count ?? n };
+			}
+			return resp;
+		},
+		searchMasterAssets: (q: string) => {
+			const qs = new URLSearchParams({ q });
+			return apiFetch(`/api/assets/master/search?${qs.toString()}`);
+		},
+		getMasterAssetKeypoints: (masterDisplayId: string) => {
+			return apiFetch(`/api/assets/master/${encodeURIComponent(masterDisplayId)}/keypoints`);
+		},
+		getMasterAssetGeometry: (masterDisplayId: string) => {
+			return apiFetch(`/api/assets/master/${encodeURIComponent(masterDisplayId)}/geometry`);
 		},
 		getMasterPaginated: (params?: {
 			page?: number; limit?: number; sort_key?: string; sort_dir?: string;
 			route_id?: number; category?: string; condition?: string;
 			zone?: string; side?: string; asset_type?: string; search?: string;
-			include_sorted_ids?: boolean;
 		}) => {
 			const qs = new URLSearchParams();
 			if (params?.page != null) qs.set("page", String(params.page));
@@ -239,9 +283,49 @@ export const api = {
 			if (params?.side) qs.set("side", params.side);
 			if (params?.asset_type) qs.set("asset_type", params.asset_type);
 			if (params?.search) qs.set("search", params.search);
-			if (params?.include_sorted_ids) qs.set("include_sorted_ids", "1");
 			const q = qs.toString();
 			return apiFetch(`/api/assets/master/paginated${q ? `?${q}` : ""}`);
+		},
+		// Resolve which table page a given master_display_id lands on under the
+		// current filters + sort. Replaces the old `sorted_ids` array.
+		getMasterPageOf: (masterDisplayId: string, params: {
+			limit?: number; sort_key?: string; sort_dir?: string;
+			route_id?: number; category?: string; condition?: string;
+			zone?: string; side?: string; asset_type?: string; search?: string;
+		}) => {
+			const qs = new URLSearchParams();
+			if (params.limit != null) qs.set("limit", String(params.limit));
+			if (params.sort_key) qs.set("sort_key", params.sort_key);
+			if (params.sort_dir) qs.set("sort_dir", params.sort_dir);
+			if (params.route_id != null) qs.set("route_id", String(params.route_id));
+			if (params.category) qs.set("category", params.category);
+			if (params.condition) qs.set("condition", params.condition);
+			if (params.zone) qs.set("zone", params.zone);
+			if (params.side) qs.set("side", params.side);
+			if (params.asset_type) qs.set("asset_type", params.asset_type);
+			if (params.search) qs.set("search", params.search);
+			const q = qs.toString();
+			return apiFetch(`/api/assets/master/${masterDisplayId}/page-of${q ? `?${q}` : ""}`);
+		},
+		// Fetch the next/prev master asset relative to `masterDisplayId` under
+		// the current filters + sort. Used by prev/next nav in the detail panel.
+		getMasterNeighbor: (masterDisplayId: string, direction: "next" | "prev", params: {
+			sort_key?: string; sort_dir?: string;
+			route_id?: number; category?: string; condition?: string;
+			zone?: string; side?: string; asset_type?: string; search?: string;
+		}) => {
+			const qs = new URLSearchParams();
+			qs.set("direction", direction);
+			if (params.sort_key) qs.set("sort_key", params.sort_key);
+			if (params.sort_dir) qs.set("sort_dir", params.sort_dir);
+			if (params.route_id != null) qs.set("route_id", String(params.route_id));
+			if (params.category) qs.set("category", params.category);
+			if (params.condition) qs.set("condition", params.condition);
+			if (params.zone) qs.set("zone", params.zone);
+			if (params.side) qs.set("side", params.side);
+			if (params.asset_type) qs.set("asset_type", params.asset_type);
+			if (params.search) qs.set("search", params.search);
+			return apiFetch(`/api/assets/master/${masterDisplayId}/neighbor?${qs.toString()}`);
 		},
 		get: (asset_id: string) => apiFetch(`/api/assets/${asset_id}`),
 		getMasterByDisplayId: (masterDisplayId: string) => apiFetch(`/api/assets/master/${masterDisplayId}`),

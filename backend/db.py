@@ -125,6 +125,20 @@ def init_app_db(app: Flask) -> None:
 	db["master_assets"].create_index([("zone", ASCENDING), ("side", ASCENDING)], name="idx_master_zone_side")
 	db["master_assets"].create_index([("last_seen_date", DESCENDING)], name="idx_master_last_seen")
 	db["master_assets"].create_index([("group_id", ASCENDING)], name="idx_master_group_id")
+	db["master_assets"].create_index(
+		[
+			("group_id", "text"),
+			("route_name", "text"),
+			("issue", "text"),
+		],
+		name="idx_master_text",
+		default_language="english",
+		weights={
+			"group_id": 10,
+			"route_name": 5,
+			"issue": 3,
+		}
+	)
 
 	# Assets — additional sort and linkage indexes
 	db["assets"].create_index([("detected_at", DESCENDING)], name="idx_assets_detected")

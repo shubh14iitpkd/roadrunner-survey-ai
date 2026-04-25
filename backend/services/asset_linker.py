@@ -216,16 +216,51 @@ def _build_survey_history_entry(asset_doc: dict, survey_id, survey_display_id: s
 _LINEAR_FIELDS = ("kind", "classification", "geometry", "keypoints",
                   "first_frame", "last_frame", "frames")
 
+# ~2m at the equator (1° ≈ 111km). Qatar latitude (~25°N) shrinks the
+# longitudinal component slightly but the tolerance stays within ~2-2.2m.
+# Chosen empirically: cuts ~50% of coordinates on typical road polylines
+# while leaving curves visually faithful up to map zoom 16.
+_SIMPLIFY_TOLERANCE_DEG = 0.00002
+
+
+def _simplify_linestring(geom: dict | None,
+                          tolerance_deg: float = _SIMPLIFY_TOLERANCE_DEG
+                          ) -> dict | None:
+    """Douglas-Peucker simplify a GeoJSON LineString. Returns a new GeoJSON
+    dict with fewer coordinates, or None on invalid / too-short input."""
+    if not geom or geom.get("type") != "LineString":
+        return None
+    coords = geom.get("coordinates") or []
+    if len(coords) < 3:
+        return {"type": "LineString", "coordinates": list(coords)}
+    try:
+        from shapely.geometry import LineString
+        ls = LineString(coords)
+        simp = ls.simplify(tolerance_deg, preserve_topology=True)
+        return {
+            "type": "LineString",
+            "coordinates": [[float(x), float(y)] for x, y in simp.coords],
+        }
+    except Exception:
+        return None
+
 
 def _merge_linear_fields(target: dict, asset_doc: dict) -> None:
     """Copy linear-asset fields from `asset_doc` onto `target` only when the
-    source doc carries them (kind == "line"). Point assets untouched."""
+    source doc carries them (kind == "line"). Point assets untouched.
+    Also computes `geometry_simplified` alongside the full geometry so the
+    /map-points endpoint can serve the small version without recomputing."""
     if asset_doc.get("kind") != "line":
         return
     for f in _LINEAR_FIELDS:
         v = asset_doc.get(f)
         if v is not None:
             target[f] = v
+    geom = asset_doc.get("geometry")
+    if geom:
+        simplified = _simplify_linestring(geom)
+        if simplified:
+            target["geometry_simplified"] = simplified
 
 
 def _update_master_asset(db, master_doc: dict, asset_doc: dict,

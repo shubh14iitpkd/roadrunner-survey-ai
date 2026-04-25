@@ -23,4 +23,15 @@ class Config:
 		self.MAX_CONCURRENT_ANONYMIZATION = int(os.getenv("MAX_CONCURRENT_ANONYMIZATION", "1"))
 		self.MAX_CONCURRENT_AI_PROCESSING = int(os.getenv("MAX_CONCURRENT_AI_PROCESSING", "1"))
 		self.MAX_CONCURRENT_ASSET_LINKING = int(os.getenv("MAX_CONCURRENT_ASSET_LINKING", "1"))
+		# ── GPX road-snap (OSRM) ──────────────────────────────────────────────
+		# Snapping runs synchronously during video upload. On any failure
+		# (snapper unreachable, /match error, too few points) the raw GPX is
+		# used unchanged — correction is best-effort.
+		self.SNAPPER_URL = os.getenv("SNAPPER_URL", "http://localhost:5000")
+		self.GPX_SNAP_ENABLED = os.getenv("GPX_SNAP_ENABLED", "true").lower() not in ("0", "false", "no")
+		self.GPX_SNAP_RADIUS_M = float(os.getenv("GPX_SNAP_RADIUS_M", "50"))
+		self.GPX_SNAP_MIN_CONFIDENCE = float(os.getenv("GPX_SNAP_MIN_CONFIDENCE", "0.3"))
+		self.GPX_SNAP_BATCH_SIZE = int(os.getenv("GPX_SNAP_BATCH_SIZE", "100"))
+		self.GPX_SNAP_BATCH_OVERLAP = int(os.getenv("GPX_SNAP_BATCH_OVERLAP", "5"))
+		self.GPX_SNAP_TIMEOUT_S = int(os.getenv("GPX_SNAP_TIMEOUT_S", "30"))
 

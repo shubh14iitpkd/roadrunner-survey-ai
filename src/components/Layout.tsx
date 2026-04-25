@@ -1,5 +1,7 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { flushSync } from "react-dom";
 import { Link, useLocation, useNavigate } from "react-router-dom";
+import PageLoader from "./PageLoader";
 import {
   LayoutDashboard,
   Map,
@@ -37,9 +39,46 @@ const navigation = [
 export default function Layout({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
+  // Show overlay loader the instant a sidebar nav is clicked, hide once the
+  // new route mounts. Decouples user-perceived responsiveness from unmount
+  // cost of heavy pages (Asset Library leaves ~70k records + Leaflet markers).
+  const [navigating, setNavigating] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
   const { user, logout } = useAuth();
+
+  // Hide loader once pathname actually flips to the target route.
+  useEffect(() => {
+    setNavigating(false);
+  }, [location.pathname]);
+
+  // Sidebar Link click handler. Sequence is critical for perceived speed:
+  //   1. preventDefault — block Router's default sync navigation.
+  //   2. flushSync(setNavigating) — paint the main-pane loader NOW.
+  //   3. Two rAFs — give the browser a real paint frame so the loader is
+  //      visible before we re-enter JS for the heavy unmount.
+  //   4. flushSync(dispatch eject) — heavy page renders null synchronously,
+  //      tearing down Leaflet + ~70k records BEFORE the route swaps.
+  //   5. navigate(href) — Router commits to the new route; lazy chunk fetch
+  //      and new-page mount happen behind the still-visible loader.
+  const handleNavClick = (e: React.MouseEvent, href: string) => {
+    // Respect modifier keys / non-primary buttons (open in new tab, etc.)
+    if (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey || e.button !== 0) return;
+    if (location.pathname === href) return;
+    e.preventDefault();
+    setSidebarOpen(false);
+    flushSync(() => {
+      setNavigating(true);
+    });
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        flushSync(() => {
+          window.dispatchEvent(new Event("page-eject"));
+        });
+        navigate(href);
+      });
+    });
+  };
 
   const isAdmin = user?.role === "Admin";
   const visibleNavigation = navigation.filter((item) => !item.roles || item.roles.includes(user?.role));
@@ -112,7 +151,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                 <Link
                   key={item.name}
                   to={item.href!}
-                  onClick={() => setSidebarOpen(false)}
+                  onClick={(e) => handleNavClick(e, item.href!)}
                   className={cn(
                     "group flex items-center rounded-md transition-all duration-150",
                     collapsed ? "justify-center p-2" : "gap-2.5 px-3 py-[7px]",
@@ -229,8 +268,16 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           </header>
 
           {/* Page content */}
-          <main className="flex-1 overflow-auto">
+          <main className="flex-1 overflow-auto relative">
             {children}
+            {/* Nav transition overlay — covers main pane only so the sidebar
+                stays interactive. Visible from the moment a sidebar link is
+                clicked until the new route's pathname commits. */}
+            {navigating && (
+              <div className="absolute inset-0 z-50 bg-background flex items-center justify-center">
+                <PageLoader />
+              </div>
+            )}
           </main>
         </div>
       </div>

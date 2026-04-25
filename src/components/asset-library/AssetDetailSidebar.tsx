@@ -304,8 +304,11 @@ export default function AssetDetailSidebar({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [imageUrl, selectedAsset?.id]);
 
+  // Compare on master_display_id: tableAssets carry it as their stable id,
+  // but after fetchAndMergeDetail lands, selectedAsset.id swaps to the mongo
+  // _id — so matching on .id would always fail.
   const selectedIdx = selectedAsset
-    ? filteredAssets.findIndex((a) => a.id === selectedAsset.id)
+    ? filteredAssets.findIndex((a) => a.assetDisplayId === selectedAsset.assetDisplayId)
     : -1;
 
   // ── Draw bounding box annotation on canvas overlay ──

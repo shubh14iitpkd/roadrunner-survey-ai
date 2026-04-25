@@ -156,7 +156,7 @@ def list_assets_paginated():
 	if road_side:
 		query["side"] = road_side
 
-	items = list(db.assets.find(query).skip(skip).limit(limit).sort("created_at", DESCENDING))
+	items = list(db.assets.find(query, {"embedding": 0}).skip(skip).limit(limit).sort("created_at", DESCENDING))
 	total_asstes = db.assets.count_documents(query)
 	total_pages = math.ceil(total_asstes/limit)
 	return mongo_response({"items": items, "total_count": total_asstes, "total_pages": total_pages, "page": page, "limit": limit})
@@ -253,7 +253,10 @@ def list_assets():
 	if road_side:
 		query["side"] = road_side
 
-	items = list(db.assets.find(query).sort("detected_at", DESCENDING))
+	# Sort by created_at — that's the field asset_linker actually writes;
+	# detected_at is set by the manual-annotations path only, so sorting on
+	# it returned legacy/AI-pipeline assets in undefined order.
+	items = list(db.assets.find(query, {"embedding": 0}).sort("created_at", DESCENDING))
 	return mongo_response({"items": items, "count": len(items)})
 
 
@@ -398,7 +401,7 @@ def get_master_assets():
 	all_assets = list(db.master_assets.aggregate(pipeline))
 
 	# Also return routes + surveys metadata (as before)
-	all_roads = list(db.roads.find({}))
+	all_roads = list(db.roads.find({}, {"route_id": 1, "road_name": 1, "road_side": 1}))
 	all_surveys = list(db.surveys.find({"is_latest": True}))
 
 	return fast_mongo_response({
@@ -500,6 +503,10 @@ def get_master_map_points():
 	db = get_db()
 	query = _build_master_filter(request.args)
 
+	# Optional defect-only fields. Off by default so the asset library
+	# (full dataset) doesn't pay the per-record cost; defect library opts in.
+	include_defect = request.args.get("include_defect") in ("1", "true", "yes")
+
 	projection = {
 		"_id": 0,
 		"master_display_id": 1,
@@ -511,52 +518,238 @@ def get_master_map_points():
 		"side": 1,
 		"zone": 1,
 		"route_id": 1,
+		"route_name": 1,
 		"category_id": 1,
-		# Linear-asset fields (only populated for kind="line" docs)
+		"last_seen_date": 1,
+		# Linear-asset fields (only populated for kind="line" docs).
+		# keypoints intentionally excluded — fetched on-demand via
+		# /master/<id>/keypoints to keep this response small.
+		# geometry_simplified is preferred (Douglas-Peucker ~2m) so the map
+		# renders fewer coords per polyline; full geometry stays in DB and
+		# is available via /master/<id>/geometry.
 		"kind": 1,
 		"classification": 1,
 		"geometry": 1,
-		"keypoints": 1,
+		"geometry_simplified": 1,
 		"first_frame": 1,
 		"last_frame": 1,
 	}
+	if include_defect:
+		projection["latest_defect_id"] = 1
+		projection["issue"] = 1
 
+	# Columnar response: each field becomes a parallel array. Removes per-row
+	# key overhead (13 keys × 15 chars × 70k rows ≈ 14MB of repeated JSON keys
+	# eliminated) and gzips better since arrays of primitives deduplicate well.
+	# Line-specific fields (geometry, first_frame, last_frame, classification)
+	# live in a sparse side map keyed by master_display_id — most docs are
+	# points, so keeping them out of the column arrays avoids 70k nulls.
 	cursor = db.master_assets.find(query, projection)
-	points = []
+	ids: list[str] = []
+	asset_ids: list[str] = []
+	types: list[str] = []
+	lats: list[float] = []
+	lngs: list[float] = []
+	conditions: list[str] = []
+	group_ids: list[str | None] = []
+	sides: list[str] = []
+	zones: list[str] = []
+	route_ids: list[int | None] = []
+	route_names: list[str] = []
+	category_ids: list[str] = []
+	last_seen_dates: list[str] = []
+	kinds: list[str] = []
+	defect_ids: list[str] = []
+	issues: list[str] = []
+	line_extras: dict[str, dict] = {}
+
 	for doc in cursor:
 		coords = (doc.get("canonical_location") or {}).get("coordinates", [0, 0])
 		kind = doc.get("kind") or "point"
-		item = {
-			"master_display_id": doc.get("master_display_id", ""),
-			"asset_type": doc.get("asset_type", ""),
-			"asset_id": doc.get("asset_id", ""),
-			"lat": coords[1] if len(coords) > 1 else 0,
-			"lng": coords[0] if len(coords) > 0 else 0,
-			"condition": doc.get("latest_condition", "unknown"),
-			"group_id": doc.get("group_id"),
-			"side": doc.get("side", "Unknown"),
-			"zone": doc.get("zone", "Unknown"),
-			"route_id": doc.get("route_id"),
-			"category_id": doc.get("category_id", ""),
-			"kind": kind,
-		}
-		classification = doc.get("classification")
-		if classification:
-			item["classification"] = classification
-		if kind == "line":
-			geom = doc.get("geometry")
-			if geom:
-				item["geometry"] = geom
-			kps = doc.get("keypoints")
-			if kps:
-				item["keypoints"] = kps
-			if doc.get("first_frame") is not None:
-				item["first_frame"] = doc.get("first_frame")
-			if doc.get("last_frame") is not None:
-				item["last_frame"] = doc.get("last_frame")
-		points.append(item)
+		last_seen = doc.get("last_seen_date")
+		if last_seen and not isinstance(last_seen, str):
+			last_seen = last_seen.isoformat() if hasattr(last_seen, "isoformat") else str(last_seen)
 
-	return fast_mongo_response({"points": points, "count": len(points)})
+		display_id = doc.get("master_display_id", "")
+		ids.append(display_id)
+		asset_ids.append(doc.get("asset_id", ""))
+		types.append(doc.get("asset_type", ""))
+		lats.append(coords[1] if len(coords) > 1 else 0)
+		lngs.append(coords[0] if len(coords) > 0 else 0)
+		conditions.append(doc.get("latest_condition", "unknown"))
+		group_ids.append(doc.get("group_id"))
+		sides.append(doc.get("side", "Unknown"))
+		zones.append(doc.get("zone", "Unknown"))
+		route_ids.append(doc.get("route_id"))
+		route_names.append(doc.get("route_name") or "")
+		category_ids.append(doc.get("category_id", ""))
+		last_seen_dates.append(last_seen or "")
+		kinds.append(kind)
+		if include_defect:
+			defect_ids.append(doc.get("latest_defect_id") or "")
+			issues.append(doc.get("issue") or "")
+
+		if kind == "line":
+			extras: dict = {}
+			classification = doc.get("classification")
+			if classification:
+				extras["classification"] = classification
+			# Prefer the pre-simplified geometry; fall back to full geometry
+			# for docs that predate the migration.
+			geom = doc.get("geometry_simplified") or doc.get("geometry")
+			if geom:
+				extras["geometry"] = geom
+			if doc.get("first_frame") is not None:
+				extras["first_frame"] = doc.get("first_frame")
+			if doc.get("last_frame") is not None:
+				extras["last_frame"] = doc.get("last_frame")
+			if extras and display_id:
+				line_extras[display_id] = extras
+
+	columns: dict = {
+		"ids": ids,
+		"asset_ids": asset_ids,
+		"types": types,
+		"lats": lats,
+		"lngs": lngs,
+		"conditions": conditions,
+		"group_ids": group_ids,
+		"sides": sides,
+		"zones": zones,
+		"route_ids": route_ids,
+		"route_names": route_names,
+		"category_ids": category_ids,
+		"last_seen_dates": last_seen_dates,
+		"kinds": kinds,
+	}
+	if include_defect:
+		columns["defect_ids"] = defect_ids
+		columns["issues"] = issues
+
+	return fast_mongo_response({
+		"count": len(ids),
+		"format": "columnar",
+		"columns": columns,
+		"line_extras": line_extras,
+	})
+
+
+@assets_bp.get("/master/<master_display_id>/keypoints", endpoint="assets_master_keypoints")
+@role_required(["super_admin", "admin", "surveyor", "viewer"])
+def get_master_asset_keypoints(master_display_id: str):
+	"""
+	Return keypoints for a single master asset. Used on-demand when a line
+	asset is clicked on the map — lets the map response itself stay small.
+	---
+	tags:
+	  - Assets
+	security:
+	  - Bearer: []
+	parameters:
+	  - name: master_display_id
+	    in: path
+	    required: true
+	    type: string
+	responses:
+	  200:
+	    description: Keypoints for the given master asset
+	"""
+	db = get_db()
+	doc = db.master_assets.find_one(
+		{"master_display_id": master_display_id},
+		{"_id": 0, "keypoints": 1},
+	)
+	if not doc:
+		return jsonify({"error": "Master asset not found"}), 404
+	return fast_mongo_response({"keypoints": doc.get("keypoints") or []})
+
+
+@assets_bp.get("/master/<master_display_id>/geometry", endpoint="assets_master_geometry")
+@role_required(["super_admin", "admin", "surveyor", "viewer"])
+def get_master_asset_geometry(master_display_id: str):
+	"""
+	Return the FULL (un-simplified) GeoJSON geometry for a line master asset.
+	/map-points ships the pre-simplified geometry to keep the payload small;
+	call this endpoint when you need accurate coordinates at close zoom.
+	---
+	tags:
+	  - Assets
+	security:
+	  - Bearer: []
+	parameters:
+	  - name: master_display_id
+	    in: path
+	    required: true
+	    type: string
+	responses:
+	  200:
+	    description: Full geometry for the given master asset
+	"""
+	db = get_db()
+	doc = db.master_assets.find_one(
+		{"master_display_id": master_display_id},
+		{"_id": 0, "geometry": 1},
+	)
+	if not doc:
+		return jsonify({"error": "Master asset not found"}), 404
+	return fast_mongo_response({"geometry": doc.get("geometry")})
+
+
+@assets_bp.get("/master/search", endpoint="assets_master_search")
+@role_required(["super_admin", "admin", "surveyor", "viewer"])
+def search_master_assets():
+	"""
+	Text search over master_assets. Returns only the matching master_display_ids
+	so the client can intersect with in-memory facet-filtered sets.
+	---
+	tags:
+	  - Assets
+	security:
+	  - Bearer: []
+	parameters:
+	  - name: q
+	    in: query
+	    type: string
+	    required: true
+	responses:
+	  200:
+	    description: List of matching master_display_ids
+	"""
+	q = (request.args.get("q") or "").strip()
+	if not q:
+		return fast_mongo_response({"ids": [], "count": 0})
+
+	db = get_db()
+	projection = {"_id": 0, "master_display_id": 1}
+
+	# Try $text first (fast, index-backed). Fall back to regex if no text
+	# index exists yet or the query doesn't yield results.
+	try:
+		cursor = db.master_assets.find(
+			{"$text": {"$search": q}},
+			projection,
+		)
+		ids = [d["master_display_id"] for d in cursor if d.get("master_display_id")]
+	except Exception:
+		ids = []
+
+	if not ids:
+		pattern = ".*".join(re.escape(w) for w in q.split())
+		regex = {"$regex": pattern, "$options": "i"}
+		cursor = db.master_assets.find(
+			{"$or": [
+				{"master_display_id": regex},
+				{"asset_type": regex},
+				{"route_name": regex},
+				{"asset_id": regex},
+				{"issue": regex},
+				{"latest_defect_id": regex},
+			]},
+			projection,
+		)
+		ids = [d["master_display_id"] for d in cursor if d.get("master_display_id")]
+
+	return fast_mongo_response({"ids": ids, "count": len(ids)})
 
 
 # Valid sort keys and their corresponding MongoDB field names
@@ -662,8 +855,6 @@ def get_master_assets_paginated():
 		"total_surveys_detected": 1,
 	}
 
-	include_sorted_ids = request.args.get("include_sorted_ids", "0") == "1"
-
 	total_count = db.master_assets.count_documents(query)
 	total_pages = math.ceil(total_count / limit) if total_count > 0 else 1
 
@@ -690,34 +881,13 @@ def get_master_assets_paginated():
 			{"$limit": limit},
 			{"$project": {"_cat_sort": 0}},
 		])
-
-		sorted_ids = []
-		if include_sorted_ids:
-			sorted_ids = [
-				d["master_display_id"]
-				for d in db.master_assets.aggregate([
-					{"$match": query},
-					add_sort_field,
-					{"$sort": {"_cat_sort": mongo_sort_dir}},
-					{"$project": {"master_display_id": 1, "_id": 0}},
-				])
-			]
 	else:
 		mongo_sort_key = _SORT_KEY_MAP.get(sort_key_param, "last_seen_date")
 
-		# Fetch paginated items
 		items_cursor = db.master_assets.find(query, projection) \
 			.sort(mongo_sort_key, mongo_sort_dir) \
 			.skip(skip) \
 			.limit(limit)
-
-		sorted_ids = []
-		if include_sorted_ids:
-			sorted_ids = [
-				d["master_display_id"]
-				for d in db.master_assets.find(query, {"master_display_id": 1, "_id": 0})
-					.sort(mongo_sort_key, mongo_sort_dir)
-			]
 
 	items = []
 	for doc in items_cursor:
@@ -732,8 +902,131 @@ def get_master_assets_paginated():
 		"total_pages": total_pages,
 		"page": page,
 		"limit": limit,
-		"sorted_ids": sorted_ids,
 	})
+
+
+def _resolve_sort_field(args):
+	"""Resolve the frontend sort_key query param to the mongo field used by the
+	paginated table. Returns (field_name, mongo_sort_dir). Falls back to
+	last_seen_date on unknown keys, matching /master/paginated.
+
+	Category sort is currently unsupported here — it requires the same
+	display-name $switch mapping used on the paginated endpoint. Callers
+	should fall back to last_seen_date when sort_key == 'category'.
+	"""
+	sort_key_param = args.get("sort_key", "lastSurveyDate")
+	sort_dir_param = args.get("sort_dir", "desc")
+	mongo_sort_dir = DESCENDING if sort_dir_param == "desc" else ASCENDING
+	if sort_key_param == "category":
+		# Category sort not yet supported on page-of / neighbor — degrade to
+		# the default table order so the nav still works.
+		return "last_seen_date", mongo_sort_dir
+	field = _SORT_KEY_MAP.get(sort_key_param, "last_seen_date")
+	return field, mongo_sort_dir
+
+
+@assets_bp.get("/master/<master_display_id>/page-of", endpoint="assets_master_page_of")
+@role_required(["super_admin", "admin", "surveyor", "viewer"])
+def get_master_page_of(master_display_id: str):
+	"""
+	Compute which table page a given master asset sits on, given the current
+	filters + sort. Replaces the old `sorted_ids` array that the paginated
+	endpoint used to return.
+	---
+	tags:
+	  - Assets
+	security:
+	  - Bearer: []
+	"""
+	db = get_db()
+	limit = min(100, max(1, request.args.get("limit", 10, type=int)))
+
+	sort_field, mongo_sort_dir = _resolve_sort_field(request.args)
+
+	clicked = db.master_assets.find_one(
+		{"master_display_id": master_display_id},
+		{sort_field: 1, "_id": 0},
+	)
+	if not clicked:
+		return jsonify({"error": "not found"}), 404
+
+	sort_val = clicked.get(sort_field)
+
+	query = _build_master_filter(request.args)
+	# Count docs that sort strictly *before* the clicked asset.
+	cmp_op = "$gt" if mongo_sort_dir == DESCENDING else "$lt"
+	if sort_val is None:
+		# Nulls sort to the end (asc) / start (desc) in mongo — treat as 0 before.
+		before_count = 0
+	else:
+		query[sort_field] = {cmp_op: sort_val}
+		before_count = db.master_assets.count_documents(query)
+
+	page = before_count // limit + 1
+	return jsonify({"page": page})
+
+
+@assets_bp.get("/master/<master_display_id>/neighbor", endpoint="assets_master_neighbor")
+@role_required(["super_admin", "admin", "surveyor", "viewer"])
+def get_master_neighbor(master_display_id: str):
+	"""
+	Return the next/prev master asset relative to `master_display_id` under
+	the current filters + sort. Direction is 'next' or 'prev'.
+	---
+	tags:
+	  - Assets
+	security:
+	  - Bearer: []
+	"""
+	db = get_db()
+	direction = (request.args.get("direction") or "next").lower()
+	if direction not in ("next", "prev"):
+		return jsonify({"error": "direction must be 'next' or 'prev'"}), 400
+
+	sort_field, mongo_sort_dir = _resolve_sort_field(request.args)
+
+	current = db.master_assets.find_one(
+		{"master_display_id": master_display_id},
+		{sort_field: 1, "_id": 0},
+	)
+	if not current:
+		return jsonify({"error": "not found"}), 404
+
+	sort_val = current.get(sort_field)
+	if sort_val is None:
+		return jsonify({"item": None})
+
+	query = _build_master_filter(request.args)
+
+	# direction=next moves with the current sort; direction=prev moves against it.
+	if direction == "next":
+		cmp_op = "$lt" if mongo_sort_dir == DESCENDING else "$gt"
+		scan_dir = mongo_sort_dir
+	else:
+		cmp_op = "$gt" if mongo_sort_dir == DESCENDING else "$lt"
+		scan_dir = ASCENDING if mongo_sort_dir == DESCENDING else DESCENDING
+
+	query[sort_field] = {cmp_op: sort_val}
+
+	projection = {
+		"_id": 1, "master_display_id": 1, "asset_id": 1, "asset_type": 1,
+		"group_id": 1, "category_id": 1, "side": 1, "zone": 1,
+		"route_id": 1, "route_name": 1, "road_side": 1,
+		"canonical_location": 1, "latest_condition": 1,
+		"latest_survey_id": 1, "latest_survey_display_id": 1,
+		"latest_defect_id": 1, "issue": 1,
+		"last_seen_date": 1, "total_surveys_detected": 1,
+	}
+
+	neighbor = db.master_assets.find_one(query, projection, sort=[(sort_field, scan_dir)])
+	if not neighbor:
+		return jsonify({"item": None})
+
+	neighbor["_id"] = str(neighbor["_id"])
+	if neighbor.get("latest_survey_id"):
+		neighbor["latest_survey_id"] = str(neighbor["latest_survey_id"])
+
+	return fast_mongo_response({"item": neighbor})
 
 
 @assets_bp.post("/bulk", endpoint="assets_bulk")
@@ -830,8 +1123,19 @@ def update_asset(asset_id: str):
 	    description: Asset not found
 	"""
 	body = request.get_json(silent=True) or {}
+	# Whitelist editable fields — caller can't write _id, embedding,
+	# master_asset_id, or other internal pointers even with admin auth.
+	_ALLOWED = {
+		"asset_type", "type", "category", "category_id", "group_id",
+		"condition", "side", "zone", "issue", "description",
+		"box", "location", "confidence", "frame_number",
+		"timestamp", "annotated_by", "annotated_by_user_id",
+	}
+	update = {k: v for k, v in body.items() if k in _ALLOWED}
+	if not update:
+		return jsonify({"error": "no editable fields supplied"}), 400
 	db = get_db()
-	res = db.assets.find_one_and_update({"_id": ObjectId(asset_id)}, {"$set": body})
+	res = db.assets.find_one_and_update({"_id": ObjectId(asset_id)}, {"$set": update})
 	if not res:
 		return jsonify({"error": "not found"}), 404
 	return jsonify({"ok": True})
@@ -1055,11 +1359,10 @@ def unmark_asset_good(asset_id: str):
 		try:
 			sid = ObjectId(sid)
 			survey_doc = db.surveys.find_one({"_id": sid}, {"survey_display_id": 1})
-			print(survey_doc, sid)
 			if survey_doc:
 				sdid = survey_doc.get("survey_display_id", "")
-		except Exception as e:
-			print("[UMARK] Unmarking Error",e)
+		except Exception:
+			sid = None
 
 	res = db.master_assets.find_one_and_update(
 		{"_id": master_oid},
@@ -1492,7 +1795,10 @@ def save_manual_annotations():
 		upload_dir_gpx = _Path(os.environ.get("UPLOAD_DIR") or os.path.join(
 			os.path.dirname(os.path.abspath(__file__)), "..", "uploads"
 		))
-		gpx_path = upload_dir_gpx / gpx_file_url.lstrip("/uploads/")
+		# removeprefix is a literal-string strip; lstrip strips ANY char in the
+		# arg, which previously ate into filenames starting with /, u, p, l, o,
+		# a, d, s (e.g. "/uploads/sdata.gpx" → "data.gpx" — wrong path).
+		gpx_path = upload_dir_gpx / gpx_file_url.removeprefix("/uploads/")
 		if gpx_path.exists():
 			gpx_parsed = parse_gpx(gpx_path)
 			if gpx_parsed and total_frames > 0:
@@ -2004,6 +2310,18 @@ def upload_icon():
 	# Sanitize filename
 	safe_name = re.sub(r"[^\w.\-]", "-", os.path.basename(file.filename))
 	dest = icons_dir / safe_name
+	# Avoid silent overwrite of an existing icon — append "-1", "-2", etc.
+	# until we land on a free name. Caller gets the actual filename back.
+	if dest.exists():
+		stem, suffix = os.path.splitext(safe_name)
+		n = 1
+		while True:
+			candidate = f"{stem}-{n}{suffix}"
+			dest = icons_dir / candidate
+			if not dest.exists():
+				safe_name = candidate
+				break
+			n += 1
 	file.save(dest)
 
 	icon_url = f"/uploads/asset-map-icons/{safe_name}"
@@ -2011,6 +2329,7 @@ def upload_icon():
 
 
 @assets_bp.get("/resolved-map", endpoint="resolved_map")
+@role_required(["super_admin", "admin", "surveyor", "viewer"])
 def get_resolved_map():
 	"""
 	Get resolved asset map (system-wide values, no per-user overrides)

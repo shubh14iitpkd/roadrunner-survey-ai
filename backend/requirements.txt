@@ -155,6 +155,7 @@ sagemaker-core==1.0.61
 schema==0.7.8
 scipy==1.17.0
 setuptools==80.10.2
+shapely==2.0.6
 shellingham==1.5.4
 six==1.17.0
 smdebug-rulesconfig==1.0.1

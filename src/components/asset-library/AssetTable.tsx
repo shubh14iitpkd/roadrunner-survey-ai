@@ -1,9 +1,10 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
+  TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
@@ -52,8 +53,11 @@ interface AssetTableProps {
   onPageChange?: (page: number) => void;
   /** Server-side pagination: callback when page size changes */
   onPageSizeChange?: (size: number) => void;
-  /** Sorted IDs for map-click page jumping (server-side pagination only) */
-  sortedIds?: string[];
+  /** When true, virtualize the entire item list with @tanstack/react-virtual
+   * and hide pagination. Use for large in-memory datasets (>1000 rows). */
+  virtualized?: boolean;
+  /** Row height in pixels for virtualized mode (default 32). */
+  virtualRowHeight?: number;
 }
 
 export default function AssetTable({
@@ -77,9 +81,10 @@ export default function AssetTable({
   serverPageSize,
   onPageChange,
   onPageSizeChange,
-  sortedIds,
+  virtualized = false,
+  virtualRowHeight = 32,
 }: AssetTableProps) {
-  const isServerPaginated = serverPage != null;
+  const isServerPaginated = serverPage != null && !virtualized;
 
   // ── Client-side pagination state (used when NOT server-paginated) ──
   const [localPage, setLocalPage] = useState(1);
@@ -131,14 +136,36 @@ export default function AssetTable({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedId, isServerPaginated]);
 
-  // Scroll selected row into view after page has rendered
+  // Scroll selected row into view after page has rendered (non-virtualized).
   useEffect(() => {
-    if (!selectedId) return;
+    if (virtualized || !selectedId) return;
     const timer = setTimeout(() => {
       document.getElementById(`asset-row-${selectedId}`)?.scrollIntoView({ behavior: "smooth", block: "nearest" });
     }, 50);
     return () => clearTimeout(timer);
-  }, [selectedId, page]);
+  }, [selectedId, page, virtualized]);
+
+  // ── Virtualization (used when `virtualized` prop is true) ──
+  const parentRef = useRef<HTMLDivElement>(null);
+  const virtualizer = useVirtualizer({
+    count: virtualized ? items.length : 0,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => virtualRowHeight,
+    overscan: 10,
+  });
+
+  // Scroll selected row into view (virtualized).
+  useEffect(() => {
+    if (!virtualized || !selectedId) return;
+    const idx = items.findIndex((a) => (a[idField] as string) === selectedId);
+    if (idx >= 0) virtualizer.scrollToIndex(idx, { align: "center" });
+  }, [selectedId, virtualized, items, idField, virtualizer]);
+
+  // Grid template shared by virtualized header + rows so columns align.
+  const gridTemplateColumns = useMemo(
+    () => `repeat(${columns.length}, minmax(0, 1fr))`,
+    [columns.length],
+  );
 
   return (
     <div className="border-t border-border bg-card flex flex-col" style={{ flex: "1 1 45%", minHeight: 0 }}>
@@ -155,7 +182,7 @@ export default function AssetTable({
           />
         </div>
       </div>
-      <div className="overflow-auto w-full" style={{ flex: 1, minHeight: 0 }}>
+      <div ref={parentRef} className="overflow-auto w-full" style={{ flex: 1, minHeight: 0 }}>
         {loading ? (
           <div className="p-3 space-y-2 w-full">
             {Array.from({ length: 20 }).map((_, i) => (
@@ -197,8 +224,91 @@ export default function AssetTable({
               </Button>
             </div>
           </div>
+        ) : virtualized ? (
+          <div>
+            {/* Sticky header — uses the same grid template as the rows. */}
+            <div
+              className="sticky top-0 z-10 bg-card border-b border-border"
+              style={{ display: "grid", gridTemplateColumns }}
+            >
+              {columns.map((col) => {
+                const sortable = !!col.getValue;
+                const isActive = propSortKey === col.key;
+                return (
+                  <div
+                    key={col.key}
+                    className={cn(
+                      "text-[9px] font-semibold uppercase tracking-wider text-muted-foreground px-1.5 py-1 whitespace-nowrap text-center",
+                      sortable && "cursor-pointer select-none hover:text-foreground"
+                    )}
+                    onClick={sortable ? () => { propOnSort(col.key); } : undefined}
+                  >
+                    <span className="inline-flex items-center gap-0.5 justify-center">
+                      {col.header}
+                      {sortable && (
+                        isActive
+                          ? propSortDir === "asc"
+                            ? <ArrowUp className="h-2.5 w-2.5" />
+                            : <ArrowDown className="h-2.5 w-2.5" />
+                          : <ArrowUpDown className="h-2.5 w-2.5 opacity-30" />
+                      )}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+            {/* Virtualized row container — total-height spacer with
+                 absolutely positioned rendered rows. */}
+            <div
+              style={{
+                height: `${virtualizer.getTotalSize()}px`,
+                position: "relative",
+                width: "100%",
+              }}
+            >
+              {virtualizer.getVirtualItems().map((vRow) => {
+                const item = items[vRow.index];
+                if (!item) return null;
+                const rowId = item[idField] as string;
+                return (
+                  <div
+                    key={rowId ?? vRow.index}
+                    id={`asset-row-${rowId}`}
+                    className={cn(
+                      "cursor-pointer hover:bg-muted/40 border-b border-border/50",
+                      selectedId === rowId && "bg-primary/5 dark:bg-muted-secondary/20"
+                    )}
+                    style={{
+                      position: "absolute",
+                      top: 0,
+                      left: 0,
+                      width: "100%",
+                      height: `${vRow.size}px`,
+                      transform: `translateY(${vRow.start}px)`,
+                      display: "grid",
+                      gridTemplateColumns,
+                      alignItems: "center",
+                    }}
+                    onClick={() => onRowClick(item)}
+                  >
+                    {columns.map((col) => (
+                      <div key={col.key} className={cn("overflow-hidden", col.className)}>
+                        {col.render(item)}
+                      </div>
+                    ))}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
         ) : (
-          <Table>
+          // Raw <table> instead of shadcn <Table> on purpose. shadcn's wrapper
+          // adds its own `overflow-auto` div that hugs the table content, so
+          // when the row count is small the horizontal scrollbar appears just
+          // below the last row instead of at the bottom of the parent scroll
+          // container. With a bare table, the outer parentRef div owns both
+          // axes and the scrollbar lands at the container's bottom edge.
+          <table className="w-full caption-bottom text-sm">
             <TableHeader className="sticky top-0 z-10 bg-card">
               <TableRow className="border-b border-border hover:bg-transparent">
                 {columns.map((col) => {
@@ -250,10 +360,14 @@ export default function AssetTable({
                 );
               })}
             </TableBody>
-          </Table>
+          </table>
         )}
       </div>
-      {totalCount > 0 && (
+      {totalCount > 0 && virtualized ? (
+        <div className="flex items-center justify-between px-4 py-1 border-t border-border text-[11px] text-muted-foreground">
+          <span className="tabular-nums">{totalCount.toLocaleString()} total</span>
+        </div>
+      ) : totalCount > 0 ? (
         <div className="flex items-center justify-between px-4 py-1 border-t border-border text-[11px] text-muted-foreground">
           <div className="flex items-center gap-2">
             <span className="tabular-nums">
@@ -280,7 +394,7 @@ export default function AssetTable({
             </Button>
           </div>
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

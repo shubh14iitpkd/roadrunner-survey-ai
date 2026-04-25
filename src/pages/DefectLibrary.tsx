@@ -190,7 +190,9 @@ function buildDefectColumns(
   ];
 }
 
-// Minimal map point from the /map-points endpoint
+// Minimal map point from the /map-points endpoint. defect_id + issue come
+// only when the caller passes include_defect=true; we use them here so the
+// table can render without a second /paginated round trip.
 interface MapPoint {
   master_display_id: string;
   asset_type: string;
@@ -202,7 +204,11 @@ interface MapPoint {
   side: string;
   zone: string;
   route_id?: number;
+  route_name?: string;
   category_id: string;
+  last_seen_date?: string;
+  latest_defect_id?: string;
+  issue?: string;
 }
 
 export default function DefectLibrary() {
@@ -213,6 +219,16 @@ export default function DefectLibrary() {
   const [loadError, setLoadError] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const { data: labelMapData } = useLabelMap();
+
+  // Eager-eject on sidebar nav — drops the heavy Leaflet/table subtree
+  // synchronously before Router commits, so users see the loader instead
+  // of a frozen page during the unmount + lazy-chunk phase.
+  const [ejected, setEjected] = useState(false);
+  useEffect(() => {
+    const handler = () => setEjected(true);
+    window.addEventListener("page-eject", handler);
+    return () => window.removeEventListener("page-eject", handler);
+  }, []);
 
   const [selectedRouteId, setSelectedRouteId] = useState<number | null>(() => {
     const p = searchParams.get("route_id");
@@ -239,19 +255,15 @@ export default function DefectLibrary() {
   const [fullViewLoading, setFullViewLoading] = useState(false);
   const [conditionLogs, setConditionLogs] = useState<any[]>([]);
 
-  // ── Two-phase data: lightweight map points + paginated table items ──
+  // ── Single in-memory data source for both map and table ──
+  // Server returns all matching damaged assets; client memos derive the
+  // filtered + sorted view for the table — same pattern as AssetLibrary.
   const [mapPoints, setMapPoints] = useState<MapPoint[]>([]);
-  const [tableItems, setTableItems] = useState<AssetRecord[]>([]);
-  const [sortedIds, setSortedIds] = useState<string[]>([]);
-  const [tablePage, setTablePage] = useState(1);
-  const [tablePageSize, setTablePageSize] = useState(10);
-  const [totalCount, setTotalCount] = useState(0);
-  const [totalPages, setTotalPages] = useState(1);
+  const tableAssetsRef = useRef<AssetRecord[]>([]);
 
   // ── Mark as Good state ──
   const [goodSet, setGoodSet] = useState<Set<string>>(new Set());
   const [markingGood, setMarkingGood] = useState<Set<string>>(new Set());
-  const [markedGoodCount, setMarkedGoodCount] = useState(0);
   const [confirmMarkGoodAsset, setConfirmMarkGoodAsset] = useState<AssetRecord | null>(null);
 
   // ── Edit Issue state ──
@@ -328,113 +340,24 @@ export default function DefectLibrary() {
     return params;
   }, [selectedRouteId, categoryFilter, directionFilter, zoneFilter, selectedAssetType, searchQuery]);
 
-  // ── Map a raw paginated item to AssetRecord ──
-  const mapRawToAssetRecord = useCallback((asset: any, idx: number): AssetRecord => {
-    const coords = asset.location?.coordinates || asset.canonical_location?.coordinates || [];
-    const lng = coords[0] || 0;
-    const lat = coords[1] || 0;
-    const categoryId = asset.category_id || '';
-    const categoryName = getCategoryNameRef.current(categoryId);
-    const assetTypeName = getAssetNameRef.current(asset);
-    const condition: string = asset.condition || asset.latest_condition || 'defective';
-    const mongoId = asset._id ? String(asset._id) : `AST-${idx}`;
-    const rawVideoId = asset.latest_video_id ? String(asset.latest_video_id) : undefined;
-    const surveyId = asset.latest_survey_id ? String(asset.latest_survey_id) : undefined;
-    const lastDate = asset.last_seen_date
-      ? (typeof asset.last_seen_date === 'string' ? asset.last_seen_date.split('T')[0] : asset.last_seen_date)
-      : asset.created_at?.split?.('T')?.[0] || '—';
-
-    return {
-      id: mongoId,
-      defectId: asset.latest_defect_id ?? `DEF-${String(idx).padStart(6, '0')}`,
-      assetId: asset.asset_id || '',
-      category_id: categoryId,
-      assetType: assetTypeName,
-      assetCategory: categoryName,
-      assetDisplayId: asset.master_display_id || '',
-      masterDisplayId: asset.master_display_id || '',
-      condition,
-      markerColor: conditionToColor(condition),
-      lat, lng, surveyId,
-      roadName: asset.route_name || '',
-      roadSide: asset.road_side || undefined,
-      routeId: asset.route_id != null ? Number(asset.route_id) : undefined,
-      groupId: asset.group_id ?? undefined,
-      side: asset.side || 'Unknown',
-      zone: asset.zone || 'Unknown',
-      lastSurveyDate: lastDate,
-      issue: asset.issue ? capitalize(asset.issue) : "Defective",
-      description: asset.description && typeof asset.description === 'object' ? asset.description : undefined,
-      severity: asset.severity || 'Low',
-      videoId: rawVideoId ? String(rawVideoId) : undefined,
-      frameNumber: asset.latest_frame_number,
-      box: asset.latest_box ? {
-        x: asset.latest_box.x, y: asset.latest_box.y,
-        width: asset.latest_box.width ?? asset.latest_box.w ?? 0,
-        height: asset.latest_box.height ?? asset.latest_box.h ?? 0,
-      } : undefined,
-      surveyHistory: [],
-      totalSurveysDetected: asset.total_surveys_detected ?? asset.survey_count ?? 0,
-    };
-  }, []);
-
-  // ── Fetch a single table page ──
-  const fetchTablePage = useCallback(async (
-    page: number, pageSize: number, filters: Record<string, any>,
-    sKey: string | null, sDir: string,
-  ) => {
-    const resp = await api.assets.getMasterPaginated({
-      ...filters,
-      page,
-      limit: pageSize,
-      sort_key: sKey || "lastSurveyDate",
-      sort_dir: sDir,
-    });
-    if (resp) {
-      const mapped = (resp.items || []).map((a: any, i: number) => mapRawToAssetRecord(a, (page - 1) * pageSize + i));
-      setTableItems(mapped);
-      if (resp.sorted_ids && resp.sorted_ids.length) setSortedIds(resp.sorted_ids);
-      setTotalCount(resp.total_count ?? 0);
-      setTotalPages(resp.total_pages ?? 1);
-      setTablePage(resp.page ?? page);
-    }
-  }, [mapRawToAssetRecord]);
-
-  // Lazily fetch full sorted_ids list (used for map→page jump + prev/next nav).
-  // Kept out of the initial paginated response because it scans the whole
-  // filtered set — cheap to skip when the user never opens a row.
-  const ensureSortedIds = useCallback(async (): Promise<string[]> => {
-    if (sortedIds.length > 0) return sortedIds;
-    const filters = buildFilterParams();
-    const resp = await api.assets.getMasterPaginated({
-      ...filters,
-      page: 1,
-      limit: 1,
-      sort_key: sortKey || "lastSurveyDate",
-      sort_dir: sortDir,
-      include_sorted_ids: true,
-    });
-    const ids: string[] = resp?.sorted_ids || [];
-    setSortedIds(ids);
-    return ids;
-  }, [sortedIds, buildFilterParams, sortKey, sortDir]);
-
-  // ── Initial + filter/sort data loading ──
-  const loadData = useCallback(async (filters?: Record<string, any>, page = 1) => {
+  // ── Initial data load ──
+  // Single fetch — /map-points covers both map and table. include_defect=1
+  // pulls defect_id + issue alongside so we don't need /paginated.
+  // route_id is the only server-side filter; everything else applies on
+  // the client (matches AssetLibrary, lets sort/page/facet feel instant).
+  const loadData = useCallback(async (filters?: Record<string, any>) => {
     try {
       setLoading(true);
       setLoadError(false);
-      // Reset session-local marking state on data reload
       setGoodSet(new Set());
-      setMarkedGoodCount(0);
-      // Invalidate cached sorted_ids — filters/sort may have changed.
-      setSortedIds([]);
       const effectiveFilters = filters ?? buildFilterParams();
+
+      const mapFilters: Record<string, any> = { condition: "damaged", include_defect: true };
+      if (effectiveFilters.route_id != null) mapFilters.route_id = effectiveFilters.route_id;
 
       const [roadsResp, mapResp] = await Promise.all([
         api.roads.list(),
-        api.assets.getMasterMapPoints(effectiveFilters),
-        fetchTablePage(page, tablePageSize, effectiveFilters, sortKey, sortDir),
+        api.assets.getMasterMapPoints(mapFilters),
       ]);
 
       if (roadsResp?.items) {
@@ -450,47 +373,59 @@ export default function DefectLibrary() {
       setLoading(false);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [buildFilterParams, fetchTablePage, tablePageSize, sortKey, sortDir]);
+  }, [buildFilterParams]);
 
   // Load on mount
   const initialLoadDoneRef = useRef(false);
   useEffect(() => { loadData().then(() => { initialLoadDoneRef.current = true; }); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Re-fetch when filters change (debounced for search via useEffect delay)
-  const filterTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const prevFiltersRef = useRef<string>("");
-
+  // Route change → reload /map-points (server universe scoped by route_id).
+  // All other filters stay client-side so toggling them feels instant.
+  const prevRouteIdRef = useRef<number | null>(selectedRouteId);
   useEffect(() => {
-    const filters = buildFilterParams();
-    const filterKey = JSON.stringify(filters) + `|${sortKey}|${sortDir}`;
-    if (filterKey === prevFiltersRef.current) return;
-    prevFiltersRef.current = filterKey;
-
-    // Skip on mount (loadData already called above)
     if (!initialLoadDoneRef.current) return;
-
-    // Deselect current defect when filters or sort change
+    if (prevRouteIdRef.current === selectedRouteId) return;
+    prevRouteIdRef.current = selectedRouteId;
     setSelectedDefect(null);
-
-    if (filterTimerRef.current) clearTimeout(filterTimerRef.current);
-    filterTimerRef.current = setTimeout(() => {
-      loadData(filters, 1);
-    }, searchQuery.trim() ? 350 : 0); // Debounce search, instant for other filters
-
-    return () => { if (filterTimerRef.current) clearTimeout(filterTimerRef.current); };
+    loadData();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [categoryFilter, directionFilter, zoneFilter, selectedAssetType, selectedRouteId, searchQuery, sortKey, sortDir]);
+  }, [selectedRouteId]);
 
-  // ── Convert map points to AssetRecord for the map component ──
+  // ── Client-side filter over cached mapPoints ──
+  // condition is intentionally NOT filtered here — the server already gave us
+  // damaged-only, and after a mark-good mutation we keep the row visible
+  // (with updated condition) so the user can see what they just changed.
+  // Search is plain substring match across a few columns; defect lib has a
+  // small enough damaged subset that we don't need the /search endpoint.
+  const filteredMapPoints = useMemo<MapPoint[]>(() => {
+    const categoryIdFilter = categoryFilter !== "all"
+      ? (categoryOptionsRef.current.find(c => c.name === categoryFilter)?.id ?? null)
+      : null;
+    const q = searchQuery.trim().toLowerCase();
+
+    return mapPoints.filter(p => {
+      if (categoryIdFilter && p.category_id !== categoryIdFilter) return false;
+      if (directionFilter !== "all" && p.side !== directionFilter) return false;
+      if (zoneFilter !== "all" && p.zone !== zoneFilter) return false;
+      if (selectedAssetType !== "all" && p.group_id !== selectedAssetType) return false;
+      if (q) {
+        const hay = `${p.master_display_id} ${p.latest_defect_id ?? ''} ${p.asset_type} ${p.route_name ?? ''} ${p.issue ?? ''}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [mapPoints, categoryFilter, directionFilter, zoneFilter, selectedAssetType, searchQuery]);
+
+  // ── Convert filtered map points to AssetRecord for map + table ──
   const mapAssets = useMemo<AssetRecord[]>(() => {
-    return mapPoints.map((p) => ({
+    return filteredMapPoints.map((p) => ({
       id: p.master_display_id,
       assetDisplayId: p.master_display_id,
       masterDisplayId: p.master_display_id,
       assetId: p.asset_id,
-      assetType: getCategoryNameRef.current ? getAssetNameRef.current({ asset_id: p.asset_id, asset_type: p.asset_type }) : p.asset_type,
+      assetType: getAssetNameRef.current({ asset_id: p.asset_id, asset_type: p.asset_type }),
       assetCategory: getCategoryNameRef.current(p.category_id),
-      defectId: '',
+      defectId: p.latest_defect_id || '',
       lat: p.lat,
       lng: p.lng,
       condition: p.condition,
@@ -500,12 +435,41 @@ export default function DefectLibrary() {
       side: p.side || 'Unknown',
       zone: p.zone || 'Unknown',
       category_id: p.category_id,
-      roadName: '',
-      lastSurveyDate: '',
-      issue: '',
+      roadName: p.route_name || '',
+      lastSurveyDate: p.last_seen_date ? String(p.last_seen_date).split('T')[0] : '',
+      issue: p.issue ? capitalize(p.issue) : 'Defective',
       severity: 'Low',
     }));
-  }, [mapPoints]);
+  }, [filteredMapPoints]);
+
+  // ── Sorted in-memory table source ──
+  const tableAssets = useMemo<AssetRecord[]>(() => {
+    if (!sortKey) return mapAssets;
+    const accessor: Record<string, (a: AssetRecord) => string> = {
+      defectId: (a) => a.defectId ?? "",
+      assetDisplayId: (a) => a.assetDisplayId ?? "",
+      assetType: (a) => a.assetType ?? "",
+      category: (a) => a.assetCategory ?? "",
+      road: (a) => a.roadName ?? "",
+      side: (a) => a.side ?? "",
+      zone: (a) => a.zone ?? "",
+      survey: (a) => a.lastSurveyDate ?? "",
+      issue: (a) => a.issue ?? "",
+    };
+    const getValue = accessor[sortKey];
+    if (!getValue) return mapAssets;
+    const dir = sortDir === "desc" ? -1 : 1;
+    const arr = [...mapAssets];
+    arr.sort((a, b) => {
+      const av = getValue(a).toLowerCase();
+      const bv = getValue(b).toLowerCase();
+      if (av < bv) return -1 * dir;
+      if (av > bv) return 1 * dir;
+      return 0;
+    });
+    return arr;
+  }, [mapAssets, sortKey, sortDir]);
+  tableAssetsRef.current = tableAssets;
 
   // ── Lazy detail loader ──
   // Fetches survey_history + full description/issue for one selected defect.
@@ -581,66 +545,30 @@ export default function DefectLibrary() {
     if (routeIdParam) setSelectedRouteId(Number(routeIdParam));
   }, [searchParams]);
 
-  // Navigate to prev/next defect within the sorted list
-  const navigateDefects = useCallback(async (direction: 'prev' | 'next') => {
-    if (!selectedDefect) return;
-    const ids = await ensureSortedIds();
-    if (!ids.length) return;
-    const currentIdx = ids.indexOf(selectedDefect.assetDisplayId ?? '');
-    if (currentIdx === -1) return;
-    const nextIdx = direction === 'prev' ? currentIdx - 1 : currentIdx + 1;
-    if (nextIdx < 0 || nextIdx >= ids.length) return;
+  // Navigate prev/next against the in-memory sorted set — same as AssetLibrary.
+  const navigateDefects = useCallback((direction: 'prev' | 'next') => {
+    const list = tableAssetsRef.current;
+    if (!selectedDefect?.assetDisplayId || list.length === 0) return;
+    const idx = list.findIndex(a => a.assetDisplayId === selectedDefect.assetDisplayId);
+    if (idx === -1) return;
+    const nextIdx = direction === 'next' ? idx + 1 : idx - 1;
+    if (nextIdx < 0 || nextIdx >= list.length) return;
+    const next = list[nextIdx];
+    setSelectedDefect(next);
+    setSelectedSurveyIdx(0);
+    setMarkerPopup(null);
+    fetchAndMergeDetail(next);
+  }, [selectedDefect, fetchAndMergeDetail]);
 
-    const nextDisplayId = ids[nextIdx];
-    const targetPage = Math.floor(nextIdx / tablePageSize) + 1;
-
-    // If the target is on a different page, fetch it
-    if (targetPage !== tablePage) {
-      const filters = buildFilterParams();
-      await fetchTablePage(targetPage, tablePageSize, filters, sortKey, sortDir);
-    }
-
-    // Find the asset in tableItems (it may have just been loaded)
-    // Use a short delay to allow state to settle after page fetch
-    setTimeout(() => {
-      setSelectedDefect(prev => {
-        const found = tableItems.find(a => a.assetDisplayId === nextDisplayId);
-        if (found) {
-          setSelectedSurveyIdx(0);
-          setMarkerPopup(null);
-          fetchAndMergeDetail(found);
-          return found;
-        }
-        return prev;
-      });
-    }, 50);
-  }, [selectedDefect, ensureSortedIds, tablePage, tablePageSize, tableItems, buildFilterParams, fetchTablePage, sortKey, sortDir, fetchAndMergeDetail]);
-
-  const handleRowClick = useCallback(async (defect: AssetRecord) => {
+  const handleRowClick = useCallback((defect: AssetRecord) => {
     setSelectedDefect(defect);
     setSelectedSurveyIdx(0);
     setMarkerPopup(null);
     fetchAndMergeDetail(defect);
-    // Show blur overlay while map repositions
     setMapTransitioning(true);
     if (mapTransitionTimer.current) clearTimeout(mapTransitionTimer.current);
     mapTransitionTimer.current = setTimeout(() => setMapTransitioning(false), 400);
-
-    // If this is a map click (asset from mapAssets, may not be on current table page),
-    // navigate the table to the page containing this asset.
-    // Lazily fetches sorted_ids on first row click to keep the initial page load light.
-    if (defect.assetDisplayId) {
-      const ids = await ensureSortedIds();
-      const idx = ids.indexOf(defect.assetDisplayId);
-      if (idx !== -1) {
-        const targetPage = Math.floor(idx / tablePageSize) + 1;
-        if (targetPage !== tablePage) {
-          const filters = buildFilterParams();
-          await fetchTablePage(targetPage, tablePageSize, filters, sortKey, sortDir);
-        }
-      }
-    }
-  }, [fetchAndMergeDetail, ensureSortedIds, tablePage, tablePageSize, buildFilterParams, fetchTablePage, sortKey, sortDir]);
+  }, [fetchAndMergeDetail]);
 
   const handleMarkGood = useCallback((asset: AssetRecord) => {
     if (user.role === "Viewer") {
@@ -670,13 +598,10 @@ export default function DefectLibrary() {
     try {
       await api.assets.markAsGood(mongoId, { name: surveyorName, user_id: surveyorId, survey_id: asset.surveyId });
       setGoodSet((prev) => new Set(prev).add(assetKey));
-      setMarkedGoodCount((prev) => prev + 1);
-      // Optimistically update table items
-      setTableItems(prev => prev.map(a => a.id === mongoId ? { ...a, condition: "good", markerColor: conditionToColor("good") } : a));
-      // Optimistically update map points
+      // Single source of truth: mapPoints. mapAssets/tableAssets memos derive
+      // condition and marker color from this, so the table and map stay in sync.
       setMapPoints(prev => prev.map(p => p.master_display_id === asset.assetDisplayId ? { ...p, condition: "good" } : p));
       toast.success(`Asset ${asset.assetDisplayId} marked as good`);
-      // Invalidate cached detail so condition logs are fresh on next detailed View open
       if (asset.masterDisplayId) delete detailCacheRef.current[asset.masterDisplayId];
     } catch (err: any) {
       toast.error(err?.message || "Failed to mark asset as good");
@@ -699,13 +624,8 @@ export default function DefectLibrary() {
     try {
       await api.assets.unmarkGood(mongoId, { name: surveyorName, user_id: surveyorId, survey_id: surveyId });
       setGoodSet((prev) => { const s = new Set(prev); s.delete(assetKey); return s; });
-      setMarkedGoodCount((prev) => prev - 1);
-      // Optimistically update table items
-      setTableItems(prev => prev.map(a => a.id === mongoId ? { ...a, condition: "damaged", markerColor: conditionToColor("damaged") } : a));
-      // Optimistically update map points
       setMapPoints(prev => prev.map(p => p.master_display_id === asset.assetDisplayId ? { ...p, condition: "damaged" } : p));
       toast.success(`Asset ${asset.assetDisplayId} reverted to defective`);
-      // Invalidate cached detail so condition logs are fresh on next detail View open
       if (asset.masterDisplayId) delete detailCacheRef.current[asset.masterDisplayId];
     } catch (err: any) {
       toast.error(err?.message || "Failed to revert asset");
@@ -730,9 +650,8 @@ export default function DefectLibrary() {
     setEditIssueSaving(true);
     try {
       await api.assets.updateIssue(editIssueAsset.id, trimmed);
-      setTableItems((prev) =>
-        prev.map((d) => d.id === editIssueAsset.id ? { ...d, issue: trimmed } : d)
-      );
+      // Mutate mapPoints — mapAssets/tableAssets memos pick up the new issue.
+      setMapPoints(prev => prev.map(p => p.master_display_id === editIssueAsset.assetDisplayId ? { ...p, issue: trimmed } : p));
       if (selectedDefect?.id === editIssueAsset.id) {
         setSelectedDefect((prev) => prev ? { ...prev, issue: trimmed } : prev);
       }
@@ -803,7 +722,7 @@ export default function DefectLibrary() {
 
 
   const categoryOptions = useMemo(() => {
-    const categoryMap = labelMapData?.categories;
+    const categoryMap = labelMapData?.categories || {};
     const opts = []
     for (const [cat, cinfo] of Object.entries(categoryMap)) {
       opts.push({ id: cat, name: cinfo.display_name });
@@ -821,6 +740,8 @@ export default function DefectLibrary() {
     setSearchQuery("");
     setSelectedRouteId(null);
   }, []);
+
+  if (ejected) return null;
 
   return (
     <div className="flex flex-col h-screen overflow-hidden bg-background">
@@ -865,9 +786,10 @@ export default function DefectLibrary() {
         </div>
       </div>
 
-      {/* Filter Strip */}
+      {/* Filter Strip — count is "still defective" rows after any client
+          mark-good mutations (mapAssets reflects current condition). */}
       <AssetFilterStrip
-        filteredCount={totalCount - markedGoodCount}
+        filteredCount={tableAssets.filter(a => (a.condition ?? '').toLowerCase() !== 'good').length}
         countLabel="defects"
         directionFilter={directionFilter}
         onDirectionChange={setDirectionFilter}
@@ -915,7 +837,7 @@ export default function DefectLibrary() {
           frameWidth={frameWidth}
           frameHeight={frameHeight}
           imageLoading={pointImageLoading}
-          filteredAssets={tableItems}
+          filteredAssets={tableAssets}
           onCloseAsset={() => setSelectedDefect(null)}
           getAssetDisplayName={getAssetDisplayName}
           onNavigate={navigateDefects}
@@ -1312,9 +1234,9 @@ export default function DefectLibrary() {
         </DialogContent>
       </Dialog>
 
-      {/* Bottom Table */}
+      {/* Bottom Table — client-side paginated, mirrors AssetLibrary. */}
       <AssetTable
-        items={tableItems}
+        items={tableAssets}
         loading={loading}
         loadError={loadError}
         searchQuery={searchQuery}
@@ -1335,20 +1257,6 @@ export default function DefectLibrary() {
             setSortDir("asc");
           }
         }}
-        serverPage={tablePage}
-        serverTotalPages={totalPages}
-        serverTotalCount={totalCount}
-        serverPageSize={tablePageSize}
-        onPageChange={async (newPage) => {
-          const filters = buildFilterParams();
-          await fetchTablePage(newPage, tablePageSize, filters, sortKey, sortDir);
-        }}
-        onPageSizeChange={async (newSize) => {
-          setTablePageSize(newSize);
-          const filters = buildFilterParams();
-          await fetchTablePage(1, newSize, filters, sortKey, sortDir);
-        }}
-        sortedIds={sortedIds}
       />
     </div>
   );
