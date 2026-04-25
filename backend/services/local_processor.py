@@ -166,6 +166,29 @@ def _vehicle_path_between(gpx_data: dict, f_a: int, f_b: int,
     return out
 
 
+def _offset_path_between(estimator: LatLongEstimator, gpx_data: dict,
+                         total_frames: int, f_a: int, f_b: int,
+                         side: str, step: int = 3
+                         ) -> List[Tuple[float, float]]:
+    """Walk gpx between two frames and offset each sample by smoothed heading
+    + side. Used by sided polyline construction so the line follows road
+    curvature instead of cutting straight chords across curves."""
+    out: List[Tuple[float, float]] = []
+    lo, hi = (f_a, f_b) if f_a <= f_b else (f_b, f_a)
+    for f in range(lo, hi + 1, max(1, step)):
+        p = gpx_data.get(f)
+        if not p:
+            continue
+        lat, lon = float(p["lat"]), float(p["lon"])
+        heading = estimator.calculate_bearing_for_frame(
+            frame_number=f, interpolated_gpx=gpx_data,
+            total_frames=total_frames, frame_interval=BEARING_SMOOTH_FRAMES,
+        ) or 0.0
+        lat, lon = _offset_latlng(lat, lon, heading, side, SIDED_OFFSET_M)
+        out.append((lat, lon))
+    return out
+
+
 class LocalVideoProcessor:
     """Process videos using model loaded locally and extract annotated frames."""
 
@@ -713,18 +736,32 @@ class LocalVideoProcessor:
 
             coords: List[Tuple[float, float]] = []
             if sided:
-                # Per-obs offset anchors, smoothed heading.
-                for o in obs_list:
-                    heading = self.lat_long_estimator.calculate_bearing_for_frame(
-                        frame_number=o["frame_number"],
-                        interpolated_gpx=gpx_data,
-                        total_frames=total_frames,
-                        frame_interval=BEARING_SMOOTH_FRAMES,
-                    )
-                    lat, lon = _offset_latlng(
-                        o["car_lat"], o["car_lon"], heading, run_side, SIDED_OFFSET_M
-                    )
-                    coords.append((lat, lon))
+                # Walk gpx between consecutive obs and offset each sample by
+                # smoothed heading + side. Old version emitted only per-obs
+                # anchors which chord-cut across curves (roundabouts, ramps).
+                # BEARING_SMOOTH_FRAMES kills gpx jitter that densification
+                # would otherwise amplify into zigzags.
+                for i, o in enumerate(obs_list):
+                    if i == 0:
+                        heading = self.lat_long_estimator.calculate_bearing_for_frame(
+                            frame_number=o["frame_number"],
+                            interpolated_gpx=gpx_data,
+                            total_frames=total_frames,
+                            frame_interval=BEARING_SMOOTH_FRAMES,
+                        ) or 0.0
+                        lat, lon = _offset_latlng(
+                            o["car_lat"], o["car_lon"], heading, run_side, SIDED_OFFSET_M
+                        )
+                        coords.append((lat, lon))
+                    else:
+                        prev = obs_list[i - 1]
+                        coords.extend(
+                            _offset_path_between(
+                                self.lat_long_estimator, gpx_data, total_frames,
+                                prev["frame_number"], o["frame_number"],
+                                run_side, step=3,
+                            )
+                        )
             else:
                 # Vehicle path walked between consecutive obs so polyline
                 # hugs the driven road rather than chording across curves.
