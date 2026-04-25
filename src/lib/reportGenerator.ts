@@ -77,8 +77,7 @@ export async function exportDefectByAssetTypeReport(filterAssetType?: string, la
     r.roadName, r.roadSide, capitalize(r.side), capitalize(r.zone), r.lastSurveyDate, capitalize(r.issueType),
   ]);
 
-  const filterLabel = filterAssetType ? labelMap?.labels?.[filterAssetType] : undefined;
-  const suffix = (filterLabel && (filterLabel.group_id || filterLabel.display_name)) || "All_Types";
+  const suffix = filterAssetType ? filterAssetType.replace(/\s+/g, "_") : "All_Types";
   exportToExcel({
     filename: `Defect_Report_AssetType_${suffix}.xlsx`,
     sheetName: "By Asset Type",

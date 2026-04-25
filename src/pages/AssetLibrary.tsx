@@ -838,8 +838,8 @@ export default function AssetLibrary() {
               return resp?.geometry ?? null;
             }}
           />
-          {/* Loading overlay — shown during initial data fetch, map transition, or while a selected point's image loads */}
-          {(loading || mapTransitioning || pointImageLoading) && (
+          {/* Loading overlay — shown during initial data fetch or map transition. Sidebar handles its own frame-image loader. */}
+          {(loading || mapTransitioning) && (
             <div className="absolute inset-0 bg-background/30 backdrop-blur-[2px] z-[1000] flex items-center justify-center transition-opacity duration-200">
               <div className="flex flex-col items-center gap-2 bg-background/80 rounded-xl px-5 py-3 shadow-lg">
                 <Loader2 className="h-5 w-5 animate-spin text-primary" />
