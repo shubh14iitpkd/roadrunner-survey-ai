@@ -136,21 +136,48 @@ export default function AssetTable({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedId, isServerPaginated]);
 
-  // Scroll selected row into view after page has rendered (non-virtualized).
-  // `pagedItems` is included in deps so the scroll re-runs once the page-jump
-  // refetch resolves and the row actually exists in the DOM — without it,
-  // the effect fires while `placeholderData` still holds the prior page and
-  // findById returns null.
+  // ── Sticky header — captured as a ref purely so scroll-into-view can
+  // skip the header's height. Plain ref, read on demand inside the scroll
+  // effect — no state, no ResizeObserver, no extra renders. Callback ref
+  // because the element type differs across virtualized (div) vs
+  // non-virtualized (thead) layouts.
+  const headerElRef = useRef<HTMLElement | null>(null);
+  const headerRef = (el: HTMLElement | null) => { headerElRef.current = el; };
+
+  const parentRef = useRef<HTMLDivElement>(null);
+
+  // Scroll any row by ID into view, accounting for the sticky header.
+  // Reads layout once (offsetTop/clientHeight/scrollTop) and only scrolls
+  // when the row is actually outside the visible band — same as
+  // scrollIntoView({block:"nearest"}), but with explicit header-height
+  // padding that the browser's native impl handles inconsistently when
+  // the header is `position: sticky` inside the same scroll container.
+  const scrollRowIntoView = (rowId: string) => {
+    const parent = parentRef.current;
+    const row = document.getElementById(`asset-row-${rowId}`);
+    if (!parent || !row) return;
+    const headerH = headerElRef.current?.offsetHeight ?? 0;
+    const rowTop = row.offsetTop;
+    const rowBottom = rowTop + row.offsetHeight;
+    const viewTop = parent.scrollTop + headerH;
+    const viewBottom = parent.scrollTop + parent.clientHeight;
+    if (rowTop < viewTop) {
+      parent.scrollTo({ top: rowTop - headerH, behavior: "smooth" });
+    } else if (rowBottom > viewBottom) {
+      parent.scrollTo({ top: rowBottom - parent.clientHeight, behavior: "smooth" });
+    }
+  };
+
+  // Non-virtualized scroll. `pagedItems` in deps so the scroll re-runs once
+  // the page-jump refetch resolves and the row actually exists in the DOM.
   useEffect(() => {
     if (virtualized || !selectedId) return;
-    const timer = setTimeout(() => {
-      document.getElementById(`asset-row-${selectedId}`)?.scrollIntoView({ behavior: "smooth", block: "nearest" });
-    }, 50);
+    const timer = setTimeout(() => scrollRowIntoView(selectedId), 50);
     return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedId, page, virtualized, pagedItems]);
 
   // ── Virtualization (used when `virtualized` prop is true) ──
-  const parentRef = useRef<HTMLDivElement>(null);
   const virtualizer = useVirtualizer({
     count: virtualized ? items.length : 0,
     getScrollElement: () => parentRef.current,
@@ -158,12 +185,26 @@ export default function AssetTable({
     overscan: 10,
   });
 
-  // Scroll selected row into view (virtualized).
+  // Virtualized scroll. Rows below the current window aren't in the DOM
+  // (virtualizer renders only the visible band), so we compute the target
+  // offset directly: idx * rowHeight, minus the header. virtualizer.scrollToOffset
+  // sets parent.scrollTop AND notifies the virtualizer to re-render.
   useEffect(() => {
     if (!virtualized || !selectedId) return;
     const idx = items.findIndex((a) => (a[idField] as string) === selectedId);
-    if (idx >= 0) virtualizer.scrollToIndex(idx, { align: "center" });
-  }, [selectedId, virtualized, items, idField, virtualizer]);
+    const parent = parentRef.current;
+    if (idx < 0 || !parent) return;
+    const headerH = headerElRef.current?.offsetHeight ?? 0;
+    const rowTop = idx * virtualRowHeight;
+    const rowBottom = rowTop + virtualRowHeight;
+    const viewTop = parent.scrollTop + headerH;
+    const viewBottom = parent.scrollTop + parent.clientHeight;
+    if (rowTop < viewTop) {
+      virtualizer.scrollToOffset(rowTop - headerH, { behavior: "smooth" });
+    } else if (rowBottom > viewBottom) {
+      virtualizer.scrollToOffset(rowBottom - parent.clientHeight, { behavior: "smooth" });
+    }
+  }, [selectedId, virtualized, items, idField, virtualRowHeight, virtualizer]);
 
   // Grid template shared by virtualized header + rows so columns align.
   const gridTemplateColumns = useMemo(
@@ -186,7 +227,11 @@ export default function AssetTable({
           />
         </div>
       </div>
-      <div ref={parentRef} className="overflow-auto w-full" style={{ flex: 1, minHeight: 0 }}>
+      <div
+        ref={parentRef}
+        className="overflow-auto w-full"
+        style={{ flex: 1, minHeight: 0 }}
+      >
         {loading ? (
           <div className="p-3 space-y-2 w-full">
             {Array.from({ length: 20 }).map((_, i) => (
@@ -232,6 +277,7 @@ export default function AssetTable({
           <div>
             {/* Sticky header — uses the same grid template as the rows. */}
             <div
+              ref={headerRef}
               className="sticky top-0 z-10 bg-card border-b border-border"
               style={{ display: "grid", gridTemplateColumns }}
             >
@@ -313,7 +359,7 @@ export default function AssetTable({
           // container. With a bare table, the outer parentRef div owns both
           // axes and the scrollbar lands at the container's bottom edge.
           <table className="w-full caption-bottom text-sm">
-            <TableHeader className="sticky top-0 z-10 bg-card">
+            <TableHeader ref={headerRef} className="sticky top-0 z-10 bg-card">
               <TableRow className="border-b border-border hover:bg-transparent">
                 {columns.map((col) => {
                   const sortable = !!col.getValue;
