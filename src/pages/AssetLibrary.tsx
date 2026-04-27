@@ -20,6 +20,7 @@ import { useLabelMap } from "@/contexts/LabelMapContext";
 import { useFrameImage } from "@/hooks/useFrameImage";
 import type { AssetRecord, MapData } from "@/types/asset";
 import { EMPTY_MAP_DATA } from "@/types/asset";
+import LinearAssetFrameSlider from "@/components/LinearAssetFrameSlider";
 import { buildAssetFromMapData, withConditionPatch } from "@/lib/mapData";
 import AssetFilterStrip from "@/components/asset-library/AssetFilterStrip";
 import AssetDetailSidebar from "@/components/asset-library/AssetDetailSidebar";
@@ -1088,6 +1089,11 @@ export default function AssetLibrary() {
                   pointIndex={0}
                   totalPoints={1}
                   onClose={() => setShowFullView(false)}
+                  loading={pointImageLoading}
+                />
+                <LinearAssetFrameSlider
+                  asset={selectedAsset}
+                  onFrameChange={(patch) => setSelectedAsset((prev) => prev ? { ...prev, ...patch } : prev)}
                 />
               </div>
             );

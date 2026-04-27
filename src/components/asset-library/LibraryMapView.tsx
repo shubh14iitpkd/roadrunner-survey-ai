@@ -7,7 +7,7 @@ import {
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import Supercluster from "supercluster";
-import type { MapData } from "@/types/asset";
+import type { MapData, LineKeypoint } from "@/types/asset";
 import { useLabelMap, type ResolvedMap } from "@/contexts/LabelMapContext";
 import { isAssetIconExist, getAssetIconFromId } from "@/components/settings/iconConfig";
 
@@ -59,15 +59,6 @@ function routeColor(key: string, selected: boolean): string {
   const lit = selected ? 55 : 50;
   return `hsl(${hue}, ${sat}%, ${lit}%)`;
 }
-
-/* ── Line keypoint type (fetched on-demand via /master/<id>/keypoints) ── */
-type LineKeypoint = {
-  frame: number;
-  lat: number;
-  lng: number;
-  side?: string | null;
-  box?: { x: number; y: number; width: number; height: number };
-};
 
 /** Per-row override that flows out of a click. Lines forward the snap
  *  point (lat/lng/frame/box of the nearest keypoint) so the page can show

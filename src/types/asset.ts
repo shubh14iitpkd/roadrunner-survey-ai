@@ -57,6 +57,17 @@ export interface AssetRecord {
   masterDisplayId?: string;
 }
 
+/** Single keypoint along a linear asset's line — observation point with
+ *  the frame/lat/lng/box of one detection. Fetched on-demand via
+ *  /api/assets/master/<id>/keypoints. */
+export type LineKeypoint = {
+  frame: number;
+  lat: number;
+  lng: number;
+  side?: string | null;
+  box?: { x: number; y: number; width: number; height: number };
+};
+
 /** Columnar map-points payload — parallel arrays of equal length `count`,
  *  consumed by LibraryMapView without per-row object allocations. The
  *  /master/map-points endpoint returns this shape verbatim (after

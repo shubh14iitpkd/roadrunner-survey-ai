@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { Layers, Eye, EyeOff, ZoomIn, ZoomOut } from 'lucide-react';
+import { Layers, Eye, EyeOff, ZoomIn, ZoomOut, Loader2 } from 'lucide-react';
 import { getCategoryColorCode } from '@/components/CategoryBadge';
 
 
@@ -50,6 +50,11 @@ interface FrameComparisonPopupProps {
   totalPoints: number;
   onClose: () => void;
   onNavigate?: (direction: 'prev' | 'next') => void;
+  /** True while the parent is fetching the next frame. When true the
+   *  component keeps the previous frame visible (sticky), shows a "Loading…"
+   *  hint instead of the "Frame not available" empty state, and renders a
+   *  sleek loader bar below the frames. */
+  loading?: boolean;
 }
 
 export default function FrameComparisonPopup({
@@ -59,6 +64,7 @@ export default function FrameComparisonPopup({
   totalPoints,
   onClose,
   onNavigate,
+  loading = false,
 }: FrameComparisonPopupProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
@@ -130,8 +136,20 @@ export default function FrameComparisonPopup({
     selectedCategories.has(d.category || 'Other')
   ).length || 0;
 
-  // Determine image source
-  const imageUrl = frameData.image_data || frameData.ai_image_url || frameData.raw_image_url;
+  // Determine image source. While `loading` is true keep showing the previous
+  // frame so scrubbing the linear-asset slider feels continuous instead of
+  // flashing the "Frame not available" placeholder between frames. Sticky URL
+  // resets when the underlying video changes (i.e. switching to a different
+  // asset).
+  const incomingUrl = frameData.image_data || frameData.ai_image_url || frameData.raw_image_url;
+  const [stickyUrl, setStickyUrl] = useState<string | undefined>(incomingUrl);
+  useEffect(() => {
+    if (incomingUrl) setStickyUrl(incomingUrl);
+  }, [incomingUrl]);
+  useEffect(() => {
+    setStickyUrl(undefined);
+  }, [frameData.videoId]);
+  const imageUrl = incomingUrl || (loading ? stickyUrl : undefined);
 
   return (
     <div className="p-2" style={{ width: '100%', fontSize: '13px' }}>
@@ -211,9 +229,10 @@ export default function FrameComparisonPopup({
               }}>
                 Raw Frame
               </div>
-              <div style={{ 
-                background: '#0f172a', 
-                borderRadius: '6px', 
+              <div style={{
+                position: 'relative',
+                background: '#0f172a',
+                borderRadius: '6px',
                 overflow: 'hidden',
                 aspectRatio: '16/9',
                 display: 'flex',
@@ -226,11 +245,12 @@ export default function FrameComparisonPopup({
                     alt="Raw frame"
                     style={{ width: '100%', height: '100%', objectFit: 'contain' }}
                   />
-                ) : (
+                ) : !loading && (
                   <div style={{ color: '#64748b', fontSize: '12px' }}>
                     Frame not available
                   </div>
                 )}
+                {loading && <FrameLoadingOverlay />}
               </div>
             </div>
 
@@ -273,18 +293,19 @@ export default function FrameComparisonPopup({
                       }}
                     />
                   </>
-                ) : (
-                  <div style={{ 
-                    display: 'flex', 
-                    alignItems: 'center', 
+                ) : !loading && (
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
                     justifyContent: 'center',
                     height: '100%',
-                    color: '#64748b', 
+                    color: '#64748b',
                     fontSize: '12px',
                   }}>
                     Frame not available
                   </div>
                 )}
+                {loading && <FrameLoadingOverlay />}
                 <div style={{
                   position: 'absolute',
                   top: '6px',
@@ -331,21 +352,46 @@ export default function FrameComparisonPopup({
                   }}
                 />
               </>
-            ) : (
-              <div style={{ 
+            ) : !loading && (
+              <div style={{
                 aspectRatio: '16/9',
-                display: 'flex', 
-                alignItems: 'center', 
+                display: 'flex',
+                alignItems: 'center',
                 justifyContent: 'center',
-                color: '#64748b', 
+                color: '#64748b',
                 fontSize: '12px',
               }}>
                 Frame not available
               </div>
             )}
+            {loading && <FrameLoadingOverlay />}
           </div>
         </TabsContent>
       </Tabs>
+    </div>
+  );
+}
+
+/* Full-frame blur overlay with a centered spinner. Sits on top of the
+ * (sticky) previous frame while a new frame is being fetched so the
+ * transition reads as "this content is updating" rather than blanking. */
+function FrameLoadingOverlay() {
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        inset: 0,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        backdropFilter: 'blur(6px)',
+        WebkitBackdropFilter: 'blur(6px)',
+        background: 'rgba(15, 23, 42, 0.35)',
+        pointerEvents: 'none',
+        zIndex: 5,
+      }}
+    >
+      <Loader2 className="h-7 w-7 animate-spin" style={{ color: 'rgba(255,255,255,0.95)' }} />
     </div>
   );
 }

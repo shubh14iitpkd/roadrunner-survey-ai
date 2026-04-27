@@ -4,6 +4,7 @@ import { useSearchParams, Link } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import LibraryMapView from "@/components/asset-library/LibraryMapView";
 import FrameComparisonPopup from "@/components/FrameComparisonPopup";
+import LinearAssetFrameSlider from "@/components/LinearAssetFrameSlider";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { api } from "@/lib/api";
@@ -1083,6 +1084,11 @@ export default function DefectLibrary() {
                       pointIndex={0}
                       totalPoints={1}
                       onClose={() => setShowFullView(false)}
+                      loading={pointImageLoading}
+                    />
+                    <LinearAssetFrameSlider
+                      asset={selectedDefect}
+                      onFrameChange={(patch) => setSelectedDefect((prev) => prev ? { ...prev, ...patch } : prev)}
                     />
                   </div>
                 );
