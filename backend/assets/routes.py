@@ -1,6 +1,7 @@
 import os
 import re
 import math
+import hashlib
 
 from flask import Blueprint, Response, jsonify, request
 from bson import ObjectId
@@ -518,7 +519,9 @@ def _map_points_full(db, query, include_defect):
 	if include_defect:
 		projection["latest_defect_id"] = 1
 		projection["issue"] = 1
-	cursor = db.master_assets.find(query, projection)
+	# batch_size(2000) cuts pymongo round-trips on large result sets — default
+	# 101 means a 50k-asset scan does ~500 GETMOREs, dominated by network RTT.
+	cursor = db.master_assets.find(query, projection).batch_size(2000)
 	return _build_columnar_points(cursor, include_defect, mode="full")
 
 
@@ -678,26 +681,55 @@ def get_master_map_points():
 	query = _build_master_filter(request.args)
 	include_defect = request.args.get("include_defect") in ("1", "true", "yes")
 
+	# Whitelist filter keys so junk params (cache-busters, future unrelated
+	# params) don't fragment the cache. include_defect already passed
+	# separately — kept out of the dict to avoid double-hashing.
+	filter_keys = ("route_id", "category", "condition", "zone", "side", "asset_type", "search")
+	cache_filters = {k: request.args.get(k) for k in filter_keys if request.args.get(k)}
+
 	# Cache key namespace bumped (v3) — prior shape included zoom/bbox/cluster
 	# variants that no longer exist. Stale entries under old keys would still
 	# sit under the 600s TTL otherwise.
 	# v4: response shape changed — `asset_type` and `kinds[]`/`route_names[]`
 	# replaced with `line_ids` set + `route_dict`. Bump the namespace so the
 	# old cached payloads don't poison the new client decoder.
+	# v5: whitelisted filter keys (was dict(request.args)).
 	cache_key = cache_make_key(
-		"assets:map:v4",
-		filters=dict(request.args),
+		"assets:map:v5",
+		filters=cache_filters,
 		include_defect=include_defect,
 	)
 	cached_body = cache_get_body(cache_key)
 	if cached_body is not None:
-		return Response(cached_body, status=200, mimetype="application/json")
+		return _conditional_response(cached_body)
 
 	resp = _map_points_full(db, query, include_defect)
 
 	# TTL 600s — payload depends only on master_assets state, invalidated on
 	# every write via invalidate_assets_cache().
-	cache_set_body(cache_key, resp.get_data(), ttl=600)
+	body = resp.get_data()
+	cache_set_body(cache_key, body, ttl=600)
+	return _conditional_response(body)
+
+
+def _conditional_response(body: bytes) -> Response:
+	"""Wrap a JSON body with ETag + Cache-Control. Returns 304 when the
+	client's If-None-Match matches — saves the wire transfer entirely on
+	repeat loads even when the Redis hit path also fires."""
+	etag = hashlib.md5(body).hexdigest()
+	if request.headers.get("If-None-Match") == etag:
+		resp = Response(status=304)
+	else:
+		resp = Response(body, status=200, mimetype="application/json")
+	resp.headers["ETag"] = etag
+	# no-cache (NOT no-store) — browser keeps body but revalidates every
+	# request via If-None-Match. Avoids the staleness window a max-age would
+	# create after a mutation: 304 still saves the payload on hit, 200
+	# delivers fresh body the moment Redis was invalidated by a write.
+	resp.headers["Cache-Control"] = "private, no-cache"
+	# Vary on Authorization — same URL with different bearer tokens (user
+	# logout/login in same browser) must not reuse the cached response.
+	resp.headers["Vary"] = "Authorization"
 	return resp
 
 

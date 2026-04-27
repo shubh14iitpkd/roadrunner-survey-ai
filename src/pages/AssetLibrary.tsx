@@ -315,7 +315,8 @@ export default function AssetLibrary() {
   const mapPointsQuery = useQuery({
     queryKey: qk.assets.mapPoints(serverFilters),
     queryFn: () => api.assets.getMasterMapPoints(serverFilters),
-    staleTime: 60_000,
+    staleTime: 60_000*5, // map points are relatively expensive to fetch and update, so cache aggressively
+    gcTime: 30 * 60_000,  
     placeholderData: (prev) => prev,
   });
   const mapData: MapData = (mapPointsQuery.data as MapData | undefined) ?? EMPTY_MAP_DATA;

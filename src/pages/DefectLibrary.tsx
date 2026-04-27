@@ -722,6 +722,10 @@ export default function DefectLibrary() {
       qc.invalidateQueries({ queryKey: ["assets", "pageOf"] });
       qc.invalidateQueries({ queryKey: ["assets", "neighbor"] });
       qc.invalidateQueries({ queryKey: ["assets", "conditionLogs"] });
+      // Map cache holds the optimistic patch — invalidate so the next
+      // refetch reconciles against server truth (catches fields the
+      // optimistic patch can't predict, e.g. defect_id changes).
+      qc.invalidateQueries({ queryKey: ["assets", "map"] });
     } catch (err: any) {
       // Roll back optimistic updates on failure.
       for (const { key, data } of snapshots) qc.setQueryData(key, data);
@@ -754,6 +758,7 @@ export default function DefectLibrary() {
       qc.invalidateQueries({ queryKey: ["assets", "pageOf"] });
       qc.invalidateQueries({ queryKey: ["assets", "neighbor"] });
       qc.invalidateQueries({ queryKey: ["assets", "conditionLogs"] });
+      qc.invalidateQueries({ queryKey: ["assets", "map"] });
     } catch (err: any) {
       for (const { key, data } of snapshots) qc.setQueryData(key, data);
       toast.error(err?.message || "Failed to revert asset");
@@ -806,6 +811,7 @@ export default function DefectLibrary() {
       if (editIssueAsset.masterDisplayId) {
         qc.invalidateQueries({ queryKey: qk.assets.detail(editIssueAsset.masterDisplayId) });
       }
+      qc.invalidateQueries({ queryKey: ["assets", "map"] });
       toast.success("Issue updated");
       setEditIssueAsset(null);
     } catch (err: any) {
