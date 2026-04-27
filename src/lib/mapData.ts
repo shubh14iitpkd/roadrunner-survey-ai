@@ -66,8 +66,6 @@ export function buildAssetFromMapData(
   if (extras) {
     if (extras.classification) rec.classification = extras.classification as AssetRecord["classification"];
     if (extras.geometry) rec.geometry = extras.geometry;
-    if (extras.first_frame !== undefined) rec.firstFrame = extras.first_frame;
-    if (extras.last_frame !== undefined) rec.lastFrame = extras.last_frame;
   }
   return rec;
 }

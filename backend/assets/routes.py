@@ -1,9 +1,14 @@
 import os
 import re
 import math
+import time
+import gzip
+import logging
 import hashlib
 
 from flask import Blueprint, Response, jsonify, request
+
+log = logging.getLogger(__name__)
 from bson import ObjectId
 from pymongo import ASCENDING, DESCENDING
 
@@ -507,14 +512,13 @@ def _map_points_full(db, query, include_defect):
 		"route_name": 1,
 		"category_id": 1,
 		# Linear-asset fields. keypoints fetched on-demand via /master/<id>/keypoints.
-		# geometry_simplified preferred (Douglas-Peucker ~2m); full geometry via
-		# /master/<id>/geometry.
+		# Bulk ships ONLY geometry_simplified (Douglas-Peucker ~2m). Full
+		# `geometry` is fetched on-click via /master/<id>/geometry — no point
+		# paying the wire cost for every line on initial paint.
+		# first_frame/last_frame previously projected but never read by frontend.
 		"kind": 1,
 		"classification": 1,
-		"geometry": 1,
 		"geometry_simplified": 1,
-		"first_frame": 1,
-		"last_frame": 1,
 	}
 	if include_defect:
 		projection["latest_defect_id"] = 1
@@ -522,7 +526,13 @@ def _map_points_full(db, query, include_defect):
 	# batch_size(2000) cuts pymongo round-trips on large result sets — default
 	# 101 means a 50k-asset scan does ~500 GETMOREs, dominated by network RTT.
 	cursor = db.master_assets.find(query, projection).batch_size(2000)
-	return _build_columnar_points(cursor, include_defect, mode="full")
+	t0 = time.perf_counter()
+	resp = _build_columnar_points(cursor, include_defect, mode="full")
+	t1 = time.perf_counter()
+	# Profiling: cursor drain + Python loop + orjson serialize, all-in. Pair
+	# with the count from the response to spot loop-vs-network dominance.
+	print(f"[map-points] build={t1 - t0:.3f}s bytes={len(resp.get_data())} query={query}", flush=True)
+	return resp
 
 
 
@@ -599,13 +609,13 @@ def _build_columnar_points(cursor, include_defect, mode):
 			classification = doc.get("classification")
 			if classification:
 				extras["classification"] = classification
-			geom = doc.get("geometry_simplified") or doc.get("geometry")
+			# Simplified geometry only — full geometry fetched on-click via
+			# /master/<id>/geometry. Lines without simplified geometry won't
+			# render until clicked (data should be backfilled via
+			# migrate_simplify_line_geometry.py).
+			geom = doc.get("geometry_simplified")
 			if geom:
 				extras["geometry"] = geom
-			if doc.get("first_frame") is not None:
-				extras["first_frame"] = doc.get("first_frame")
-			if doc.get("last_frame") is not None:
-				extras["last_frame"] = doc.get("last_frame")
 			if extras and display_id:
 				line_extras[display_id] = extras
 
@@ -694,33 +704,58 @@ def get_master_map_points():
 	# replaced with `line_ids` set + `route_dict`. Bump the namespace so the
 	# old cached payloads don't poison the new client decoder.
 	# v5: whitelisted filter keys (was dict(request.args)).
+	# v6: store gzip-compressed body in Redis (was raw orjson). Skips the
+	# Flask-Compress re-gzip on every cache hit (~22MB → 4MB takes ~150ms
+	# of CPU each time; storing compressed amortizes that across the TTL).
+	# v7: dropped full `geometry` fallback + first_frame/last_frame from
+	# line_extras — frontend never read them. Bump so old payloads expire.
 	cache_key = cache_make_key(
-		"assets:map:v5",
+		"assets:map:v7",
 		filters=cache_filters,
 		include_defect=include_defect,
 	)
-	cached_body = cache_get_body(cache_key)
-	if cached_body is not None:
-		return _conditional_response(cached_body)
+	cached_gz = cache_get_body(cache_key)
+	if cached_gz is not None:
+		return _conditional_response_gz(cached_gz)
 
 	resp = _map_points_full(db, query, include_defect)
 
+	# Compress once. compresslevel=6 is the gzip default — good ratio/CPU
+	# tradeoff; level 9 saves ~3% more bytes for ~2x the CPU.
+	body = resp.get_data()
+	body_gz = gzip.compress(body, compresslevel=6)
 	# TTL 600s — payload depends only on master_assets state, invalidated on
 	# every write via invalidate_assets_cache().
-	body = resp.get_data()
-	cache_set_body(cache_key, body, ttl=600)
-	return _conditional_response(body)
+	cache_set_body(cache_key, body_gz, ttl=600)
+	return _conditional_response_gz(body_gz)
 
 
-def _conditional_response(body: bytes) -> Response:
-	"""Wrap a JSON body with ETag + Cache-Control. Returns 304 when the
-	client's If-None-Match matches — saves the wire transfer entirely on
-	repeat loads even when the Redis hit path also fires."""
-	etag = hashlib.md5(body).hexdigest()
+def _conditional_response_gz(body_gz: bytes) -> Response:
+	"""Serve a pre-gzipped body. ETag is computed from the compressed bytes
+	(opaque per RFC 7232) so the same bytes always round-trip the same
+	If-None-Match value. Sets Content-Encoding: gzip — Flask-Compress sees
+	the header and skips its own pass.
+
+	Falls back to decompression for the rare client that doesn't advertise
+	gzip support (curl without -H, ancient bots). Modern browsers all do."""
+	etag = hashlib.md5(body_gz).hexdigest()
 	if request.headers.get("If-None-Match") == etag:
 		resp = Response(status=304)
+		resp.headers["ETag"] = etag
+		resp.headers["Cache-Control"] = "private, no-cache"
+		resp.headers["Vary"] = "Authorization, Accept-Encoding"
+		return resp
+
+	accept = request.headers.get("Accept-Encoding", "")
+	if "gzip" in accept:
+		resp = Response(body_gz, status=200, mimetype="application/json")
+		resp.headers["Content-Encoding"] = "gzip"
+		resp.headers["Content-Length"] = str(len(body_gz))
 	else:
-		resp = Response(body, status=200, mimetype="application/json")
+		raw = gzip.decompress(body_gz)
+		resp = Response(raw, status=200, mimetype="application/json")
+		resp.headers["Content-Length"] = str(len(raw))
+
 	resp.headers["ETag"] = etag
 	# no-cache (NOT no-store) — browser keeps body but revalidates every
 	# request via If-None-Match. Avoids the staleness window a max-age would
@@ -729,7 +764,8 @@ def _conditional_response(body: bytes) -> Response:
 	resp.headers["Cache-Control"] = "private, no-cache"
 	# Vary on Authorization — same URL with different bearer tokens (user
 	# logout/login in same browser) must not reuse the cached response.
-	resp.headers["Vary"] = "Authorization"
+	# Vary on Accept-Encoding — gzip vs raw bodies must not alias.
+	resp.headers["Vary"] = "Authorization, Accept-Encoding"
 	return resp
 
 

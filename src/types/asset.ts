@@ -37,8 +37,6 @@ export interface AssetRecord {
     side?: string | null;
     box?: { x: number; y: number; width: number; height: number };
   }[];
-  firstFrame?: number;
-  lastFrame?: number;
   /** UI-only: true when this asset has been marked as good in this session */
   isGood?: boolean;
   /** Cross-survey timeline from master_assets.survey_history */
@@ -91,8 +89,6 @@ export interface MapData {
   line_extras: Record<string, {
     classification?: string;
     geometry?: { type: "LineString"; coordinates: [number, number][] };
-    first_frame?: number;
-    last_frame?: number;
   }>;
 }
 

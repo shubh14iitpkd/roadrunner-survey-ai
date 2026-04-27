@@ -264,8 +264,6 @@ export const api = {
 				line_extras: (resp.line_extras || {}) as Record<string, {
 					classification?: string;
 					geometry?: { type: "LineString"; coordinates: [number, number][] };
-					first_frame?: number;
-					last_frame?: number;
 				}>,
 			};
 		},
