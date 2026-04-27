@@ -191,7 +191,7 @@ export default function AssetLibrary() {
 
   // ── Server-side table pagination state ──
   const [tablePage, setTablePage] = useState(1);
-  const [tablePageSize, setTablePageSize] = useState(50);
+  const [tablePageSize, setTablePageSize] = useState(10);
 
   // ── Map transition loading state ──
   const [mapTransitioning, setMapTransitioning] = useState(false);
@@ -321,49 +321,46 @@ export default function AssetLibrary() {
   const mapData: MapData = (mapPointsQuery.data as MapData | undefined) ?? EMPTY_MAP_DATA;
 
   // Reset table page whenever filters change so the user doesn't land on an
-  // empty page-N of the new filter set.
-  useEffect(() => { setTablePage(1); }, [serverFilters]);
-
-  // Auto-jump the table to the page containing the selected asset — but only
-  // once per selection. After the jump, user is free to flip pages with
-  // prev/next without losing the highlight or being yanked back.
-  // Map-clicks vs table-clicks both flow through here: if the asset is 
-  // already on the current page, page-of returns the same page → no-op.
-  const lastJumpedForRef = useRef<string | null>(null);
+  // empty page-N of the new filter set. Also drop the current selection —
+  // a filtered-out asset still pinned in the sidebar would desync the map
+  // highlight, page-of jumping, and prev/next navigation.
   useEffect(() => {
-    const id = selectedAsset?.masterDisplayId;
-    if (!id) { lastJumpedForRef.current = null; return; }
-    if (lastJumpedForRef.current === id) return;
-    lastJumpedForRef.current = id;
-    let cancelled = false;
+    setTablePage(1);
+    setSelectedAsset(null);
+  }, [serverFilters]);
+
+  // Jump the table to the page containing the given asset. Called explicitly
+  // on user-initiated selections that may land off the current page (map
+  // click, sidebar prev/next). NOT called for table row clicks — the row is
+  // by definition already on the current page.
+  // Tracks the in-flight token so rapid clicks discard stale resolutions.
+  const jumpTokenRef = useRef(0);
+  const jumpTablePageToAsset = useCallback(async (masterDisplayId: string) => {
+    const token = ++jumpTokenRef.current;
     const sortParams = {
       filters: serverFilters,
       limit: tablePageSize,
       sort_key: sortKey ?? "lastSurveyDate",
       sort_dir: sortDir,
     };
-    (async () => {
-      try {
-        const resp = await qc.fetchQuery({
-          queryKey: qk.assets.pageOf(id, sortParams),
-          queryFn: () => api.assets.getMasterPageOf(id, {
-            limit: sortParams.limit,
-            sort_key: sortParams.sort_key,
-            sort_dir: sortParams.sort_dir,
-            ...serverFilters,
-          }),
-          staleTime: 60_000,
-        });
-        const page = resp?.page;
-        if (!cancelled && typeof page === "number" && page >= 1) {
-          setTablePage(page);
-        }
-      } catch {
-        // page-of resolution failed — leave current page alone
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [selectedAsset?.masterDisplayId, tablePageSize, sortKey, sortDir, serverFilters, qc]);
+    try {
+      const resp = await qc.fetchQuery({
+        queryKey: qk.assets.pageOf(masterDisplayId, sortParams),
+        queryFn: () => api.assets.getMasterPageOf(masterDisplayId, {
+          limit: sortParams.limit,
+          sort_key: sortParams.sort_key,
+          sort_dir: sortParams.sort_dir,
+          ...serverFilters,
+        }),
+        staleTime: 60_000,
+      });
+      if (token !== jumpTokenRef.current) return;
+      const page = resp?.page;
+      if (typeof page === "number" && page >= 1) setTablePage(page);
+    } catch {
+      // page-of resolution failed — leave current page alone
+    }
+  }, [serverFilters, tablePageSize, sortKey, sortDir, qc]);
 
   // Server-paginated table. Filters + sort + page round-trip; results are
   // already filtered/sorted/sliced — frontend renders as-is.
@@ -385,14 +382,6 @@ export default function AssetLibrary() {
     staleTime: 60_000,
     placeholderData: (prev) => prev,
   });
-
-  // Clear selected asset when route changes (mirrors prior behavior).
-  const prevRouteIdRef = useRef<number | null>(selectedRouteId);
-  useEffect(() => {
-    if (prevRouteIdRef.current === selectedRouteId) return;
-    prevRouteIdRef.current = selectedRouteId;
-    setSelectedAsset(null);
-  }, [selectedRouteId]);
 
   const loading = mapPointsQuery.isLoading || mapPointsQuery.isFetching;
   const loadError = mapPointsQuery.isError;
@@ -439,6 +428,25 @@ export default function AssetLibrary() {
   tableAssetsRef.current = tableAssets;
   const tableTotalCount = paginatedQuery.data?.total_count ?? 0;
   const tableTotalPages = paginatedQuery.data?.total_pages ?? 1;
+
+  // Server-aware prev/next availability for the sidebar nav buttons.
+  // navigateAsset hits /master/neighbor regardless of page, so we only need
+  // to disable at the absolute boundaries of the filtered set. When the
+  // selected asset isn't on the current page, assume both directions are
+  // available (server will no-op at true boundaries).
+  const selectedIdxOnPage = selectedAsset
+    ? tableAssets.findIndex(a => a.assetDisplayId === selectedAsset.assetDisplayId)
+    : -1;
+  const hasPrevAsset = !selectedAsset
+    ? false
+    : selectedIdxOnPage === -1
+      ? true
+      : !(tablePage === 1 && selectedIdxOnPage === 0);
+  const hasNextAsset = !selectedAsset
+    ? false
+    : selectedIdxOnPage === -1
+      ? true
+      : !(tablePage === tableTotalPages && selectedIdxOnPage === tableAssets.length - 1);
 
   // ── Lazy detail loader ──
   // Fetches survey_history + full description/issue for one selected asset.
@@ -598,10 +606,11 @@ export default function AssetLibrary() {
       setSelectedSurveyIdx(0);
       setMarkerPopup(null);
       fetchAndMergeDetail(next);
+      jumpTablePageToAsset(next.masterDisplayId!);
     } catch {
       // Neighbor fetch failed — silently no-op (user can keep navigating later).
     }
-  }, [selectedAsset, sortKey, sortDir, serverFilters, fetchAndMergeDetail, qc]);
+  }, [selectedAsset, sortKey, sortDir, serverFilters, fetchAndMergeDetail, qc, jumpTablePageToAsset]);
 
   const handleRowClick = useCallback((asset: AssetRecord) => {
     setSelectedAsset(asset);
@@ -632,7 +641,8 @@ export default function AssetLibrary() {
       if (overrides.lng !== undefined) rec.lng = overrides.lng;
     }
     handleRowClick(rec);
-  }, [mapData, handleRowClick]);
+    if (rec.masterDisplayId) jumpTablePageToAsset(rec.masterDisplayId);
+  }, [mapData, handleRowClick, jumpTablePageToAsset]);
 
   const [exporting, setExporting] = useState(false);
   const handleExportExcel = async () => {
@@ -995,6 +1005,8 @@ export default function AssetLibrary() {
           frameHeight={frameHeight}
           imageLoading={pointImageLoading}
           filteredAssets={tableAssets}
+          hasPrev={hasPrevAsset}
+          hasNext={hasNextAsset}
           onCloseAsset={() => setSelectedAsset(null)}
           getAssetDisplayName={getAssetDisplayName}
           onNavigate={navigateAsset}
@@ -1456,13 +1468,14 @@ export default function AssetLibrary() {
             setSortDir("asc");
           }
           setTablePage(1);
+          setSelectedAsset(null);
         }}
         serverPage={tablePage}
         serverPageSize={tablePageSize}
         serverTotalPages={tableTotalPages}
         serverTotalCount={tableTotalCount}
-        onPageChange={setTablePage}
-        onPageSizeChange={(size) => { setTablePageSize(size); setTablePage(1); }}
+        onPageChange={(p) => { setTablePage(p); setSelectedAsset(null); }}
+        onPageSizeChange={(size) => { setTablePageSize(size); setTablePage(1); setSelectedAsset(null); }}
       />
     </div>
   );

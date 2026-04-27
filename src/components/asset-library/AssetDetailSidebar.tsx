@@ -246,6 +246,10 @@ interface AssetDetailSidebarProps {
   frameHeight: number;
   imageLoading: boolean;
   filteredAssets: AssetRecord[];
+  /** Server-aware prev/next availability. When omitted, falls back to
+   *  filteredAssets index — only correct for fully-in-memory tables. */
+  hasPrev?: boolean;
+  hasNext?: boolean;
   onCloseAsset: () => void;
   onNavigate: (dir: "prev" | "next") => void;
   onFullView: () => void;
@@ -266,6 +270,8 @@ export default function AssetDetailSidebar({
   frameHeight,
   imageLoading,
   filteredAssets,
+  hasPrev,
+  hasNext,
   onCloseAsset,
   onNavigate,
   onFullView,
@@ -318,6 +324,11 @@ export default function AssetDetailSidebar({
   const selectedIdx = selectedAsset
     ? filteredAssets.findIndex((a) => a.assetDisplayId === selectedAsset.assetDisplayId)
     : -1;
+
+  // Server-aware nav availability: parent computes against full filtered set.
+  // Fallback to local-page index when not provided (in-memory consumers).
+  const prevDisabled = hasPrev != null ? !hasPrev : selectedIdx <= 0;
+  const nextDisabled = hasNext != null ? !hasNext : selectedIdx >= filteredAssets.length - 1;
 
   // ── Draw bounding box annotation on canvas overlay ──
   // Depends on drawTrigger which is incremented after img.onLoad, ensuring valid dimensions
@@ -581,7 +592,7 @@ export default function AssetDetailSidebar({
                 variant="outline"
                 size="icon"
                 className="h-6 w-6 shrink-0"
-                disabled={selectedIdx <= 0}
+                disabled={prevDisabled}
                 onClick={() => onNavigate("prev")}
               >
                 <ChevronLeft className="h-3 w-3" />
@@ -599,7 +610,7 @@ export default function AssetDetailSidebar({
                 variant="outline"
                 size="icon"
                 className="h-6 w-6 shrink-0"
-                disabled={selectedIdx >= filteredAssets.length - 1}
+                disabled={nextDisabled}
                 onClick={() => onNavigate("next")}
               >
                 <ChevronRight className="h-3 w-3" />

@@ -810,17 +810,48 @@ def search_master_assets():
 	return fast_mongo_response({"ids": ids, "count": len(ids)})
 
 
-# Valid sort keys and their corresponding MongoDB field names
+# Valid sort keys and their corresponding MongoDB field names. Both the
+# canonical names ("roadName", "lastSurveyDate") and the column-key aliases
+# the frontend tables actually emit ("road", "survey") map to the same
+# fields. "category" is intentionally omitted: it sorts on the display name
+# resolved via system_asset_categories, not the raw category_id, so all three
+# endpoints (paginated, page-of, neighbor) handle it via aggregation.
 _SORT_KEY_MAP = {
 	"assetDisplayId": "master_display_id",
 	"defectId": "latest_defect_id",
 	"assetType": "asset_type",
 	"condition": "latest_condition",
 	"roadName": "route_name",
+	"road": "route_name",
 	"side": "side",
 	"zone": "zone",
 	"lastSurveyDate": "last_seen_date",
+	"survey": "last_seen_date",
 }
+
+
+def _category_sort_branches(db):
+	"""Build the $switch branches that resolve `category_id` → display name.
+	Used by paginated / page-of / neighbor when the client sorts by category,
+	so all three agree on the same display-name ordering."""
+	branches = []
+	for cat in db.system_asset_categories.find({}, {"category_id": 1, "display_name": 1, "_id": 0}):
+		branches.append({
+			"case": {"$eq": ["$category_id", cat["category_id"]]},
+			"then": cat.get("display_name", cat["category_id"]),
+		})
+	return branches
+
+
+def _category_sort_value(db, category_id: str) -> str:
+	"""Resolve a single asset's display-name sort value the same way the
+	$switch above would. Used to anchor page-of / neighbor comparisons."""
+	if not category_id:
+		return ""
+	doc = db.system_asset_categories.find_one(
+		{"category_id": category_id}, {"display_name": 1, "_id": 0}
+	)
+	return (doc or {}).get("display_name") or category_id
 
 
 @assets_bp.get("/master/paginated", endpoint="assets_master_paginated")
@@ -934,34 +965,24 @@ def get_master_assets_paginated():
 	total_count = db.master_assets.count_documents(query)
 	total_pages = math.ceil(total_count / limit) if total_count > 0 else 1
 
-	# Category sort needs special handling: sort by display name, not raw category_id
+	# Category sort runs through aggregation so the display name (not the raw
+	# category_id) drives the order. _id ASC is the deterministic tiebreaker
+	# that page-of / neighbor also use.
 	if sort_key_param == "category":
-		# Build category_id → display_name mapping from system_asset_categories
-		cat_branches = []
-		for cat in db.system_asset_categories.find({}, {"category_id": 1, "display_name": 1, "_id": 0}):
-			cat_branches.append({
-				"case": {"$eq": ["$category_id", cat["category_id"]]},
-				"then": cat.get("display_name", cat["category_id"]),
-			})
-		add_sort_field = {"$addFields": {
-			"_cat_sort": {"$switch": {"branches": cat_branches, "default": {"$ifNull": ["$category_id", ""]}}}
-		}}
-
-		# Paginated items via aggregation
+		branches = _category_sort_branches(db)
 		items_cursor = db.master_assets.aggregate([
 			{"$match": query},
 			{"$project": projection},
-			add_sort_field,
-			{"$sort": {"_cat_sort": mongo_sort_dir}},
+			{"$addFields": {"_cat_sort": {"$switch": {"branches": branches, "default": {"$ifNull": ["$category_id", ""]}}}}},
+			{"$sort": {"_cat_sort": mongo_sort_dir, "_id": ASCENDING}},
 			{"$skip": skip},
 			{"$limit": limit},
 			{"$project": {"_cat_sort": 0}},
 		])
 	else:
 		mongo_sort_key = _SORT_KEY_MAP.get(sort_key_param, "last_seen_date")
-
 		items_cursor = db.master_assets.find(query, projection) \
-			.sort(mongo_sort_key, mongo_sort_dir) \
+			.sort([(mongo_sort_key, mongo_sort_dir), ("_id", ASCENDING)]) \
 			.skip(skip) \
 			.limit(limit)
 
@@ -985,22 +1006,33 @@ def get_master_assets_paginated():
 	return resp
 
 
+def _and_combine(base_query: dict, extra_clause: dict) -> dict:
+	"""Merge `extra_clause` into `base_query` so a top-level `$or` on either
+	side survives. Plain dict-spread overwrites duplicate keys — the search
+	regex puts `$or` into base_query and the page-of/neighbor tiebreaker also
+	uses `$or`, so naive spread silently drops the search filter."""
+	# Only $or actually collides today; if neither side has $or, fall back to
+	# a cheap spread.
+	if "$or" not in base_query and "$or" not in extra_clause:
+		return {**base_query, **extra_clause}
+	merged = {k: v for k, v in base_query.items() if k != "$or"}
+	merged.update({k: v for k, v in extra_clause.items() if k != "$or"})
+	clauses = []
+	if "$or" in base_query:
+		clauses.append({"$or": base_query["$or"]})
+	if "$or" in extra_clause:
+		clauses.append({"$or": extra_clause["$or"]})
+	merged["$and"] = clauses
+	return merged
+
+
 def _resolve_sort_field(args):
 	"""Resolve the frontend sort_key query param to the mongo field used by the
 	paginated table. Returns (field_name, mongo_sort_dir). Falls back to
-	last_seen_date on unknown keys, matching /master/paginated.
-
-	Category sort is currently unsupported here — it requires the same
-	display-name $switch mapping used on the paginated endpoint. Callers
-	should fall back to last_seen_date when sort_key == 'category'.
-	"""
+	last_seen_date on unknown keys, matching /master/paginated."""
 	sort_key_param = args.get("sort_key", "lastSurveyDate")
 	sort_dir_param = args.get("sort_dir", "desc")
 	mongo_sort_dir = DESCENDING if sort_dir_param == "desc" else ASCENDING
-	if sort_key_param == "category":
-		# Category sort not yet supported on page-of / neighbor — degrade to
-		# the default table order so the nav still works.
-		return "last_seen_date", mongo_sort_dir
 	field = _SORT_KEY_MAP.get(sort_key_param, "last_seen_date")
 	return field, mongo_sort_dir
 
@@ -1021,25 +1053,64 @@ def get_master_page_of(master_display_id: str):
 	db = get_db()
 	limit = min(100, max(1, request.args.get("limit", 10, type=int)))
 
-	sort_field, mongo_sort_dir = _resolve_sort_field(request.args)
+	sort_key_param = request.args.get("sort_key", "lastSurveyDate")
+	sort_dir_param = request.args.get("sort_dir", "desc")
+	mongo_sort_dir = DESCENDING if sort_dir_param == "desc" else ASCENDING
 
+	base_query = _build_master_filter(request.args)
+	cmp_op = "$gt" if mongo_sort_dir == DESCENDING else "$lt"
+
+	# Category sort needs the same display-name resolution paginated does, so
+	# the page index this returns matches the row order rendered in the table.
+	if sort_key_param == "category":
+		clicked = db.master_assets.find_one(
+			{"master_display_id": master_display_id},
+			{"category_id": 1},
+		)
+		if not clicked:
+			return jsonify({"error": "not found"}), 404
+		clicked_cat_sort = _category_sort_value(db, clicked.get("category_id") or "")
+		clicked_id = clicked["_id"]
+		branches = _category_sort_branches(db)
+		pipeline = [
+			{"$match": base_query},
+			{"$addFields": {"_cat_sort": {"$switch": {"branches": branches, "default": {"$ifNull": ["$category_id", ""]}}}}},
+			{"$match": {"$or": [
+				{"_cat_sort": {cmp_op: clicked_cat_sort}},
+				{"_cat_sort": clicked_cat_sort, "_id": {"$lt": clicked_id}},
+			]}},
+			{"$count": "n"},
+		]
+		result = list(db.master_assets.aggregate(pipeline))
+		before_count = result[0]["n"] if result else 0
+		page = before_count // limit + 1
+		return jsonify({"page": page})
+
+	sort_field = _SORT_KEY_MAP.get(sort_key_param, "last_seen_date")
 	clicked = db.master_assets.find_one(
 		{"master_display_id": master_display_id},
-		{sort_field: 1, "_id": 0},
+		{sort_field: 1},
 	)
 	if not clicked:
 		return jsonify({"error": "not found"}), 404
 
 	sort_val = clicked.get(sort_field)
+	clicked_id = clicked["_id"]
 
-	query = _build_master_filter(request.args)
-	# Count docs that sort strictly *before* the clicked asset.
-	cmp_op = "$gt" if mongo_sort_dir == DESCENDING else "$lt"
+	# Count docs that sort strictly *before* the clicked asset under
+	# (sort_field, _id) ordering — _id is the stable tiebreaker the paginated
+	# endpoint also uses, so ties on non-unique sort fields don't undercount.
 	if sort_val is None:
 		# Nulls sort to the end (asc) / start (desc) in mongo — treat as 0 before.
 		before_count = 0
 	else:
-		query[sort_field] = {cmp_op: sort_val}
+		# Compose with base_query via $and so a search regex (which uses $or
+		# inside _build_master_filter) isn't clobbered by the tiebreaker $or.
+		sort_clause = {"$or": [
+			{sort_field: {cmp_op: sort_val}},
+			{sort_field: sort_val, "_id": {"$lt": clicked_id}},
+		]}
+		query = _and_combine(base_query, sort_clause)
 		before_count = db.master_assets.count_documents(query)
 
 	page = before_count // limit + 1
@@ -1063,31 +1134,26 @@ def get_master_neighbor(master_display_id: str):
 	if direction not in ("next", "prev"):
 		return jsonify({"error": "direction must be 'next' or 'prev'"}), 400
 
-	sort_field, mongo_sort_dir = _resolve_sort_field(request.args)
+	sort_key_param = request.args.get("sort_key", "lastSurveyDate")
+	sort_dir_param = request.args.get("sort_dir", "desc")
+	mongo_sort_dir = DESCENDING if sort_dir_param == "desc" else ASCENDING
 
-	current = db.master_assets.find_one(
-		{"master_display_id": master_display_id},
-		{sort_field: 1, "_id": 0},
-	)
-	if not current:
-		return jsonify({"error": "not found"}), 404
-
-	sort_val = current.get(sort_field)
-	if sort_val is None:
-		return jsonify({"item": None})
-
-	query = _build_master_filter(request.args)
-
-	# direction=next moves with the current sort; direction=prev moves against it.
+	# direction=next moves with the current sort; direction=prev moves against
+	# it. _id is the stable tiebreaker the paginated endpoint also uses, so
+	# ties on non-unique sort fields (condition, side, zone, route, category,
+	# …) don't strand or skip neighbors that share the current sort value.
 	if direction == "next":
 		cmp_op = "$lt" if mongo_sort_dir == DESCENDING else "$gt"
 		scan_dir = mongo_sort_dir
+		tie_id_op = "$gt"
+		id_dir = ASCENDING
 	else:
 		cmp_op = "$gt" if mongo_sort_dir == DESCENDING else "$lt"
 		scan_dir = ASCENDING if mongo_sort_dir == DESCENDING else DESCENDING
+		tie_id_op = "$lt"
+		id_dir = DESCENDING
 
-	query[sort_field] = {cmp_op: sort_val}
-
+	base_query = _build_master_filter(request.args)
 	projection = {
 		"_id": 1, "master_display_id": 1, "asset_id": 1, "asset_type": 1,
 		"group_id": 1, "category_id": 1, "side": 1, "zone": 1,
@@ -1098,7 +1164,62 @@ def get_master_neighbor(master_display_id: str):
 		"last_seen_date": 1, "total_surveys_detected": 1,
 	}
 
-	neighbor = db.master_assets.find_one(query, projection, sort=[(sort_field, scan_dir)])
+	# Category sort uses the same display-name resolution paginated does, so
+	# the neighbor returned matches the row that visually sits next to the
+	# current one in the table.
+	if sort_key_param == "category":
+		current = db.master_assets.find_one(
+			{"master_display_id": master_display_id},
+			{"category_id": 1},
+		)
+		if not current:
+			return jsonify({"error": "not found"}), 404
+		current_cat_sort = _category_sort_value(db, current.get("category_id") or "")
+		current_id = current["_id"]
+		branches = _category_sort_branches(db)
+		pipeline = [
+			{"$match": base_query},
+			{"$addFields": {"_cat_sort": {"$switch": {"branches": branches, "default": {"$ifNull": ["$category_id", ""]}}}}},
+			{"$match": {"$or": [
+				{"_cat_sort": {cmp_op: current_cat_sort}},
+				{"_cat_sort": current_cat_sort, "_id": {tie_id_op: current_id}},
+			]}},
+			{"$sort": {"_cat_sort": scan_dir, "_id": id_dir}},
+			{"$limit": 1},
+			{"$project": projection},
+		]
+		docs = list(db.master_assets.aggregate(pipeline))
+		if not docs:
+			return jsonify({"item": None})
+		neighbor = docs[0]
+		neighbor["_id"] = str(neighbor["_id"])
+		if neighbor.get("latest_survey_id"):
+			neighbor["latest_survey_id"] = str(neighbor["latest_survey_id"])
+		return fast_mongo_response({"item": neighbor})
+
+	sort_field = _SORT_KEY_MAP.get(sort_key_param, "last_seen_date")
+	current = db.master_assets.find_one(
+		{"master_display_id": master_display_id},
+		{sort_field: 1},
+	)
+	if not current:
+		return jsonify({"error": "not found"}), 404
+
+	sort_val = current.get(sort_field)
+	if sort_val is None:
+		return jsonify({"item": None})
+	current_id = current["_id"]
+
+	# Compose with base_query via $and so a search regex (which uses $or
+	# inside _build_master_filter) isn't clobbered by the tiebreaker $or.
+	sort_clause = {"$or": [
+		{sort_field: {cmp_op: sort_val}},
+		{sort_field: sort_val, "_id": {tie_id_op: current_id}},
+	]}
+	query = _and_combine(base_query, sort_clause)
+
+	# Sort by (sort_field, _id) so the tiebreaker matches paginated row order.
+	neighbor = db.master_assets.find_one(query, projection, sort=[(sort_field, scan_dir), ("_id", id_dir)])
 	if not neighbor:
 		return jsonify({"item": None})
 

@@ -246,7 +246,7 @@ export default function DefectLibrary() {
 
   // ── Server-side table pagination state ──
   const [tablePage, setTablePage] = useState(1);
-  const [tablePageSize, setTablePageSize] = useState(50);
+  const [tablePageSize, setTablePageSize] = useState(10);
   const tableAssetsRef = useRef<AssetRecord[]>([]);
 
   // Debounced text search for server-side filtering.
@@ -369,15 +369,13 @@ export default function DefectLibrary() {
   });
   const mapData: MapData = (mapPointsQuery.data as MapData | undefined) ?? EMPTY_MAP_DATA;
 
-  // Reset page on filter change.
-  useEffect(() => { setTablePage(1); }, [serverFilters]);
-  // Clear selected defect on route change.
-  const prevRouteIdRef = useRef<number | null>(selectedRouteId);
+  // Reset page + drop selection on filter change. A filtered-out defect
+  // pinned in the sidebar would desync map highlight, page-of jumping, and
+  // prev/next navigation.
   useEffect(() => {
-    if (prevRouteIdRef.current === selectedRouteId) return;
-    prevRouteIdRef.current = selectedRouteId;
+    setTablePage(1);
     setSelectedDefect(null);
-  }, [selectedRouteId]);
+  }, [serverFilters]);
 
   const paginatedQuery = useQuery({
     queryKey: qk.assets.paginated({
@@ -440,6 +438,25 @@ export default function DefectLibrary() {
   tableAssetsRef.current = tableAssets;
   const tableTotalCount = paginatedQuery.data?.total_count ?? 0;
   const tableTotalPages = paginatedQuery.data?.total_pages ?? 1;
+
+  // Server-aware prev/next availability for the sidebar nav buttons.
+  // navigateDefects hits /master/neighbor regardless of page, so we only need
+  // to disable at the absolute boundaries of the filtered set. When the
+  // selected defect isn't on the current page, assume both directions are
+  // available (server will no-op at true boundaries).
+  const selectedIdxOnPage = selectedDefect
+    ? tableAssets.findIndex(a => a.assetDisplayId === selectedDefect.assetDisplayId)
+    : -1;
+  const hasPrevDefect = !selectedDefect
+    ? false
+    : selectedIdxOnPage === -1
+      ? true
+      : !(tablePage === 1 && selectedIdxOnPage === 0);
+  const hasNextDefect = !selectedDefect
+    ? false
+    : selectedIdxOnPage === -1
+      ? true
+      : !(tablePage === tableTotalPages && selectedIdxOnPage === tableAssets.length - 1);
 
   // ── Lazy detail loader ──
   // Fetches survey_history + full description/issue for one selected defect
@@ -520,6 +537,39 @@ export default function DefectLibrary() {
     if (routeIdParam) setSelectedRouteId(Number(routeIdParam));
   }, [searchParams]);
 
+  // Jump the table to the page containing the given defect. Called explicitly
+  // on user-initiated selections that may land off the current page (map
+  // click, sidebar prev/next). NOT called for table row clicks — the row is
+  // by definition already on the current page.
+  // Tracks the in-flight token so rapid clicks discard stale resolutions.
+  const jumpTokenRef = useRef(0);
+  const jumpTablePageToDefect = useCallback(async (masterDisplayId: string) => {
+    const token = ++jumpTokenRef.current;
+    const sortParams = {
+      filters: serverFilters,
+      limit: tablePageSize,
+      sort_key: sortKey ?? "lastSurveyDate",
+      sort_dir: sortDir,
+    };
+    try {
+      const resp = await qc.fetchQuery({
+        queryKey: qk.assets.pageOf(masterDisplayId, sortParams),
+        queryFn: () => api.assets.getMasterPageOf(masterDisplayId, {
+          limit: sortParams.limit,
+          sort_key: sortParams.sort_key,
+          sort_dir: sortParams.sort_dir,
+          ...serverFilters,
+        }),
+        staleTime: 60_000,
+      });
+      if (token !== jumpTokenRef.current) return;
+      const page = resp?.page;
+      if (typeof page === "number" && page >= 1) setTablePage(page);
+    } catch {
+      // page-of resolution failed — leave current page alone
+    }
+  }, [serverFilters, tablePageSize, sortKey, sortDir, qc]);
+
   // Navigate prev/next across the full server-filtered + sorted set via the
   // /master/<id>/neighbor endpoint (same pattern as AssetLibrary).
   const navigateDefects = useCallback(async (direction: 'prev' | 'next') => {
@@ -568,48 +618,11 @@ export default function DefectLibrary() {
       setSelectedSurveyIdx(0);
       setMarkerPopup(null);
       fetchAndMergeDetail(next);
+      jumpTablePageToDefect(next.masterDisplayId!);
     } catch {
       // neighbor lookup failed — silently no-op
     }
-  }, [selectedDefect, sortKey, sortDir, serverFilters, fetchAndMergeDetail, qc]);
-
-  // Auto-jump table to page containing selected defect — once per selection.
-  // Mirrors AssetLibrary so map-click and table-click stay symmetric.
-  const lastJumpedForRef = useRef<string | null>(null);
-  useEffect(() => {
-    const id = selectedDefect?.masterDisplayId;
-    if (!id) { lastJumpedForRef.current = null; return; }
-    if (lastJumpedForRef.current === id) return;
-    lastJumpedForRef.current = id;
-    let cancelled = false;
-    const sortParams = {
-      filters: serverFilters,
-      limit: tablePageSize,
-      sort_key: sortKey ?? "lastSurveyDate",
-      sort_dir: sortDir,
-    };
-    (async () => {
-      try {
-        const resp = await qc.fetchQuery({
-          queryKey: qk.assets.pageOf(id, sortParams),
-          queryFn: () => api.assets.getMasterPageOf(id, {
-            limit: sortParams.limit,
-            sort_key: sortParams.sort_key,
-            sort_dir: sortParams.sort_dir,
-            ...serverFilters,
-          }),
-          staleTime: 60_000,
-        });
-        const page = resp?.page;
-        if (!cancelled && typeof page === "number" && page >= 1) {
-          setTablePage(page);
-        }
-      } catch {
-        // page-of resolution failed — leave current page alone
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [selectedDefect?.masterDisplayId, tablePageSize, sortKey, sortDir, serverFilters, qc]);
+  }, [selectedDefect, sortKey, sortDir, serverFilters, fetchAndMergeDetail, qc, jumpTablePageToDefect]);
 
   const handleRowClick = useCallback((defect: AssetRecord) => {
     setSelectedDefect(defect);
@@ -641,7 +654,8 @@ export default function DefectLibrary() {
       if (overrides.lng !== undefined) rec.lng = overrides.lng;
     }
     handleRowClick(rec);
-  }, [mapData, handleRowClick]);
+    if (rec.masterDisplayId) jumpTablePageToDefect(rec.masterDisplayId);
+  }, [mapData, handleRowClick, jumpTablePageToDefect]);
 
   const handleMarkGood = useCallback((asset: AssetRecord) => {
     if (user.role === "Viewer") {
@@ -978,6 +992,8 @@ export default function DefectLibrary() {
           frameHeight={frameHeight}
           imageLoading={pointImageLoading}
           filteredAssets={tableAssets}
+          hasPrev={hasPrevDefect}
+          hasNext={hasNextDefect}
           onCloseAsset={() => setSelectedDefect(null)}
           getAssetDisplayName={getAssetDisplayName}
           onNavigate={navigateDefects}
@@ -1406,13 +1422,14 @@ export default function DefectLibrary() {
             setSortDir("asc");
           }
           setTablePage(1);
+          setSelectedDefect(null);
         }}
         serverPage={tablePage}
         serverPageSize={tablePageSize}
         serverTotalPages={tableTotalPages}
         serverTotalCount={tableTotalCount}
-        onPageChange={setTablePage}
-        onPageSizeChange={(size) => { setTablePageSize(size); setTablePage(1); }}
+        onPageChange={(p) => { setTablePage(p); setSelectedDefect(null); }}
+        onPageSizeChange={(size) => { setTablePageSize(size); setTablePage(1); setSelectedDefect(null); }}
       />
     </div>
   );
