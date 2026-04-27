@@ -1,11 +1,13 @@
 import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
 import { useSearchParams, Link } from "react-router-dom";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import LibraryMapView from "@/components/asset-library/LibraryMapView";
 import FrameComparisonPopup from "@/components/FrameComparisonPopup";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { api } from "@/lib/api";
+import { qk } from "@/lib/queryKeys";
 import { exportToExcel } from "@/lib/excelExport";
 import { Textarea } from "@/components/ui/textarea";
 import { Download, AlertTriangle, CheckCircle2, Loader2, Pencil, RotateCcw, Tag } from "lucide-react";
@@ -17,7 +19,9 @@ import { cn } from "@/lib/utils";
 import { CategoryBadge } from "@/components/CategoryBadge";
 import { useLabelMap } from "@/contexts/LabelMapContext";
 import { useFrameImage } from "@/hooks/useFrameImage";
-import type { AssetRecord } from "@/types/asset";
+import type { AssetRecord, MapData } from "@/types/asset";
+import { EMPTY_MAP_DATA } from "@/types/asset";
+import { buildAssetFromMapData, withConditionPatch, withIssuePatch } from "@/lib/mapData";
 import AssetFilterStrip from "@/components/asset-library/AssetFilterStrip";
 import AssetDetailSidebar from "@/components/asset-library/AssetDetailSidebar";
 import AssetTable, { type ColumnDef } from "@/components/asset-library/AssetTable";
@@ -126,7 +130,6 @@ const BASE_DEFECT_COLUMNS: ColumnDef[] = [
 
 /** Builds column definitions including the interactive "Mark as Good" / unmark column and edit issue. */
 function buildDefectColumns(
-  goodSet: Set<string>,
   markingGood: Set<string>,
   onMarkGood: (a: AssetRecord) => void,
   onUnmarkGood: (a: AssetRecord) => void,
@@ -157,7 +160,11 @@ function buildDefectColumns(
       className: "py-1.5 px-2 text-center",
       render: (a) => {
         const assetKey = a.assetDisplayId ?? a.defectId;
-        const isMarked = goodSet.has(assetKey);
+        // Source of truth = the row's condition. After mark good the
+        // optimistic update flips condition to 'good' so the green check
+        // shows immediately; on next refetch the row falls outside the
+        // damaged filter and disappears.
+        const isMarked = (a.condition ?? '').toLowerCase() === 'good';
         const isSaving = markingGood.has(assetKey);
         return (
           <button
@@ -190,33 +197,15 @@ function buildDefectColumns(
   ];
 }
 
-// Minimal map point from the /map-points endpoint. defect_id + issue come
-// only when the caller passes include_defect=true; we use them here so the
-// table can render without a second /paginated round trip.
-interface MapPoint {
-  master_display_id: string;
-  asset_type: string;
-  asset_id: string;
-  lat: number;
-  lng: number;
-  condition: string;
-  group_id?: string;
-  side: string;
-  zone: string;
-  route_id?: number;
-  route_name?: string;
-  category_id: string;
-  last_seen_date?: string;
-  latest_defect_id?: string;
-  issue?: string;
-}
+// Map view consumes the columnar MapData shape directly (see
+// src/types/asset.ts). When the page uses include_defect=true on
+// /master/map-points, MapData carries the optional `defect_ids` and
+// `issues` parallel arrays alongside everything else.
 
 export default function DefectLibrary() {
   const { user } = useAuth();
+  const qc = useQueryClient();
   const [searchParams] = useSearchParams();
-  const [roads, setRoads] = useState<{ route_id: number; name: string; side?: string }[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [loadError, setLoadError] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const { data: labelMapData } = useLabelMap();
 
@@ -255,14 +244,19 @@ export default function DefectLibrary() {
   const [fullViewLoading, setFullViewLoading] = useState(false);
   const [conditionLogs, setConditionLogs] = useState<any[]>([]);
 
-  // ── Single in-memory data source for both map and table ──
-  // Server returns all matching damaged assets; client memos derive the
-  // filtered + sorted view for the table — same pattern as AssetLibrary.
-  const [mapPoints, setMapPoints] = useState<MapPoint[]>([]);
+  // ── Server-side table pagination state ──
+  const [tablePage, setTablePage] = useState(1);
+  const [tablePageSize, setTablePageSize] = useState(50);
   const tableAssetsRef = useRef<AssetRecord[]>([]);
 
+  // Debounced text search for server-side filtering.
+  const [debouncedSearchQ, setDebouncedSearchQ] = useState("");
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearchQ(searchQuery.trim()), 350);
+    return () => clearTimeout(t);
+  }, [searchQuery]);
+
   // ── Mark as Good state ──
-  const [goodSet, setGoodSet] = useState<Set<string>>(new Set());
   const [markingGood, setMarkingGood] = useState<Set<string>>(new Set());
   const [confirmMarkGoodAsset, setConfirmMarkGoodAsset] = useState<AssetRecord | null>(null);
 
@@ -330,182 +324,142 @@ export default function DefectLibrary() {
   const getAssetNameRef = useRef(getAssetDisplayName);
   getAssetNameRef.current = getAssetDisplayName;
 
-  // Cache detail responses keyed by masterDisplayId so repeated clicks are instant
-  const detailCacheRef = useRef<Record<string, Partial<AssetRecord>>>({});
-
   // ── Build filter params for server requests ──
   // categoryFilter stores the display name (from the Select), but the backend
   // expects category_id. Look it up via categoryOptions.
   const categoryOptionsRef = useRef<{id: string; name: string}[]>([]);
 
-  const buildFilterParams = useCallback(() => {
-    const params: Record<string, any> = { condition: "damaged" };
-    if (selectedRouteId !== null) params.route_id = selectedRouteId;
+  // ── Server filter params (one source of truth for both queries) ──
+  // condition: "damaged" is always pinned — Defect Library by definition
+  // shows only the damaged subset. Other filters mirror Asset Library.
+  const serverFilters = useMemo<Record<string, any>>(() => {
+    const f: Record<string, any> = { condition: "damaged" };
+    if (selectedRouteId !== null) f.route_id = selectedRouteId;
     if (categoryFilter !== "all") {
-      const match = categoryOptionsRef.current.find(c => c.name === categoryFilter);
-      if (match) params.category = match.id;
+      const m = categoryOptionsRef.current.find(c => c.name === categoryFilter);
+      if (m) f.category = m.id;
     }
-    if (directionFilter !== "all") params.side = directionFilter;
-    if (zoneFilter !== "all") params.zone = zoneFilter;
-    if (selectedAssetType !== "all") params.asset_type = selectedAssetType;
-    if (searchQuery.trim()) params.search = searchQuery.trim();
-    return params;
-  }, [selectedRouteId, categoryFilter, directionFilter, zoneFilter, selectedAssetType, searchQuery]);
+    if (directionFilter !== "all") f.side = directionFilter;
+    if (zoneFilter !== "all") f.zone = zoneFilter;
+    if (selectedAssetType !== "all") f.asset_type = selectedAssetType;
+    if (debouncedSearchQ) f.search = debouncedSearchQ;
+    return f;
+  }, [selectedRouteId, categoryFilter, directionFilter, zoneFilter, selectedAssetType, debouncedSearchQ]);
 
-  // ── Initial data load ──
-  // Single fetch — /map-points covers both map and table. include_defect=1
-  // pulls defect_id + issue alongside so we don't need /paginated.
-  // route_id is the only server-side filter; everything else applies on
-  // the client (matches AssetLibrary, lets sort/page/facet feel instant).
-  const loadData = useCallback(async (filters?: Record<string, any>) => {
-    try {
-      setLoading(true);
-      setLoadError(false);
-      setGoodSet(new Set());
-      const effectiveFilters = filters ?? buildFilterParams();
+  const buildFilterParams = useCallback(() => serverFilters, [serverFilters]);
 
-      const mapFilters: Record<string, any> = { condition: "damaged", include_defect: true };
-      if (effectiveFilters.route_id != null) mapFilters.route_id = effectiveFilters.route_id;
+  // ── React Query data sources (mirror AssetLibrary) ──
+  const roadsQuery = useQuery({
+    queryKey: qk.roads.list(),
+    queryFn: () => api.roads.list(),
+    staleTime: 5 * 60_000,
+  });
+  const roads = useMemo(
+    () => ((roadsQuery.data?.items ?? []) as any[]).map((r) => ({
+      route_id: r.route_id, name: r.road_name, side: r.road_side,
+    })),
+    [roadsQuery.data]
+  );
 
-      const [roadsResp, mapResp] = await Promise.all([
-        api.roads.list(),
-        api.assets.getMasterMapPoints(mapFilters),
-      ]);
+  const mapPointsQuery = useQuery({
+    queryKey: qk.assets.mapPoints({ ...serverFilters, include_defect: true }),
+    queryFn: () => api.assets.getMasterMapPoints({ ...serverFilters, include_defect: true }),
+    staleTime: 60_000,
+    placeholderData: (prev) => prev,
+  });
+  const mapData: MapData = (mapPointsQuery.data as MapData | undefined) ?? EMPTY_MAP_DATA;
 
-      if (roadsResp?.items) {
-        setRoads(roadsResp.items.map((r: any) => ({ route_id: r.route_id, name: r.road_name, side: r.road_side })));
-      }
-      if (mapResp?.points) {
-        setMapPoints(mapResp.points);
-      }
-    } catch (err: any) {
-      console.error("Failed to load data:", err);
-      setLoadError(true);
-    } finally {
-      setLoading(false);
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [buildFilterParams]);
-
-  // Load on mount
-  const initialLoadDoneRef = useRef(false);
-  useEffect(() => { loadData().then(() => { initialLoadDoneRef.current = true; }); }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Route change → reload /map-points (server universe scoped by route_id).
-  // All other filters stay client-side so toggling them feels instant.
+  // Reset page on filter change.
+  useEffect(() => { setTablePage(1); }, [serverFilters]);
+  // Clear selected defect on route change.
   const prevRouteIdRef = useRef<number | null>(selectedRouteId);
   useEffect(() => {
-    if (!initialLoadDoneRef.current) return;
     if (prevRouteIdRef.current === selectedRouteId) return;
     prevRouteIdRef.current = selectedRouteId;
     setSelectedDefect(null);
-    loadData();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedRouteId]);
 
-  // ── Client-side filter over cached mapPoints ──
-  // condition is intentionally NOT filtered here — the server already gave us
-  // damaged-only, and after a mark-good mutation we keep the row visible
-  // (with updated condition) so the user can see what they just changed.
-  // Search is plain substring match across a few columns; defect lib has a
-  // small enough damaged subset that we don't need the /search endpoint.
-  const filteredMapPoints = useMemo<MapPoint[]>(() => {
-    const categoryIdFilter = categoryFilter !== "all"
-      ? (categoryOptionsRef.current.find(c => c.name === categoryFilter)?.id ?? null)
-      : null;
-    const q = searchQuery.trim().toLowerCase();
+  const paginatedQuery = useQuery({
+    queryKey: qk.assets.paginated({
+      filters: serverFilters,
+      page: tablePage,
+      limit: tablePageSize,
+      sort_key: sortKey ?? "lastSurveyDate",
+      sort_dir: sortDir,
+    }),
+    queryFn: () => api.assets.getMasterPaginated({
+      ...serverFilters,
+      page: tablePage,
+      limit: tablePageSize,
+      sort_key: sortKey ?? "lastSurveyDate",
+      sort_dir: sortDir,
+    }),
+    staleTime: 60_000,
+    placeholderData: (prev) => prev,
+  });
 
-    return mapPoints.filter(p => {
-      if (categoryIdFilter && p.category_id !== categoryIdFilter) return false;
-      if (directionFilter !== "all" && p.side !== directionFilter) return false;
-      if (zoneFilter !== "all" && p.zone !== zoneFilter) return false;
-      if (selectedAssetType !== "all" && p.group_id !== selectedAssetType) return false;
-      if (q) {
-        const hay = `${p.master_display_id} ${p.latest_defect_id ?? ''} ${p.asset_type} ${p.route_name ?? ''} ${p.issue ?? ''}`.toLowerCase();
-        if (!hay.includes(q)) return false;
-      }
-      return true;
-    });
-  }, [mapPoints, categoryFilter, directionFilter, zoneFilter, selectedAssetType, searchQuery]);
+  const loading = mapPointsQuery.isLoading || mapPointsQuery.isFetching;
 
-  // ── Convert filtered map points to AssetRecord for map + table ──
-  const mapAssets = useMemo<AssetRecord[]>(() => {
-    return filteredMapPoints.map((p) => ({
-      id: p.master_display_id,
-      assetDisplayId: p.master_display_id,
-      masterDisplayId: p.master_display_id,
-      assetId: p.asset_id,
-      assetType: getAssetNameRef.current({ asset_id: p.asset_id, asset_type: p.asset_type }),
-      assetCategory: getCategoryNameRef.current(p.category_id),
-      defectId: p.latest_defect_id || '',
-      lat: p.lat,
-      lng: p.lng,
-      condition: p.condition,
-      markerColor: conditionToColor(p.condition),
-      groupId: p.group_id ?? undefined,
-      routeId: p.route_id,
-      side: p.side || 'Unknown',
-      zone: p.zone || 'Unknown',
-      category_id: p.category_id,
-      roadName: p.route_name || '',
-      lastSurveyDate: p.last_seen_date ? String(p.last_seen_date).split('T')[0] : '',
-      issue: p.issue ? capitalize(p.issue) : 'Defective',
-      severity: 'Low',
-    }));
-  }, [filteredMapPoints]);
+  // Map view consumes the columnar `mapData` directly. We do NOT build an
+  // AssetRecord per row — that allocation alone burned ~150 MB at 1M.
+  // Records are materialized on demand via buildAssetFromMapData when a
+  // user clicks a marker (see handleSelectFromMap below).
 
-  // ── Sorted in-memory table source ──
+  // ── Table records — server-paginated page ──
   const tableAssets = useMemo<AssetRecord[]>(() => {
-    if (!sortKey) return mapAssets;
-    const accessor: Record<string, (a: AssetRecord) => string> = {
-      defectId: (a) => a.defectId ?? "",
-      assetDisplayId: (a) => a.assetDisplayId ?? "",
-      assetType: (a) => a.assetType ?? "",
-      category: (a) => a.assetCategory ?? "",
-      road: (a) => a.roadName ?? "",
-      side: (a) => a.side ?? "",
-      zone: (a) => a.zone ?? "",
-      survey: (a) => a.lastSurveyDate ?? "",
-      issue: (a) => a.issue ?? "",
-    };
-    const getValue = accessor[sortKey];
-    if (!getValue) return mapAssets;
-    const dir = sortDir === "desc" ? -1 : 1;
-    const arr = [...mapAssets];
-    arr.sort((a, b) => {
-      const av = getValue(a).toLowerCase();
-      const bv = getValue(b).toLowerCase();
-      if (av < bv) return -1 * dir;
-      if (av > bv) return 1 * dir;
-      return 0;
+    const items: any[] = paginatedQuery.data?.items ?? [];
+    return items.map((raw) => {
+      const coords = (raw.canonical_location?.coordinates ?? []) as number[];
+      const lastDate = raw.last_seen_date ? String(raw.last_seen_date).split('T')[0] : '';
+      return {
+        id: raw._id ? String(raw._id) : raw.master_display_id,
+        assetDisplayId: raw.master_display_id,
+        masterDisplayId: raw.master_display_id,
+        assetId: raw.asset_id ?? '',
+        assetType: getAssetNameRef.current({ asset_id: raw.asset_id, asset_type: raw.asset_type }) || raw.asset_type || '',
+        assetCategory: getCategoryNameRef.current(raw.category_id ?? ''),
+        defectId: raw.latest_defect_id ?? '',
+        lat: coords[1] ?? 0,
+        lng: coords[0] ?? 0,
+        condition: raw.latest_condition ?? 'unknown',
+        markerColor: conditionToColor(raw.latest_condition ?? 'unknown'),
+        groupId: raw.group_id ?? undefined,
+        routeId: raw.route_id,
+        side: raw.side || 'Unknown',
+        zone: raw.zone || 'Unknown',
+        category_id: raw.category_id ?? '',
+        roadName: raw.route_name || '',
+        roadSide: raw.road_side || undefined,
+        lastSurveyDate: lastDate,
+        issue: raw.issue ? capitalize(raw.issue) : 'Defective',
+        severity: 'Low',
+        surveyId: raw.latest_survey_id ? String(raw.latest_survey_id) : undefined,
+      } as AssetRecord;
     });
-    return arr;
-  }, [mapAssets, sortKey, sortDir]);
+  }, [paginatedQuery.data]);
   tableAssetsRef.current = tableAssets;
+  const tableTotalCount = paginatedQuery.data?.total_count ?? 0;
+  const tableTotalPages = paginatedQuery.data?.total_pages ?? 1;
 
   // ── Lazy detail loader ──
-  // Fetches survey_history + full description/issue for one selected defect.
-  // Results are cached in detailCacheRef so repeated clicks are instant.
-  const fetchAndMergeDetail = useCallback(async (asset: AssetRecord) => {
-    if (!asset.masterDisplayId) return;
-    const cached = detailCacheRef.current[asset.masterDisplayId];
-    if (cached) {
-      setSelectedDefect(prev =>
-        prev?.masterDisplayId === asset.masterDisplayId ? { ...prev, ...cached } : prev
-      );
-      return;
-    }
-    try {
-      const resp = await api.assets.getMasterByDisplayId(asset.masterDisplayId);
-      if (resp?.item) {
+  // Fetches survey_history + full description/issue for one selected defect
+  // via React Query — repeated clicks hit the cache, mark mutations
+  // invalidate via qk.assets.detail(id).
+  const fetchDefectDetail = useCallback(async (asset: AssetRecord): Promise<Partial<AssetRecord> | null> => {
+    if (!asset.masterDisplayId) return null;
+    const fallbackIssue = asset.issue || 'Defective';
+    return qc.fetchQuery({
+      queryKey: qk.assets.detail(asset.masterDisplayId),
+      queryFn: async (): Promise<Partial<AssetRecord> | null> => {
+        const resp = await api.assets.getMasterByDisplayId(asset.masterDisplayId!);
+        if (!resp?.item) return null;
         const raw = resp.item;
         const history: any[] = raw.survey_history || [];
         const lastDate = raw.last_seen_date
           ? String(raw.last_seen_date).split('T')[0]
           : raw.created_at?.split?.('T')?.[0] || '—';
-
         // Backend uses fast_mongo_response so all ObjectIds are plain strings already.
-        const detail: Partial<AssetRecord> = {
+        return {
           surveyHistory: history.map((h: any) => ({
             survey_display_id: h.survey_display_id,
             survey_date: h.survey_date,
@@ -520,7 +474,7 @@ export default function DefectLibrary() {
             created_at: h.created_at,
           })),
           totalSurveysDetected: raw.total_surveys_detected ?? history.length,
-          issue: raw.issue ? capitalize(raw.issue) : asset.issue || 'Defective',
+          issue: raw.issue ? capitalize(raw.issue) : fallbackIssue,
           ...((raw.description ?? raw.latest_description) && typeof (raw.description ?? raw.latest_description) === 'object' ? { description: raw.description ?? raw.latest_description } : {}),
           // Fields that map-point assets lack — fill from the full document
           // so clicking a map point loads the frame image just like a table click.
@@ -538,7 +492,16 @@ export default function DefectLibrary() {
           lastSurveyDate: lastDate,
           defectId: raw.latest_defect_id ?? '',
         };
-        detailCacheRef.current[asset.masterDisplayId] = detail;
+      },
+      staleTime: Infinity, // mutations explicitly invalidate
+    });
+  }, [qc]);
+
+  const fetchAndMergeDetail = useCallback(async (asset: AssetRecord) => {
+    if (!asset.masterDisplayId) return;
+    try {
+      const detail = await fetchDefectDetail(asset);
+      if (detail) {
         setSelectedDefect(prev =>
           prev?.masterDisplayId === asset.masterDisplayId ? { ...prev, ...detail } : prev
         );
@@ -546,7 +509,7 @@ export default function DefectLibrary() {
     } catch {
       // silently ignore — user still sees slim data
     }
-  }, []);
+  }, [fetchDefectDetail]);
 
   useEffect(() => {
     const typeParam = searchParams.get("type");
@@ -557,20 +520,96 @@ export default function DefectLibrary() {
     if (routeIdParam) setSelectedRouteId(Number(routeIdParam));
   }, [searchParams]);
 
-  // Navigate prev/next against the in-memory sorted set — same as AssetLibrary.
-  const navigateDefects = useCallback((direction: 'prev' | 'next') => {
-    const list = tableAssetsRef.current;
-    if (!selectedDefect?.assetDisplayId || list.length === 0) return;
-    const idx = list.findIndex(a => a.assetDisplayId === selectedDefect.assetDisplayId);
-    if (idx === -1) return;
-    const nextIdx = direction === 'next' ? idx + 1 : idx - 1;
-    if (nextIdx < 0 || nextIdx >= list.length) return;
-    const next = list[nextIdx];
-    setSelectedDefect(next);
-    setSelectedSurveyIdx(0);
-    setMarkerPopup(null);
-    fetchAndMergeDetail(next);
-  }, [selectedDefect, fetchAndMergeDetail]);
+  // Navigate prev/next across the full server-filtered + sorted set via the
+  // /master/<id>/neighbor endpoint (same pattern as AssetLibrary).
+  const navigateDefects = useCallback(async (direction: 'prev' | 'next') => {
+    if (!selectedDefect?.masterDisplayId) return;
+    try {
+      const sortParams = {
+        filters: serverFilters,
+        sort_key: sortKey ?? "lastSurveyDate",
+        sort_dir: sortDir,
+      };
+      const resp = await qc.fetchQuery({
+        queryKey: qk.assets.neighbor(selectedDefect.masterDisplayId, direction, sortParams),
+        queryFn: () => api.assets.getMasterNeighbor(selectedDefect.masterDisplayId!, direction, {
+          sort_key: sortParams.sort_key,
+          sort_dir: sortParams.sort_dir,
+          ...serverFilters,
+        }),
+        staleTime: 60_000,
+      });
+      const raw = resp?.item;
+      if (!raw?.master_display_id) return;
+      const coords = (raw.canonical_location?.coordinates ?? []) as number[];
+      const next: AssetRecord = {
+        id: raw._id ? String(raw._id) : raw.master_display_id,
+        assetDisplayId: raw.master_display_id,
+        masterDisplayId: raw.master_display_id,
+        assetId: raw.asset_id ?? '',
+        assetType: getAssetNameRef.current({ asset_id: raw.asset_id, asset_type: raw.asset_type }) || raw.asset_type || '',
+        assetCategory: getCategoryNameRef.current(raw.category_id ?? ''),
+        defectId: raw.latest_defect_id ?? '',
+        lat: coords[1] ?? 0,
+        lng: coords[0] ?? 0,
+        condition: raw.latest_condition ?? 'unknown',
+        markerColor: conditionToColor(raw.latest_condition ?? 'unknown'),
+        routeId: raw.route_id,
+        side: raw.side || 'Unknown',
+        zone: raw.zone || 'Unknown',
+        category_id: raw.category_id ?? '',
+        roadName: raw.route_name || '',
+        lastSurveyDate: raw.last_seen_date ? String(raw.last_seen_date).split('T')[0] : '',
+        issue: raw.issue ? capitalize(raw.issue) : 'Defective',
+        severity: 'Low',
+        surveyId: raw.latest_survey_id ? String(raw.latest_survey_id) : undefined,
+      };
+      setSelectedDefect(next);
+      setSelectedSurveyIdx(0);
+      setMarkerPopup(null);
+      fetchAndMergeDetail(next);
+    } catch {
+      // neighbor lookup failed — silently no-op
+    }
+  }, [selectedDefect, sortKey, sortDir, serverFilters, fetchAndMergeDetail, qc]);
+
+  // Auto-jump table to page containing selected defect — once per selection.
+  // Mirrors AssetLibrary so map-click and table-click stay symmetric.
+  const lastJumpedForRef = useRef<string | null>(null);
+  useEffect(() => {
+    const id = selectedDefect?.masterDisplayId;
+    if (!id) { lastJumpedForRef.current = null; return; }
+    if (lastJumpedForRef.current === id) return;
+    lastJumpedForRef.current = id;
+    let cancelled = false;
+    const sortParams = {
+      filters: serverFilters,
+      limit: tablePageSize,
+      sort_key: sortKey ?? "lastSurveyDate",
+      sort_dir: sortDir,
+    };
+    (async () => {
+      try {
+        const resp = await qc.fetchQuery({
+          queryKey: qk.assets.pageOf(id, sortParams),
+          queryFn: () => api.assets.getMasterPageOf(id, {
+            limit: sortParams.limit,
+            sort_key: sortParams.sort_key,
+            sort_dir: sortParams.sort_dir,
+            ...serverFilters,
+          }),
+          staleTime: 60_000,
+        });
+        const page = resp?.page;
+        if (!cancelled && typeof page === "number" && page >= 1) {
+          setTablePage(page);
+        }
+      } catch {
+        // page-of resolution failed — leave current page alone
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [selectedDefect?.masterDisplayId, tablePageSize, sortKey, sortDir, serverFilters, qc]);
 
   const handleRowClick = useCallback((defect: AssetRecord) => {
     setSelectedDefect(defect);
@@ -582,6 +621,28 @@ export default function DefectLibrary() {
     mapTransitionTimer.current = setTimeout(() => setMapTransitioning(false), 400);
   }, [fetchAndMergeDetail]);
 
+  // Map-side click: id (and optional line snap overrides) → AssetRecord.
+  // We materialize one record per click instead of one per row in the
+  // dataset — see buildAssetFromMapData for the lazy construction.
+  const handleSelectFromMap = useCallback((id: string, overrides?: { frameNumber?: number; box?: any; lat?: number; lng?: number }) => {
+    const idx = mapData.idIndex.get(id);
+    if (idx === undefined) return;
+    const rec = buildAssetFromMapData(mapData, idx, {
+      getAssetDisplayName: getAssetNameRef.current,
+      getCategoryDisplayName: getCategoryNameRef.current,
+    });
+    // Defect Library convention: empty issue renders as "Defective".
+    if (!rec.issue) rec.issue = "Defective";
+    else rec.issue = capitalize(rec.issue);
+    if (overrides) {
+      if (overrides.frameNumber !== undefined) rec.frameNumber = overrides.frameNumber;
+      if (overrides.box) rec.box = overrides.box;
+      if (overrides.lat !== undefined) rec.lat = overrides.lat;
+      if (overrides.lng !== undefined) rec.lng = overrides.lng;
+    }
+    handleRowClick(rec);
+  }, [mapData, handleRowClick]);
+
   const handleMarkGood = useCallback((asset: AssetRecord) => {
     if (user.role === "Viewer") {
       toast.error("You do not have permission to mark assets as good.");
@@ -589,6 +650,32 @@ export default function DefectLibrary() {
     }
     setConfirmMarkGoodAsset(asset);
   }, [user]);
+
+  // Optimistically flip a master_display_id's condition in every active
+  // /map-points cache entry (now columnar — see withConditionPatch) AND
+  // in the current paginated table page. The paginated update is still
+  // row-shaped because /master/paginated returns row-of-objects.
+  const optimisticallySetCondition = useCallback((masterDisplayId: string, condition: string) => {
+    const snapshots: Array<{ key: any; data: any }> = [];
+    const mapEntries = qc.getQueriesData<MapData>({ queryKey: ["assets", "map"] });
+    for (const [key, data] of mapEntries) {
+      snapshots.push({ key, data });
+      if (!data) continue;
+      qc.setQueryData<MapData>(key, withConditionPatch(data, masterDisplayId, condition));
+    }
+    const pagEntries = qc.getQueriesData<any>({ queryKey: ["assets", "paginated"] });
+    for (const [key, data] of pagEntries) {
+      snapshots.push({ key, data });
+      if (!data?.items) continue;
+      qc.setQueryData<any>(key, {
+        ...data,
+        items: data.items.map((it: any) =>
+          it.master_display_id === masterDisplayId ? { ...it, latest_condition: condition } : it
+        ),
+      });
+    }
+    return snapshots;
+  }, [qc]);
 
   const handleConfirmMarkGood = useCallback(async () => {
     const asset = confirmMarkGoodAsset;
@@ -607,20 +694,28 @@ export default function DefectLibrary() {
     const surveyorId = user?.id ?? "";
 
     setMarkingGood((prev) => new Set(prev).add(assetKey));
+    const snapshots = asset.masterDisplayId
+      ? optimisticallySetCondition(asset.masterDisplayId, "good")
+      : [];
     try {
       await api.assets.markAsGood(mongoId, { name: surveyorName, user_id: surveyorId, survey_id: asset.surveyId });
-      setGoodSet((prev) => new Set(prev).add(assetKey));
-      // Single source of truth: mapPoints. mapAssets/tableAssets memos derive
-      // condition and marker color from this, so the table and map stay in sync.
-      setMapPoints(prev => prev.map(p => p.master_display_id === asset.assetDisplayId ? { ...p, condition: "good" } : p));
       toast.success(`Asset ${asset.assetDisplayId} marked as good`);
-      if (asset.masterDisplayId) delete detailCacheRef.current[asset.masterDisplayId];
+      if (asset.masterDisplayId) {
+        qc.invalidateQueries({ queryKey: qk.assets.detail(asset.masterDisplayId) });
+      }
+      // Position-dependent caches: condition flip can shift sort order
+      // (under condition filters) and adds a log entry.
+      qc.invalidateQueries({ queryKey: ["assets", "pageOf"] });
+      qc.invalidateQueries({ queryKey: ["assets", "neighbor"] });
+      qc.invalidateQueries({ queryKey: ["assets", "conditionLogs"] });
     } catch (err: any) {
+      // Roll back optimistic updates on failure.
+      for (const { key, data } of snapshots) qc.setQueryData(key, data);
       toast.error(err?.message || "Failed to mark asset as good");
     } finally {
       setMarkingGood((prev) => { const s = new Set(prev); s.delete(assetKey); return s; });
     }
-  }, [confirmMarkGoodAsset, user]);
+  }, [confirmMarkGoodAsset, user, optimisticallySetCondition, qc]);
 
   const handleUnmarkGood = useCallback(async (asset: AssetRecord) => {
     const assetKey = asset.assetDisplayId ?? asset.defectId;
@@ -633,18 +728,25 @@ export default function DefectLibrary() {
     const surveyorId = user?.id ?? "";
     const surveyId = asset.surveyId;
     setMarkingGood((prev) => new Set(prev).add(assetKey));
+    const snapshots = asset.masterDisplayId
+      ? optimisticallySetCondition(asset.masterDisplayId, "damaged")
+      : [];
     try {
       await api.assets.unmarkGood(mongoId, { name: surveyorName, user_id: surveyorId, survey_id: surveyId });
-      setGoodSet((prev) => { const s = new Set(prev); s.delete(assetKey); return s; });
-      setMapPoints(prev => prev.map(p => p.master_display_id === asset.assetDisplayId ? { ...p, condition: "damaged" } : p));
       toast.success(`Asset ${asset.assetDisplayId} reverted to defective`);
-      if (asset.masterDisplayId) delete detailCacheRef.current[asset.masterDisplayId];
+      if (asset.masterDisplayId) {
+        qc.invalidateQueries({ queryKey: qk.assets.detail(asset.masterDisplayId) });
+      }
+      qc.invalidateQueries({ queryKey: ["assets", "pageOf"] });
+      qc.invalidateQueries({ queryKey: ["assets", "neighbor"] });
+      qc.invalidateQueries({ queryKey: ["assets", "conditionLogs"] });
     } catch (err: any) {
+      for (const { key, data } of snapshots) qc.setQueryData(key, data);
       toast.error(err?.message || "Failed to revert asset");
     } finally {
       setMarkingGood((prev) => { const s = new Set(prev); s.delete(assetKey); return s; });
     }
-  }, [user]);
+  }, [user, optimisticallySetCondition, qc]);
 
   const handleOpenEditIssue = useCallback((asset: AssetRecord) => {
     if (user.role === "Viewer") {
@@ -662,10 +764,33 @@ export default function DefectLibrary() {
     setEditIssueSaving(true);
     try {
       await api.assets.updateIssue(editIssueAsset.id, trimmed);
-      // Mutate mapPoints — mapAssets/tableAssets memos pick up the new issue.
-      setMapPoints(prev => prev.map(p => p.master_display_id === editIssueAsset.assetDisplayId ? { ...p, issue: trimmed } : p));
+      // Optimistically reflect the new issue in every active map-points
+      // and paginated cache entry — same pattern as condition flips.
+      const targetId = editIssueAsset.assetDisplayId;
+      if (targetId) {
+        const mapEntries = qc.getQueriesData<MapData>({ queryKey: ["assets", "map"] });
+        for (const [key, data] of mapEntries) {
+          if (!data) continue;
+          qc.setQueryData<MapData>(key, withIssuePatch(data, targetId, trimmed));
+        }
+      }
+      const pagEntries = qc.getQueriesData<any>({ queryKey: ["assets", "paginated"] });
+      for (const [key, data] of pagEntries) {
+        if (!data?.items) continue;
+        qc.setQueryData<any>(key, {
+          ...data,
+          items: data.items.map((it: any) =>
+            it.master_display_id === targetId ? { ...it, issue: trimmed } : it
+          ),
+        });
+      }
       if (selectedDefect?.id === editIssueAsset.id) {
         setSelectedDefect((prev) => prev ? { ...prev, issue: trimmed } : prev);
+      }
+      // Detail cache holds the previous issue — invalidate so re-open
+      // refetches the canonical value.
+      if (editIssueAsset.masterDisplayId) {
+        qc.invalidateQueries({ queryKey: qk.assets.detail(editIssueAsset.masterDisplayId) });
       }
       toast.success("Issue updated");
       setEditIssueAsset(null);
@@ -674,11 +799,11 @@ export default function DefectLibrary() {
     } finally {
       setEditIssueSaving(false);
     }
-  }, [editIssueAsset, editIssueValue, selectedDefect]);
+  }, [editIssueAsset, editIssueValue, selectedDefect, qc]);
 
   const defectColumns = useMemo(
-    () => buildDefectColumns(goodSet, markingGood, handleMarkGood, handleUnmarkGood, handleOpenEditIssue),
-    [goodSet, markingGood, handleMarkGood, handleUnmarkGood, handleOpenEditIssue]
+    () => buildDefectColumns(markingGood, handleMarkGood, handleUnmarkGood, handleOpenEditIssue),
+    [markingGood, handleMarkGood, handleUnmarkGood, handleOpenEditIssue]
   );
 
   const [exporting, setExporting] = useState(false);
@@ -799,9 +924,9 @@ export default function DefectLibrary() {
       </div>
 
       {/* Filter Strip — count is "still defective" rows after any client
-          mark-good mutations (mapAssets reflects current condition). */}
+          mark-good mutations (mapData.conditions reflects current state). */}
       <AssetFilterStrip
-        filteredCount={tableAssets.filter(a => (a.condition ?? '').toLowerCase() !== 'good').length}
+        filteredCount={tableTotalCount}
         countLabel="defects"
         directionFilter={directionFilter}
         onDirectionChange={setDirectionFilter}
@@ -825,9 +950,10 @@ export default function DefectLibrary() {
       <div className="flex min-h-0" style={{ flex: "1 1 45%" }}>
         <div className="flex-1 relative min-w-0" style={{ zIndex: 0, isolation: 'isolate' }}>
           <LibraryMapView
-            assets={mapAssets}
+            data={mapData}
             selectedId={selectedDefect?.assetDisplayId ?? null}
-            onSelect={handleRowClick}
+            onSelect={handleSelectFromMap}
+            getAssetDisplayName={getAssetDisplayName}
           />
           {/* Loading overlay — shown during initial data fetch or map transition. Sidebar handles its own frame-image loader. */}
           {(loading || mapTransitioning) && (
@@ -866,7 +992,12 @@ export default function DefectLibrary() {
               setShowFullView(true);
               setFullViewLoading(true);
               try {
-                const resp = await api.assets.getConditionLogs(selectedDefect.id);
+                const mongoId = selectedDefect.id ?? '';
+                const resp = await qc.fetchQuery({
+                  queryKey: qk.assets.conditionLogs(mongoId),
+                  queryFn: () => api.assets.getConditionLogs(mongoId),
+                  staleTime: 60_000,
+                });
                 setConditionLogs(resp?.items ?? []);
               } catch { setConditionLogs([]); }
               finally { setFullViewLoading(false); }
@@ -1248,16 +1379,20 @@ export default function DefectLibrary() {
         </DialogContent>
       </Dialog>
 
-      {/* Bottom Table — client-side paginated, mirrors AssetLibrary. */}
+      {/* Bottom Table — server-paginated against /master/paginated */}
       <AssetTable
         items={tableAssets}
-        loading={loading}
-        loadError={loadError}
+        // Skeleton only on initial fetch. During refetches (page jump from
+        // map click, sort/filter change) `placeholderData` keeps the prior
+        // rows visible — otherwise the skeleton flashes and the row-level
+        // selection highlight + auto-scroll disappear mid-transition.
+        loading={paginatedQuery.isLoading}
+        loadError={paginatedQuery.isError}
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
         selectedId={selectedDefect?.assetDisplayId ?? null}
         onRowClick={handleRowClick}
-        onRetry={() => loadData()}
+        onRetry={() => paginatedQuery.refetch()}
         idField="assetDisplayId"
         onClearFilters={clearFilters}
         columns={defectColumns}
@@ -1270,7 +1405,14 @@ export default function DefectLibrary() {
             setSortKey(colKey);
             setSortDir("asc");
           }
+          setTablePage(1);
         }}
+        serverPage={tablePage}
+        serverPageSize={tablePageSize}
+        serverTotalPages={tableTotalPages}
+        serverTotalCount={tableTotalCount}
+        onPageChange={setTablePage}
+        onPageSizeChange={(size) => { setTablePageSize(size); setTablePage(1); }}
       />
     </div>
   );

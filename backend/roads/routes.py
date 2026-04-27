@@ -1,12 +1,30 @@
 from utils.response import mongo_response
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, Response, jsonify, request
 from pymongo import ASCENDING, TEXT
 
 from db import get_db
 from utils.ids import next_sequence, get_now_iso
 from utils.rbac import role_required
+from cache import (
+	cache_get_body,
+	cache_set_body,
+	make_key as cache_make_key,
+	invalidate_roads_cache,
+)
 
 roads_bp = Blueprint("roads", __name__)
+
+
+@roads_bp.after_request
+def _invalidate_cache_after_writes(response):
+	"""Wipe roads:* cache after every successful write — covers POST/PUT/DELETE
+	on this blueprint without per-handler boilerplate."""
+	if request.method in ("POST", "PUT", "PATCH", "DELETE") and 200 <= response.status_code < 400:
+		try:
+			invalidate_roads_cache()
+		except Exception:  # noqa: BLE001
+			pass
+	return response
 
 
 @roads_bp.get("/")
@@ -49,6 +67,17 @@ def list_roads():
 	if road_side:
 		query["road_side"] = road_side
 
+	# Roads change rarely (manual admin edits) and the payload is small but
+	# fetched on nearly every page load. 1h TTL with pattern invalidation on
+	# every write keeps it warm without serving stale data after edits.
+	# Skip cache when a free-text search is present — the keyspace is unbounded.
+	use_cache = not search
+	cache_key = cache_make_key("roads:list:v1", side=road_side or "")
+	if use_cache:
+		cached = cache_get_body(cache_key)
+		if cached is not None:
+			return Response(cached, status=200, mimetype="application/json")
+
 	db = get_db()
 	cursor = db.roads.find(query).sort("route_id", ASCENDING)
 	roads = []
@@ -66,7 +95,10 @@ def list_roads():
 			"road_side": r.get("road_side"),
 			"gpx_file_url": r.get("gpx_file_url"),
 		})
-	return jsonify({"items": roads, "count": len(roads)})
+	resp = jsonify({"items": roads, "count": len(roads)})
+	if use_cache:
+		cache_set_body(cache_key, resp.get_data(), ttl=3600)
+	return resp
 
 
 @roads_bp.get("/<int:route_id>")

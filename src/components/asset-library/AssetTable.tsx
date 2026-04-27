@@ -137,13 +137,17 @@ export default function AssetTable({
   }, [selectedId, isServerPaginated]);
 
   // Scroll selected row into view after page has rendered (non-virtualized).
+  // `pagedItems` is included in deps so the scroll re-runs once the page-jump
+  // refetch resolves and the row actually exists in the DOM — without it,
+  // the effect fires while `placeholderData` still holds the prior page and
+  // findById returns null.
   useEffect(() => {
     if (virtualized || !selectedId) return;
     const timer = setTimeout(() => {
       document.getElementById(`asset-row-${selectedId}`)?.scrollIntoView({ behavior: "smooth", block: "nearest" });
     }, 50);
     return () => clearTimeout(timer);
-  }, [selectedId, page, virtualized]);
+  }, [selectedId, page, virtualized, pagedItems]);
 
   // ── Virtualization (used when `virtualized` prop is true) ──
   const parentRef = useRef<HTMLDivElement>(null);

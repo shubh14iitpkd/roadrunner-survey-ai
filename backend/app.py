@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 
 from config import Config
 from db import init_app_db
+from cache import init_cache
 
 def create_app() -> Flask:
 	import os
@@ -38,6 +39,7 @@ def create_app() -> Flask:
 	JWTManager(app)
 
 	init_app_db(app)
+	init_cache(app)
 
 	from auth.routes import auth_bp  # noqa: WPS433
 	from roads.routes import roads_bp

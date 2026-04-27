@@ -1,10 +1,12 @@
 import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { useSearchParams, Link } from "react-router-dom";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import LibraryMapView from "@/components/asset-library/LibraryMapView";
 import FrameComparisonPopup from "@/components/FrameComparisonPopup";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { api } from "@/lib/api";
+import { qk } from "@/lib/queryKeys";
 import { exportToExcel } from "@/lib/excelExport";
 import { Download, Database, Loader2, RotateCcw, Tag, AlertCircle, CheckCircle2, AlertTriangle } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
@@ -16,7 +18,9 @@ import { cn } from "@/lib/utils";
 import { CategoryBadge } from "@/components/CategoryBadge";
 import { useLabelMap } from "@/contexts/LabelMapContext";
 import { useFrameImage } from "@/hooks/useFrameImage";
-import type { AssetRecord } from "@/types/asset";
+import type { AssetRecord, MapData } from "@/types/asset";
+import { EMPTY_MAP_DATA } from "@/types/asset";
+import { buildAssetFromMapData, withConditionPatch } from "@/lib/mapData";
 import AssetFilterStrip from "@/components/asset-library/AssetFilterStrip";
 import AssetDetailSidebar from "@/components/asset-library/AssetDetailSidebar";
 import AssetTable, { type ColumnDef } from "@/components/asset-library/AssetTable";
@@ -119,38 +123,16 @@ function buildAssetColumns(
 }
 
 // Minimal map point from the /map-points endpoint.
-// Keypoints are fetched on-demand via /master/<id>/keypoints when a line is
-// clicked — keeping them off this payload was a big size win.
-// route_name / last_seen_date added so the table can render from the same
-// in-memory set without a second paginated fetch.
-interface MapPoint {
-  master_display_id: string;
-  asset_type: string;
-  asset_id: string;
-  lat: number;
-  lng: number;
-  condition: string;
-  group_id?: string;
-  side: string;
-  zone: string;
-  route_id?: number;
-  route_name?: string;
-  category_id: string;
-  last_seen_date?: string;
-  // Linear-asset fields
-  kind?: "point" | "line";
-  classification?: "point" | "linear_sided" | "linear_unsided";
-  geometry?: { type: "LineString"; coordinates: [number, number][] };
-  first_frame?: number;
-  last_frame?: number;
-}
+// Map view consumes the columnar MapData shape directly (see
+// src/types/asset.ts). The legacy per-row `MapPoint` interface used to
+// live here — it was removed when LibraryMapView switched to indexing the
+// parallel arrays in place, so we no longer pay one allocation per row.
 
 export default function AssetLibrary() {
   const { user } = useAuth();
+  const qc = useQueryClient();
   const [searchParams] = useSearchParams();
-  const [loading, setLoading] = useState(false);
   const [conditionLogs, setConditionLogs] = useState<any[]>([]);
-  const [loadError, setLoadError] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const { data: labelMapData } = useLabelMap();
 
@@ -167,7 +149,6 @@ export default function AssetLibrary() {
     return () => window.removeEventListener("page-eject", handler);
   }, []);
 
-  const [roads, setRoads] = useState<{ route_id: number; name: string; side?: string }[]>([]);
   const [selectedRouteId, setSelectedRouteId] = useState<number | null>(() => {
     const p = searchParams.get("route_id");
     return p ? Number(p) : null;
@@ -197,19 +178,20 @@ export default function AssetLibrary() {
   const [showFullView, setShowFullView] = useState(false);
   const [fullViewLoading, setFullViewLoading] = useState(false);
 
-  // ── Unified in-memory data source: map + table both read from mapPoints ──
-  const [mapPoints, setMapPoints] = useState<MapPoint[]>([]);
   // Latest tableAssets kept in a ref so navigate prev/next can resolve without
   // re-creating the callback on every sort/filter change.
   const tableAssetsRef = useRef<AssetRecord[]>([]);
 
-  // Search IDs returned by /master/search. null = no active search.
-  // Intersected client-side with facet-filtered mapPoints.
-  const [mapSearchIds, setMapSearchIds] = useState<Set<string> | null>(null);
-  const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Debounced search query — drives the /master/search useQuery key.
+  const [debouncedSearchQ, setDebouncedSearchQ] = useState("");
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearchQ(searchQuery.trim()), 350);
+    return () => clearTimeout(t);
+  }, [searchQuery]);
 
-  // Cache detail responses keyed by masterDisplayId so repeated clicks are instant
-  const detailCacheRef = useRef<Record<string, Partial<AssetRecord>>>({});
+  // ── Server-side table pagination state ──
+  const [tablePage, setTablePage] = useState(1);
+  const [tablePageSize, setTablePageSize] = useState(50);
 
   // ── Map transition loading state ──
   const [mapTransitioning, setMapTransitioning] = useState(false);
@@ -297,159 +279,166 @@ export default function AssetLibrary() {
     return params;
   }, [selectedRouteId, categoryFilter, conditionFilter, directionFilter, zoneFilter, selectedAssetType, searchQuery]);
 
-  // ── Initial data load ──
-  // /map-points is expensive; scoped server-side only by route_id. All other
-  // filters (category, condition, zone, side, type) and search apply on the
-  // client. Fetched on mount, on route change, and after a mutation.
-  const loadData = useCallback(async (filters?: Record<string, any>) => {
-    try {
-      setLoading(true);
-      setLoadError(false);
-      const effectiveFilters = filters ?? buildFilterParams();
+  // ── Data sources via React Query ──
+  // All facet filters (route, category, condition, zone, side, type, search)
+  // are sent to the server. Map clustering happens client-side via
+  // supercluster, so /map-points fires once per filter combo and pan/zoom
+  // never re-hits the network.
+  const roadsQuery = useQuery({
+    queryKey: qk.roads.list(),
+    queryFn: () => api.roads.list(),
+    staleTime: 5 * 60_000,
+  });
+  const roads = useMemo(
+    () => ((roadsQuery.data?.items ?? []) as any[]).map((r) => ({
+      route_id: r.route_id, name: r.road_name, side: r.road_side,
+    })),
+    [roadsQuery.data]
+  );
 
-      const mapFilters: Record<string, any> = {};
-      if (effectiveFilters.route_id != null) mapFilters.route_id = effectiveFilters.route_id;
-
-      const [roadsResp, mapResp] = await Promise.all([
-        api.roads.list(),
-        api.assets.getMasterMapPoints(mapFilters),
-      ]);
-
-      if (roadsResp?.items) {
-        setRoads(roadsResp.items.map((r: any) => ({ route_id: r.route_id, name: r.road_name, side: r.road_side })));
-      }
-      if (mapResp?.points) {
-        setMapPoints(mapResp.points);
-      }
-    } catch (err: any) {
-      console.error("Failed to load data:", err);
-      setLoadError(true);
-    } finally {
-      setLoading(false);
+  // Server filter params (one source of truth for both map and table queries).
+  const serverFilters = useMemo<Record<string, any>>(() => {
+    const f: Record<string, any> = {};
+    if (selectedRouteId !== null) f.route_id = selectedRouteId;
+    if (categoryFilter !== "all") {
+      const m = categoryOptionsRef.current.find(c => c.name === categoryFilter);
+      if (m) f.category = m.id;
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [buildFilterParams]);
+    if (conditionFilter !== "all") f.condition = conditionFilter;
+    if (directionFilter !== "all") f.side = directionFilter;
+    if (zoneFilter !== "all") f.zone = zoneFilter;
+    if (selectedAssetType !== "all") f.asset_type = selectedAssetType;
+    if (debouncedSearchQ) f.search = debouncedSearchQ;
+    return f;
+  }, [selectedRouteId, categoryFilter, conditionFilter, directionFilter, zoneFilter, selectedAssetType, debouncedSearchQ]);
 
-  // Load on mount
-  const initialLoadDoneRef = useRef(false);
-  useEffect(() => { loadData().then(() => { initialLoadDoneRef.current = true; }); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const mapPointsQuery = useQuery({
+    queryKey: qk.assets.mapPoints(serverFilters),
+    queryFn: () => api.assets.getMasterMapPoints(serverFilters),
+    staleTime: 60_000,
+    placeholderData: (prev) => prev,
+  });
+  const mapData: MapData = (mapPointsQuery.data as MapData | undefined) ?? EMPTY_MAP_DATA;
 
-  // Route change → reload /map-points (new server-side universe). Other
-  // filters stay pure client-side; no refetch needed.
+  // Reset table page whenever filters change so the user doesn't land on an
+  // empty page-N of the new filter set.
+  useEffect(() => { setTablePage(1); }, [serverFilters]);
+
+  // Auto-jump the table to the page containing the selected asset — but only
+  // once per selection. After the jump, user is free to flip pages with
+  // prev/next without losing the highlight or being yanked back.
+  // Map-clicks vs table-clicks both flow through here: if the asset is 
+  // already on the current page, page-of returns the same page → no-op.
+  const lastJumpedForRef = useRef<string | null>(null);
+  useEffect(() => {
+    const id = selectedAsset?.masterDisplayId;
+    if (!id) { lastJumpedForRef.current = null; return; }
+    if (lastJumpedForRef.current === id) return;
+    lastJumpedForRef.current = id;
+    let cancelled = false;
+    const sortParams = {
+      filters: serverFilters,
+      limit: tablePageSize,
+      sort_key: sortKey ?? "lastSurveyDate",
+      sort_dir: sortDir,
+    };
+    (async () => {
+      try {
+        const resp = await qc.fetchQuery({
+          queryKey: qk.assets.pageOf(id, sortParams),
+          queryFn: () => api.assets.getMasterPageOf(id, {
+            limit: sortParams.limit,
+            sort_key: sortParams.sort_key,
+            sort_dir: sortParams.sort_dir,
+            ...serverFilters,
+          }),
+          staleTime: 60_000,
+        });
+        const page = resp?.page;
+        if (!cancelled && typeof page === "number" && page >= 1) {
+          setTablePage(page);
+        }
+      } catch {
+        // page-of resolution failed — leave current page alone
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [selectedAsset?.masterDisplayId, tablePageSize, sortKey, sortDir, serverFilters, qc]);
+
+  // Server-paginated table. Filters + sort + page round-trip; results are
+  // already filtered/sorted/sliced — frontend renders as-is.
+  const paginatedQuery = useQuery({
+    queryKey: qk.assets.paginated({
+      filters: serverFilters,
+      page: tablePage,
+      limit: tablePageSize,
+      sort_key: sortKey ?? "lastSurveyDate",
+      sort_dir: sortDir,
+    }),
+    queryFn: () => api.assets.getMasterPaginated({
+      ...serverFilters,
+      page: tablePage,
+      limit: tablePageSize,
+      sort_key: sortKey ?? "lastSurveyDate",
+      sort_dir: sortDir,
+    }),
+    staleTime: 60_000,
+    placeholderData: (prev) => prev,
+  });
+
+  // Clear selected asset when route changes (mirrors prior behavior).
   const prevRouteIdRef = useRef<number | null>(selectedRouteId);
   useEffect(() => {
-    if (!initialLoadDoneRef.current) return;
     if (prevRouteIdRef.current === selectedRouteId) return;
     prevRouteIdRef.current = selectedRouteId;
     setSelectedAsset(null);
-    loadData();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedRouteId]);
 
-  // Debounced text search → fetch matching IDs for client-side intersection
-  // against the facet-filtered map points.
-  useEffect(() => {
-    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
-    const q = searchQuery.trim();
-    if (!q) {
-      setMapSearchIds(null);
-      return;
-    }
-    searchDebounceRef.current = setTimeout(async () => {
-      try {
-        const resp = await api.assets.searchMasterAssets(q);
-        setMapSearchIds(new Set<string>(resp?.ids ?? []));
-      } catch {
-        setMapSearchIds(new Set<string>());
-      }
-    }, 350);
-    return () => { if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current); };
-  }, [searchQuery]);
+  const loading = mapPointsQuery.isLoading || mapPointsQuery.isFetching;
+  const loadError = mapPointsQuery.isError;
 
-  // ── Client-side filter over cached mapPoints ──
-  // Facet filters (category/condition/side/zone/type) and the search-result
-  // ID set all apply here. Route_id is already applied server-side at fetch.
-  const filteredMapPoints = useMemo<MapPoint[]>(() => {
-    const categoryIdFilter = categoryFilter !== "all"
-      ? (categoryOptionsRef.current.find(c => c.name === categoryFilter)?.id ?? null)
-      : null;
+  // Map view consumes the columnar `mapData` directly — we do NOT build
+  // an AssetRecord per row. At 1M assets that allocation alone burned
+  // ~150 MB of JS heap. AssetRecord is materialized on demand only when
+  // the user actually selects an asset (see handleSelectFromMap below).
 
-    return mapPoints.filter(p => {
-      if (mapSearchIds && !mapSearchIds.has(p.master_display_id)) return false;
-      if (categoryIdFilter && p.category_id !== categoryIdFilter) return false;
-      if (conditionFilter === "damaged" && !DAMAGED_CONDITIONS.has((p.condition ?? '').toLowerCase())) return false;
-      if (conditionFilter === "good" && (p.condition ?? '').toLowerCase() !== "good") return false;
-      if (directionFilter !== "all" && p.side !== directionFilter) return false;
-      if (zoneFilter !== "all" && p.zone !== zoneFilter) return false;
-      if (selectedAssetType !== "all" && p.group_id !== selectedAssetType) return false;
-      return true;
-    });
-  }, [mapPoints, mapSearchIds, categoryFilter, conditionFilter, directionFilter, zoneFilter, selectedAssetType]);
-
-  // ── Convert filtered map points to AssetRecord for the map component ──
-  const mapAssets = useMemo<AssetRecord[]>(() => {
-    return filteredMapPoints.map((p) => ({
-      id: p.master_display_id,
-      assetDisplayId: p.master_display_id,
-      masterDisplayId: p.master_display_id,
-      assetId: p.asset_id,
-      assetType: getCategoryNameRef.current ? getAssetNameRef.current({ asset_id: p.asset_id, asset_type: p.asset_type }) : p.asset_type,
-      assetCategory: getCategoryNameRef.current(p.category_id),
-      defectId: '',
-      lat: p.lat,
-      lng: p.lng,
-      condition: p.condition,
-      markerColor: conditionToColor(p.condition),
-      groupId: p.group_id ?? undefined,
-      routeId: p.route_id,
-      side: p.side || 'Unknown',
-      zone: p.zone || 'Unknown',
-      roadName: p.route_name || '',
-      lastSurveyDate: p.last_seen_date ? String(p.last_seen_date).split('T')[0] : '',
-      issue: '',
-      severity: 'Low',
-      kind: p.kind ?? (p.classification === 'linear_sided' || p.classification === 'linear_unsided' ? 'line' : 'point'),
-      classification: p.classification,
-      geometry: p.geometry,
-      firstFrame: p.first_frame,
-      lastFrame: p.last_frame,
-    }));
-  }, [filteredMapPoints]);
-
-  // ── Unified in-memory table source ──
-  // Same records as mapAssets, sorted client-side by sortKey/sortDir.
-  // Kill the server-paginated /paginated round trip — the map already loaded
-  // everything, table just renders a sorted view of the filtered set.
+  // ── Table records: server-paginated page-of-results ──
   const tableAssets = useMemo<AssetRecord[]>(() => {
-    if (!sortKey) return mapAssets;
-    const accessor: Record<string, (a: AssetRecord) => string> = {
-      assetDisplayId: (a) => a.assetDisplayId ?? "",
-      assetType: (a) => a.assetType ?? "",
-      category: (a) => a.assetCategory ?? "",
-      condition: (a) => a.condition ?? "",
-      road: (a) => a.roadName ?? "",
-      side: (a) => a.side ?? "",
-      zone: (a) => a.zone ?? "",
-      survey: (a) => a.lastSurveyDate ?? "",
-    };
-    const getValue = accessor[sortKey];
-    if (!getValue) return mapAssets;
-    const dir = sortDir === "desc" ? -1 : 1;
-    const arr = [...mapAssets];
-    // Lowercased < / > is ~20× faster than localeCompare across 70k items
-    // and gives the right order for our all-English data (case-insensitive).
-    // Switch back to localeCompare if non-ASCII strings ever land in these
-    // columns — code-unit ordering breaks for Arabic / accented chars.
-    arr.sort((a, b) => {
-      const av = getValue(a).toLowerCase();
-      const bv = getValue(b).toLowerCase();
-      if (av < bv) return -1 * dir;
-      if (av > bv) return 1 * dir;
-      return 0;
+    const items: any[] = paginatedQuery.data?.items ?? [];
+    return items.map((raw) => {
+      const coords = (raw.canonical_location?.coordinates ?? []) as number[];
+      const lat = coords[1] ?? 0;
+      const lng = coords[0] ?? 0;
+      const lastDate = raw.last_seen_date
+        ? String(raw.last_seen_date).split('T')[0]
+        : '';
+      return {
+        id: raw._id ? String(raw._id) : raw.master_display_id,
+        assetDisplayId: raw.master_display_id,
+        masterDisplayId: raw.master_display_id,
+        assetId: raw.asset_id ?? '',
+        assetType: getAssetNameRef.current({ asset_id: raw.asset_id, asset_type: raw.asset_type }) || raw.asset_type || '',
+        assetCategory: getCategoryNameRef.current(raw.category_id ?? ''),
+        defectId: raw.latest_defect_id ?? '',
+        lat, lng,
+        condition: raw.latest_condition ?? 'unknown',
+        markerColor: conditionToColor(raw.latest_condition ?? 'unknown'),
+        groupId: raw.group_id ?? undefined,
+        routeId: raw.route_id,
+        side: raw.side || 'Unknown',
+        zone: raw.zone || 'Unknown',
+        roadName: raw.route_name || '',
+        roadSide: raw.road_side || undefined,
+        lastSurveyDate: lastDate,
+        issue: raw.issue || '',
+        severity: 'Low',
+        kind: 'point',
+      } as AssetRecord;
     });
-    return arr;
-  }, [mapAssets, sortKey, sortDir]);
+  }, [paginatedQuery.data]);
   tableAssetsRef.current = tableAssets;
+  const tableTotalCount = paginatedQuery.data?.total_count ?? 0;
+  const tableTotalPages = paginatedQuery.data?.total_pages ?? 1;
 
   // ── Lazy detail loader ──
   // Fetches survey_history + full description/issue for one selected asset.
@@ -479,26 +468,23 @@ export default function AssetLibrary() {
     return { ...prev, ...detail } as AssetRecord;
   }, []);
 
-  const fetchAndMergeDetail = useCallback(async (asset: AssetRecord) => {
-    if (!asset.masterDisplayId) return;
-    const cached = detailCacheRef.current[asset.masterDisplayId];
-    if (cached) {
-      setSelectedAsset(prev =>
-        mergeDetailIntoSelection(prev, asset.masterDisplayId!, cached)
-      );
-      return;
-    }
-    try {
-      const resp = await api.assets.getMasterByDisplayId(asset.masterDisplayId);
-      if (resp?.item) {
+  // Imperative cache-aware detail fetcher. Uses React Query's cache so repeat
+  // calls (row click → mutation → row click) hit the cache, and a single
+  // invalidation in the mark mutation flushes both this and any other
+  // consumer (e.g. resolveMarkIds).
+  const fetchAssetDetail = useCallback(async (masterDisplayId: string): Promise<Partial<AssetRecord> | null> => {
+    return qc.fetchQuery({
+      queryKey: qk.assets.detail(masterDisplayId),
+      queryFn: async (): Promise<Partial<AssetRecord> | null> => {
+        const resp = await api.assets.getMasterByDisplayId(masterDisplayId);
+        if (!resp?.item) return null;
         const raw = resp.item;
         const history: any[] = raw.survey_history || [];
         const lastDate = raw.last_seen_date
           ? String(raw.last_seen_date).split('T')[0]
           : raw.created_at?.split?.('T')?.[0] || '—';
-
         // Backend uses fast_mongo_response so all ObjectIds are plain strings already.
-        const detail: Partial<AssetRecord> = {
+        return {
           surveyHistory: history.map((h: any) => ({
             survey_display_id: h.survey_display_id,
             survey_date: h.survey_date,
@@ -531,7 +517,16 @@ export default function AssetLibrary() {
           lastSurveyDate: lastDate,
           defectId: raw.latest_defect_id ?? '',
         };
-        detailCacheRef.current[asset.masterDisplayId] = detail;
+      },
+      staleTime: Infinity, // mutations explicitly invalidate
+    });
+  }, [qc]);
+
+  const fetchAndMergeDetail = useCallback(async (asset: AssetRecord) => {
+    if (!asset.masterDisplayId) return;
+    try {
+      const detail = await fetchAssetDetail(asset.masterDisplayId);
+      if (detail) {
         setSelectedAsset(prev =>
           mergeDetailIntoSelection(prev, asset.masterDisplayId!, detail)
         );
@@ -539,7 +534,7 @@ export default function AssetLibrary() {
     } catch {
       // silently ignore — user still sees slim data (type, location, condition, road)
     }
-  }, []);
+  }, [fetchAssetDetail, mergeDetailIntoSelection]);
 
   useEffect(() => {
     const typeParam = searchParams.get("type");
@@ -555,20 +550,58 @@ export default function AssetLibrary() {
     if (routeIdParam) setSelectedRouteId(Number(routeIdParam));
   }, [searchParams]);
 
-  // Navigate prev/next against the in-memory sorted set.
-  const navigateAsset = useCallback((direction: 'prev' | 'next') => {
-    const list = tableAssetsRef.current;
-    if (!selectedAsset?.assetDisplayId || list.length === 0) return;
-    const idx = list.findIndex(a => a.assetDisplayId === selectedAsset.assetDisplayId);
-    if (idx === -1) return;
-    const nextIdx = direction === 'next' ? idx + 1 : idx - 1;
-    if (nextIdx < 0 || nextIdx >= list.length) return;
-    const next = list[nextIdx];
-    setSelectedAsset(next);
-    setSelectedSurveyIdx(0);
-    setMarkerPopup(null);
-    fetchAndMergeDetail(next);
-  }, [selectedAsset, fetchAndMergeDetail]);
+  // Navigate prev/next across the full server-filtered sorted set (not just
+  // the current page). Server resolves the neighbor and returns its row;
+  // we then fetch detail to populate the sidebar exactly like row click.
+  const navigateAsset = useCallback(async (direction: 'prev' | 'next') => {
+    if (!selectedAsset?.masterDisplayId) return;
+    try {
+      const sortParams = {
+        filters: serverFilters,
+        sort_key: sortKey ?? 'lastSurveyDate',
+        sort_dir: sortDir,
+      };
+      const resp = await qc.fetchQuery({
+        queryKey: qk.assets.neighbor(selectedAsset.masterDisplayId, direction, sortParams),
+        queryFn: () => api.assets.getMasterNeighbor(selectedAsset.masterDisplayId!, direction, {
+          sort_key: sortParams.sort_key,
+          sort_dir: sortParams.sort_dir,
+          ...serverFilters,
+        }),
+        staleTime: 60_000,
+      });
+      const raw = resp?.item;
+      if (!raw?.master_display_id) return;
+      const coords = (raw.canonical_location?.coordinates ?? []) as number[];
+      const next: AssetRecord = {
+        id: raw._id ? String(raw._id) : raw.master_display_id,
+        assetDisplayId: raw.master_display_id,
+        masterDisplayId: raw.master_display_id,
+        assetId: raw.asset_id ?? '',
+        assetType: getAssetNameRef.current({ asset_id: raw.asset_id, asset_type: raw.asset_type }) || raw.asset_type || '',
+        assetCategory: getCategoryNameRef.current(raw.category_id ?? ''),
+        defectId: raw.latest_defect_id ?? '',
+        lat: coords[1] ?? 0,
+        lng: coords[0] ?? 0,
+        condition: raw.latest_condition ?? 'unknown',
+        markerColor: conditionToColor(raw.latest_condition ?? 'unknown'),
+        routeId: raw.route_id,
+        side: raw.side || 'Unknown',
+        zone: raw.zone || 'Unknown',
+        roadName: raw.route_name || '',
+        lastSurveyDate: raw.last_seen_date ? String(raw.last_seen_date).split('T')[0] : '',
+        issue: raw.issue || '',
+        severity: 'Low',
+        kind: 'point',
+      };
+      setSelectedAsset(next);
+      setSelectedSurveyIdx(0);
+      setMarkerPopup(null);
+      fetchAndMergeDetail(next);
+    } catch {
+      // Neighbor fetch failed — silently no-op (user can keep navigating later).
+    }
+  }, [selectedAsset, sortKey, sortDir, serverFilters, fetchAndMergeDetail, qc]);
 
   const handleRowClick = useCallback((asset: AssetRecord) => {
     setSelectedAsset(asset);
@@ -580,6 +613,26 @@ export default function AssetLibrary() {
     if (mapTransitionTimer.current) clearTimeout(mapTransitionTimer.current);
     mapTransitionTimer.current = setTimeout(() => setMapTransitioning(false), 400);
   }, [fetchAndMergeDetail]);
+
+  // Map-side click: receives a master_display_id (and optional line-snap
+  // overrides) instead of a full AssetRecord. We materialize the record
+  // from the columnar payload at the indexed position — once per click,
+  // not once per row in the dataset.
+  const handleSelectFromMap = useCallback((id: string, overrides?: { frameNumber?: number; box?: any; lat?: number; lng?: number }) => {
+    const idx = mapData.idIndex.get(id);
+    if (idx === undefined) return;
+    const rec = buildAssetFromMapData(mapData, idx, {
+      getAssetDisplayName: getAssetNameRef.current,
+      getCategoryDisplayName: getCategoryNameRef.current,
+    });
+    if (overrides) {
+      if (overrides.frameNumber !== undefined) rec.frameNumber = overrides.frameNumber;
+      if (overrides.box) rec.box = overrides.box;
+      if (overrides.lat !== undefined) rec.lat = overrides.lat;
+      if (overrides.lng !== undefined) rec.lng = overrides.lng;
+    }
+    handleRowClick(rec);
+  }, [mapData, handleRowClick]);
 
   const [exporting, setExporting] = useState(false);
   const handleExportExcel = async () => {
@@ -634,21 +687,79 @@ export default function AssetLibrary() {
     if (asset.id && asset.id !== asset.masterDisplayId) {
       return { mongoId: asset.id, surveyId: asset.surveyId };
     }
-    const cached = asset.masterDisplayId ? detailCacheRef.current[asset.masterDisplayId] : undefined;
-    if (cached?.id) return { mongoId: cached.id, surveyId: cached.surveyId };
     if (!asset.masterDisplayId) return { mongoId: null, surveyId: undefined };
     try {
-      const resp = await api.assets.getMasterByDisplayId(asset.masterDisplayId);
-      const raw = resp?.item;
-      if (!raw) return { mongoId: null, surveyId: undefined };
-      return {
-        mongoId: raw._id ? String(raw._id) : null,
-        surveyId: raw.latest_survey_id ? String(raw.latest_survey_id) : undefined,
-      };
+      const detail = await fetchAssetDetail(asset.masterDisplayId);
+      if (!detail) return { mongoId: null, surveyId: undefined };
+      return { mongoId: detail.id ?? null, surveyId: detail.surveyId };
     } catch {
       return { mongoId: null, surveyId: undefined };
     }
-  }, []);
+  }, [fetchAssetDetail]);
+
+  // Shared optimistic-update helper for the mark-condition mutations.
+  // Flips a single asset's condition in every active /map-points payload
+  // (filter combos may have multiple cached entries) so the marker recolors
+  // immediately. The paginated table is invalidated separately in onSuccess.
+  // Works on the columnar MapData shape — `withConditionPatch` clones only
+  // the `conditions` array (≈8 MB at 1M, vs. recreating row objects).
+  const optimisticallySetCondition = useCallback((masterDisplayId: string, condition: string) => {
+    const snapshots: Array<{ key: any; data: MapData | undefined }> = [];
+    const queries = qc.getQueriesData<MapData>({ queryKey: ["assets", "map"] });
+    for (const [key, data] of queries) {
+      snapshots.push({ key, data });
+      if (!data) continue;
+      qc.setQueryData<MapData>(key, withConditionPatch(data, masterDisplayId, condition));
+    }
+    return { snapshots };
+  }, [qc]);
+
+  const rollbackMapSnapshots = (snapshots: Array<{ key: any; data: any }>) => {
+    for (const { key, data } of snapshots) qc.setQueryData(key, data);
+  };
+
+  const markGoodMutation = useMutation({
+    mutationFn: (vars: { mongoId: string; modifier: any; masterDisplayId: string }) =>
+      api.assets.markAsGood(vars.mongoId, vars.modifier),
+    onMutate: async ({ masterDisplayId }) => {
+      await qc.cancelQueries({ queryKey: ["assets", "map"] });
+      return optimisticallySetCondition(masterDisplayId, "good");
+    },
+    onError: (_err, _vars, ctx) => {
+      if (ctx) rollbackMapSnapshots(ctx.snapshots);
+    },
+    onSuccess: (_data, { masterDisplayId }) => {
+      qc.invalidateQueries({ queryKey: qk.assets.detail(masterDisplayId) });
+      // Refetch map + paginated so server truth replaces optimistic state.
+      qc.invalidateQueries({ queryKey: ["assets", "map"] });
+      qc.invalidateQueries({ queryKey: ["assets", "paginated"] });
+      // Position-dependent caches: condition flip can shift a row's place
+      // in the sort order (under condition filters) and adds a log entry.
+      qc.invalidateQueries({ queryKey: ["assets", "pageOf"] });
+      qc.invalidateQueries({ queryKey: ["assets", "neighbor"] });
+      qc.invalidateQueries({ queryKey: ["assets", "conditionLogs"] });
+    },
+  });
+
+  const markDefectiveMutation = useMutation({
+    mutationFn: (vars: { mongoId: string; modifier: any; masterDisplayId: string }) =>
+      api.assets.unmarkGood(vars.mongoId, vars.modifier),
+    onMutate: async ({ masterDisplayId }) => {
+      await qc.cancelQueries({ queryKey: ["assets", "map"] });
+      return optimisticallySetCondition(masterDisplayId, "damaged");
+    },
+    onError: (_err, _vars, ctx) => {
+      if (ctx) rollbackMapSnapshots(ctx.snapshots);
+    },
+    onSuccess: (_data, { masterDisplayId }) => {
+      qc.invalidateQueries({ queryKey: qk.assets.detail(masterDisplayId) });
+      qc.invalidateQueries({ queryKey: ["assets", "map"] });
+      qc.invalidateQueries({ queryKey: ["assets", "paginated"] });
+      qc.invalidateQueries({ queryKey: ["assets", "pageOf"] });
+      qc.invalidateQueries({ queryKey: ["assets", "neighbor"] });
+      qc.invalidateQueries({ queryKey: ["assets", "conditionLogs"] });
+    },
+  });
 
   const handleConfirmMarkGood = useCallback(async () => {
     const asset = confirmMarkGoodAsset;
@@ -662,22 +773,22 @@ export default function AssetLibrary() {
     setMarkingSaving((prev) => new Set(prev).add(assetKey));
     try {
       const { mongoId, surveyId } = await resolveMarkIds(asset);
-      if (!mongoId) { toast.error("Cannot update asset: missing ID"); return; }
-      await api.assets.markAsGood(mongoId, { name: surveyorName, user_id: surveyorId, survey_id: surveyId });
+      if (!mongoId || !asset.masterDisplayId) { toast.error("Cannot update asset: missing ID"); return; }
+      await markGoodMutation.mutateAsync({
+        mongoId,
+        modifier: { name: surveyorName, user_id: surveyorId, survey_id: surveyId },
+        masterDisplayId: asset.masterDisplayId,
+      });
       toast.success(`Asset ${asset.assetDisplayId} marked as good`);
-      // Optimistically flip the condition on the in-memory set — this flows
-      // through filteredMapPoints → mapAssets → tableAssets.
-      setMapPoints(prev => prev.map(p => p.master_display_id === asset.assetDisplayId ? { ...p, condition: "good" } : p));
       setSelectedAsset(prev => prev?.masterDisplayId === asset.masterDisplayId
         ? { ...prev, condition: "good", markerColor: conditionToColor("good") }
         : prev);
-      if (asset.masterDisplayId) delete detailCacheRef.current[asset.masterDisplayId];
     } catch (err: any) {
       toast.error(err?.message || "Failed to mark asset as good");
     } finally {
       setMarkingSaving((prev) => { const s = new Set(prev); s.delete(assetKey); return s; });
     }
-  }, [confirmMarkGoodAsset, user, resolveMarkIds]);
+  }, [confirmMarkGoodAsset, user, resolveMarkIds, markGoodMutation]);
 
   // ── Mark as Defective (good → defective) ──
   const handleMarkDefective = useCallback((asset: AssetRecord) => {
@@ -700,20 +811,22 @@ export default function AssetLibrary() {
     setMarkingSaving((prev) => new Set(prev).add(assetKey));
     try {
       const { mongoId, surveyId } = await resolveMarkIds(asset);
-      if (!mongoId) { toast.error("Cannot update asset: missing ID"); return; }
-      await api.assets.unmarkGood(mongoId, { name: surveyorName, user_id: surveyorId, survey_id: surveyId });
+      if (!mongoId || !asset.masterDisplayId) { toast.error("Cannot update asset: missing ID"); return; }
+      await markDefectiveMutation.mutateAsync({
+        mongoId,
+        modifier: { name: surveyorName, user_id: surveyorId, survey_id: surveyId },
+        masterDisplayId: asset.masterDisplayId,
+      });
       toast.success(`Asset ${asset.assetDisplayId} marked as defective`);
-      setMapPoints(prev => prev.map(p => p.master_display_id === asset.assetDisplayId ? { ...p, condition: "damaged" } : p));
       setSelectedAsset(prev => prev?.masterDisplayId === asset.masterDisplayId
         ? { ...prev, condition: "damaged", markerColor: conditionToColor("damaged") }
         : prev);
-      if (asset.masterDisplayId) delete detailCacheRef.current[asset.masterDisplayId];
     } catch (err: any) {
       toast.error(err?.message || "Failed to mark asset as defective");
     } finally {
       setMarkingSaving((prev) => { const s = new Set(prev); s.delete(assetKey); return s; });
     }
-  }, [confirmMarkDefectiveAsset, user, resolveMarkIds]);
+  }, [confirmMarkDefectiveAsset, user, resolveMarkIds, markDefectiveMutation]);
 
   const assetColumns = useMemo(
     () => buildAssetColumns(markingSaving, handleMarkGood, handleMarkDefective),
@@ -812,7 +925,7 @@ export default function AssetLibrary() {
 
       {/* Filter Strip */}
       <AssetFilterStrip
-        filteredCount={tableAssets.length}
+        filteredCount={tableTotalCount}
         countLabel="assets"
         directionFilter={directionFilter}
         onDirectionChange={setDirectionFilter}
@@ -838,15 +951,24 @@ export default function AssetLibrary() {
       <div className="flex min-h-0" style={{ flex: "1 1 45%" }}>
         <div className="flex-1 relative min-w-0" style={{ zIndex: 0, isolation: 'isolate' }}>
           <LibraryMapView
-            assets={mapAssets}
+            data={mapData}
             selectedId={selectedAsset?.assetDisplayId ?? null}
-            onSelect={handleRowClick}
+            onSelect={handleSelectFromMap}
+            getAssetDisplayName={getAssetDisplayName}
             onFetchLineKeypoints={async (id) => {
-              const resp = await api.assets.getMasterAssetKeypoints(id);
+              const resp = await qc.fetchQuery({
+                queryKey: qk.assets.keypoints(id),
+                queryFn: () => api.assets.getMasterAssetKeypoints(id),
+                staleTime: 5 * 60_000,
+              });
               return resp?.keypoints ?? [];
             }}
             onFetchLineGeometry={async (id) => {
-              const resp = await api.assets.getMasterAssetGeometry(id);
+              const resp = await qc.fetchQuery({
+                queryKey: qk.assets.geometry(id),
+                queryFn: () => api.assets.getMasterAssetGeometry(id),
+                staleTime: 5 * 60_000,
+              });
               return resp?.geometry ?? null;
             }}
           />
@@ -887,8 +1009,12 @@ export default function AssetLibrary() {
               setShowFullView(true);
               setFullViewLoading(true);
               try {
-                const resp = await api.assets.getConditionLogs(selectedAsset.id);
-                // console.log("Fetched condition logs:", resp);
+                const mongoId = selectedAsset.id ?? '';
+                const resp = await qc.fetchQuery({
+                  queryKey: qk.assets.conditionLogs(mongoId),
+                  queryFn: () => api.assets.getConditionLogs(mongoId),
+                  staleTime: 60_000,
+                });
                 setConditionLogs(resp?.items ?? []);
               } catch { setConditionLogs([]); }
               finally { setFullViewLoading(false); }
@@ -1303,16 +1429,20 @@ export default function AssetLibrary() {
         </DialogContent>
       </Dialog>
 
-      {/* Bottom Table (client-side paginated, matches Defect Library UI) */}
+      {/* Bottom Table — server-paginated against /master/paginated */}
       <AssetTable
         items={tableAssets}
-        loading={loading}
-        loadError={loadError}
+        // Skeleton only on initial fetch. During refetches (page jump from
+        // map click, sort/filter change) `placeholderData` keeps the prior
+        // rows visible — otherwise the skeleton flashes and the row-level
+        // selection highlight disappears mid-transition.
+        loading={paginatedQuery.isLoading}
+        loadError={paginatedQuery.isError}
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
         selectedId={selectedAsset?.assetDisplayId ?? null}
         onRowClick={handleRowClick}
-        onRetry={() => loadData()}
+        onRetry={() => paginatedQuery.refetch()}
         idField="assetDisplayId"
         onClearFilters={clearFilters}
         columns={assetColumns}
@@ -1325,7 +1455,14 @@ export default function AssetLibrary() {
             setSortKey(colKey);
             setSortDir("asc");
           }
+          setTablePage(1);
         }}
+        serverPage={tablePage}
+        serverPageSize={tablePageSize}
+        serverTotalPages={tableTotalPages}
+        serverTotalCount={tableTotalCount}
+        onPageChange={setTablePage}
+        onPageSizeChange={(size) => { setTablePageSize(size); setTablePage(1); }}
       />
     </div>
   );

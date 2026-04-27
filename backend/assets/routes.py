@@ -2,7 +2,7 @@ import os
 import re
 import math
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, Response, jsonify, request
 from bson import ObjectId
 from pymongo import ASCENDING, DESCENDING
 
@@ -11,8 +11,26 @@ from utils.ids import get_now_iso
 from utils.is_demo_video import is_demo
 from utils.rbac import role_required
 from utils.response import mongo_response, fast_mongo_response
+from cache import (
+	cache_get_body,
+	cache_set_body,
+	make_key as cache_make_key,
+	invalidate_assets_cache,
+)
 
 assets_bp = Blueprint("assets", __name__)
+
+
+@assets_bp.after_request
+def _invalidate_cache_after_writes(response):
+	"""Wipe assets:* cache after every successful write. Catches every
+	mutation route in this blueprint without per-handler boilerplate."""
+	if request.method in ("POST", "PUT", "PATCH", "DELETE") and 200 <= response.status_code < 400:
+		try:
+			invalidate_assets_cache()
+		except Exception:  # noqa: BLE001
+			pass
+	return response
 
 
 def _propagate_group_rename(db, old_group_id: str, new_group_id: str):
@@ -450,25 +468,178 @@ def _build_master_filter(args):
 		query["group_id"] = asset_type
 	search = (args.get("search") or "").strip()
 	if search:
-		pattern = ".*".join(re.escape(w) for w in search.split())
-		regex = {"$regex": pattern, "$options": "i"}
+		# Order-independent AND across all words. Lookahead per word lets a
+		# user type "light head" or "head light" and match "Street Light Head"
+		# either way. `group_id` carries the user-visible display name, so
+		# searches against asset type land here (not on `asset_type`, which
+		# is a raw token like "street_light_head" and was never the intended
+		# search target).
+		words = [re.escape(w) for w in search.split() if w]
+		pattern = "".join(f"(?=.*{w})" for w in words) + ".*"
+		regex = {"$regex": pattern, "$options": "is"}
 		query["$or"] = [
 			{"master_display_id": regex},
-			{"asset_type": regex},
+			{"group_id": regex},
 			{"route_name": regex},
-			{"asset_id": regex},
 			{"issue": regex},
 			{"latest_defect_id": regex},
 		]
 	return query
 
 
+def _map_points_full(db, query, include_defect):
+	"""Returns the full filtered dataset in columnar form.
+
+	Map clustering is done client-side via supercluster — server just emits
+	a flat columnar set of all points (and lines, with geometry) matching
+	the filters. Pan/zoom never re-hits the server."""
+	projection = {
+		"_id": 0,
+		"master_display_id": 1,
+		"asset_id": 1,
+		"canonical_location": 1,
+		"latest_condition": 1,
+		"group_id": 1,
+		"side": 1,
+		"zone": 1,
+		"route_id": 1,
+		"route_name": 1,
+		"category_id": 1,
+		# Linear-asset fields. keypoints fetched on-demand via /master/<id>/keypoints.
+		# geometry_simplified preferred (Douglas-Peucker ~2m); full geometry via
+		# /master/<id>/geometry.
+		"kind": 1,
+		"classification": 1,
+		"geometry": 1,
+		"geometry_simplified": 1,
+		"first_frame": 1,
+		"last_frame": 1,
+	}
+	if include_defect:
+		projection["latest_defect_id"] = 1
+		projection["issue"] = 1
+	cursor = db.master_assets.find(query, projection)
+	return _build_columnar_points(cursor, include_defect, mode="full")
+
+
+
+def _build_columnar_points(cursor, include_defect, mode):
+	"""Drain a master_assets cursor into a columnar JSON response.
+
+	Columnar = parallel arrays per field (vs an array of objects). Smaller
+	wire size + better gzip compression for repeated keys, and lets the
+	frontend index by position without per-row deserialization.
+
+	Payload trims at 1M-asset scale:
+	  - `asset_type` dropped — frontend resolves display name from
+	    `asset_id` via the label map; fallback handles the rare missing case.
+	  - `kinds` dropped — replaced with `line_ids` (the small set of master
+	    display IDs that are linear). Default is "point".
+	  - `route_names` dropped — replaced with `route_dict` keyed by
+	    `route_id`. Lots of rows share a handful of route names; the dict
+	    deduplicates them on the wire and in the JS heap.
+	  - `last_seen_date` dropped entirely — no map consumer reads it
+	    (markers/lines don't display dates). The detail panel pulls dates
+	    via the dedicated /master/<id> endpoint, so the map payload doesn't
+	    need to carry them.
+	"""
+	ids: list[str] = []
+	asset_ids: list[str] = []
+	lats: list[float] = []
+	lngs: list[float] = []
+	conditions: list[str] = []
+	group_ids: list[str | None] = []
+	sides: list[str] = []
+	zones: list[str] = []
+	route_ids: list[int | None] = []
+	category_ids: list[str] = []
+	defect_ids: list[str] = []
+	issues: list[str] = []
+	line_ids: list[str] = []
+	line_extras: dict[str, dict] = {}
+	# Keys are stringified — orjson rejects non-str dict keys, and the
+	# frontend already does `routeDict[String(rid)]` lookups.
+	route_dict: dict[str, str] = {}
+
+	for doc in cursor:
+		coords = (doc.get("canonical_location") or {}).get("coordinates", [0, 0])
+		kind = doc.get("kind") or "point"
+
+		display_id = doc.get("master_display_id", "")
+		ids.append(display_id)
+		asset_ids.append(doc.get("asset_id", ""))
+		lats.append(coords[1] if len(coords) > 1 else 0)
+		lngs.append(coords[0] if len(coords) > 0 else 0)
+		conditions.append(doc.get("latest_condition", "unknown"))
+		group_ids.append(doc.get("group_id"))
+		sides.append(doc.get("side", "Unknown"))
+		zones.append(doc.get("zone", "Unknown"))
+		rid = doc.get("route_id")
+		route_ids.append(rid)
+		# Build route_id → route_name dict (deduplicated on wire). Key
+		# stringified so orjson can serialize, frontend stringifies on
+		# lookup either way.
+		rname = doc.get("route_name")
+		if rid is not None and rname:
+			rid_key = str(rid)
+			if rid_key not in route_dict:
+				route_dict[rid_key] = rname
+		category_ids.append(doc.get("category_id", ""))
+		if include_defect:
+			defect_ids.append(doc.get("latest_defect_id") or "")
+			issues.append(doc.get("issue") or "")
+
+		if kind == "line":
+			if display_id:
+				line_ids.append(display_id)
+			extras: dict = {}
+			classification = doc.get("classification")
+			if classification:
+				extras["classification"] = classification
+			geom = doc.get("geometry_simplified") or doc.get("geometry")
+			if geom:
+				extras["geometry"] = geom
+			if doc.get("first_frame") is not None:
+				extras["first_frame"] = doc.get("first_frame")
+			if doc.get("last_frame") is not None:
+				extras["last_frame"] = doc.get("last_frame")
+			if extras and display_id:
+				line_extras[display_id] = extras
+
+	columns: dict = {
+		"ids": ids,
+		"asset_ids": asset_ids,
+		"lats": lats,
+		"lngs": lngs,
+		"conditions": conditions,
+		"group_ids": group_ids,
+		"sides": sides,
+		"zones": zones,
+		"route_ids": route_ids,
+		"category_ids": category_ids,
+	}
+	if include_defect:
+		columns["defect_ids"] = defect_ids
+		columns["issues"] = issues
+
+	return fast_mongo_response({
+		"count": len(ids),
+		"format": "columnar",
+		"mode": mode,
+		"columns": columns,
+		"line_ids": line_ids,
+		"line_extras": line_extras,
+		"route_dict": route_dict,
+	})
+
+
+
 @assets_bp.get("/master/map-points", endpoint="assets_master_map_points")
 @role_required(["super_admin", "admin", "surveyor", "viewer"])
 def get_master_map_points():
 	"""
-	Lightweight endpoint returning only the fields needed for map rendering.
-	~6 fields per asset → ~300-500KB gzipped for 70k records.
+	Returns the full filtered dataset in columnar form. Map clustering is
+	done client-side via supercluster — pan/zoom never re-hits the server.
 	---
 	tags:
 	  - Assets
@@ -496,142 +667,38 @@ def get_master_map_points():
 	  - name: search
 	    in: query
 	    type: string
+	  - name: include_defect
+	    in: query
+	    type: boolean
 	responses:
 	  200:
 	    description: Map points retrieved successfully
 	"""
 	db = get_db()
 	query = _build_master_filter(request.args)
-
-	# Optional defect-only fields. Off by default so the asset library
-	# (full dataset) doesn't pay the per-record cost; defect library opts in.
 	include_defect = request.args.get("include_defect") in ("1", "true", "yes")
 
-	projection = {
-		"_id": 0,
-		"master_display_id": 1,
-		"asset_type": 1,
-		"asset_id": 1,
-		"canonical_location": 1,
-		"latest_condition": 1,
-		"group_id": 1,
-		"side": 1,
-		"zone": 1,
-		"route_id": 1,
-		"route_name": 1,
-		"category_id": 1,
-		"last_seen_date": 1,
-		# Linear-asset fields (only populated for kind="line" docs).
-		# keypoints intentionally excluded — fetched on-demand via
-		# /master/<id>/keypoints to keep this response small.
-		# geometry_simplified is preferred (Douglas-Peucker ~2m) so the map
-		# renders fewer coords per polyline; full geometry stays in DB and
-		# is available via /master/<id>/geometry.
-		"kind": 1,
-		"classification": 1,
-		"geometry": 1,
-		"geometry_simplified": 1,
-		"first_frame": 1,
-		"last_frame": 1,
-	}
-	if include_defect:
-		projection["latest_defect_id"] = 1
-		projection["issue"] = 1
+	# Cache key namespace bumped (v3) — prior shape included zoom/bbox/cluster
+	# variants that no longer exist. Stale entries under old keys would still
+	# sit under the 600s TTL otherwise.
+	# v4: response shape changed — `asset_type` and `kinds[]`/`route_names[]`
+	# replaced with `line_ids` set + `route_dict`. Bump the namespace so the
+	# old cached payloads don't poison the new client decoder.
+	cache_key = cache_make_key(
+		"assets:map:v4",
+		filters=dict(request.args),
+		include_defect=include_defect,
+	)
+	cached_body = cache_get_body(cache_key)
+	if cached_body is not None:
+		return Response(cached_body, status=200, mimetype="application/json")
 
-	# Columnar response: each field becomes a parallel array. Removes per-row
-	# key overhead (13 keys × 15 chars × 70k rows ≈ 14MB of repeated JSON keys
-	# eliminated) and gzips better since arrays of primitives deduplicate well.
-	# Line-specific fields (geometry, first_frame, last_frame, classification)
-	# live in a sparse side map keyed by master_display_id — most docs are
-	# points, so keeping them out of the column arrays avoids 70k nulls.
-	cursor = db.master_assets.find(query, projection)
-	ids: list[str] = []
-	asset_ids: list[str] = []
-	types: list[str] = []
-	lats: list[float] = []
-	lngs: list[float] = []
-	conditions: list[str] = []
-	group_ids: list[str | None] = []
-	sides: list[str] = []
-	zones: list[str] = []
-	route_ids: list[int | None] = []
-	route_names: list[str] = []
-	category_ids: list[str] = []
-	last_seen_dates: list[str] = []
-	kinds: list[str] = []
-	defect_ids: list[str] = []
-	issues: list[str] = []
-	line_extras: dict[str, dict] = {}
+	resp = _map_points_full(db, query, include_defect)
 
-	for doc in cursor:
-		coords = (doc.get("canonical_location") or {}).get("coordinates", [0, 0])
-		kind = doc.get("kind") or "point"
-		last_seen = doc.get("last_seen_date")
-		if last_seen and not isinstance(last_seen, str):
-			last_seen = last_seen.isoformat() if hasattr(last_seen, "isoformat") else str(last_seen)
-
-		display_id = doc.get("master_display_id", "")
-		ids.append(display_id)
-		asset_ids.append(doc.get("asset_id", ""))
-		types.append(doc.get("asset_type", ""))
-		lats.append(coords[1] if len(coords) > 1 else 0)
-		lngs.append(coords[0] if len(coords) > 0 else 0)
-		conditions.append(doc.get("latest_condition", "unknown"))
-		group_ids.append(doc.get("group_id"))
-		sides.append(doc.get("side", "Unknown"))
-		zones.append(doc.get("zone", "Unknown"))
-		route_ids.append(doc.get("route_id"))
-		route_names.append(doc.get("route_name") or "")
-		category_ids.append(doc.get("category_id", ""))
-		last_seen_dates.append(last_seen or "")
-		kinds.append(kind)
-		if include_defect:
-			defect_ids.append(doc.get("latest_defect_id") or "")
-			issues.append(doc.get("issue") or "")
-
-		if kind == "line":
-			extras: dict = {}
-			classification = doc.get("classification")
-			if classification:
-				extras["classification"] = classification
-			# Prefer the pre-simplified geometry; fall back to full geometry
-			# for docs that predate the migration.
-			geom = doc.get("geometry_simplified") or doc.get("geometry")
-			if geom:
-				extras["geometry"] = geom
-			if doc.get("first_frame") is not None:
-				extras["first_frame"] = doc.get("first_frame")
-			if doc.get("last_frame") is not None:
-				extras["last_frame"] = doc.get("last_frame")
-			if extras and display_id:
-				line_extras[display_id] = extras
-
-	columns: dict = {
-		"ids": ids,
-		"asset_ids": asset_ids,
-		"types": types,
-		"lats": lats,
-		"lngs": lngs,
-		"conditions": conditions,
-		"group_ids": group_ids,
-		"sides": sides,
-		"zones": zones,
-		"route_ids": route_ids,
-		"route_names": route_names,
-		"category_ids": category_ids,
-		"last_seen_dates": last_seen_dates,
-		"kinds": kinds,
-	}
-	if include_defect:
-		columns["defect_ids"] = defect_ids
-		columns["issues"] = issues
-
-	return fast_mongo_response({
-		"count": len(ids),
-		"format": "columnar",
-		"columns": columns,
-		"line_extras": line_extras,
-	})
+	# TTL 600s — payload depends only on master_assets state, invalidated on
+	# every write via invalidate_assets_cache().
+	cache_set_body(cache_key, resp.get_data(), ttl=600)
+	return resp
 
 
 @assets_bp.get("/master/<master_display_id>/keypoints", endpoint="assets_master_keypoints")
@@ -722,32 +789,23 @@ def search_master_assets():
 	db = get_db()
 	projection = {"_id": 0, "master_display_id": 1}
 
-	# Try $text first (fast, index-backed). Fall back to regex if no text
-	# index exists yet or the query doesn't yield results.
-	try:
-		cursor = db.master_assets.find(
-			{"$text": {"$search": q}},
-			projection,
-		)
-		ids = [d["master_display_id"] for d in cursor if d.get("master_display_id")]
-	except Exception:
-		ids = []
-
-	if not ids:
-		pattern = ".*".join(re.escape(w) for w in q.split())
-		regex = {"$regex": pattern, "$options": "i"}
-		cursor = db.master_assets.find(
-			{"$or": [
-				{"master_display_id": regex},
-				{"asset_type": regex},
-				{"route_name": regex},
-				{"asset_id": regex},
-				{"issue": regex},
-				{"latest_defect_id": regex},
-			]},
-			projection,
-		)
-		ids = [d["master_display_id"] for d in cursor if d.get("master_display_id")]
+	# Same lookahead regex as _build_master_filter — order-independent AND
+	# across the user's typed words. Same field set so search results align
+	# with what the table-search filter would return.
+	words = [re.escape(w) for w in q.split() if w]
+	pattern = "".join(f"(?=.*{w})" for w in words) + ".*"
+	regex = {"$regex": pattern, "$options": "is"}
+	cursor = db.master_assets.find(
+		{"$or": [
+			{"master_display_id": regex},
+			{"group_id": regex},
+			{"route_name": regex},
+			{"issue": regex},
+			{"latest_defect_id": regex},
+		]},
+		projection,
+	)
+	ids = [d["master_display_id"] for d in cursor if d.get("master_display_id")]
 
 	return fast_mongo_response({"ids": ids, "count": len(ids)})
 
@@ -830,6 +888,24 @@ def get_master_assets_paginated():
 	sort_dir_param = request.args.get("sort_dir", "desc")
 	mongo_sort_dir = DESCENDING if sort_dir_param == "desc" else ASCENDING
 
+	# Read-through cache. Search is unbounded keyspace — skip cache when a
+	# free-text search is supplied (low repeat rate, would balloon Redis).
+	# Mutations under /api/assets invalidate via _invalidate_cache_after_writes.
+	search_param = request.args.get("search") or ""
+	use_cache = not search_param
+	cache_key = cache_make_key(
+		"assets:paginated:v1",
+		filters=dict(request.args),
+		page=page,
+		limit=limit,
+		sort_key=sort_key_param,
+		sort_dir=sort_dir_param,
+	)
+	if use_cache:
+		cached_body = cache_get_body(cache_key)
+		if cached_body is not None:
+			return Response(cached_body, status=200, mimetype="application/json")
+
 	# Table-only inclusion projection. Viewer-only fields (latest_box,
 	# latest_frame_number, latest_video_id, latest_description) are fetched
 	# on demand via GET /master/<display_id> when the user opens a row.
@@ -896,13 +972,17 @@ def get_master_assets_paginated():
 			doc["latest_survey_id"] = str(doc["latest_survey_id"])
 		items.append(doc)
 
-	return fast_mongo_response({
+	resp = fast_mongo_response({
 		"items": items,
 		"total_count": total_count,
 		"total_pages": total_pages,
 		"page": page,
 		"limit": limit,
 	})
+	if use_cache:
+		# 600s TTL — same as map-points. Mutation invalidator flushes on writes.
+		cache_set_body(cache_key, resp.get_data(), ttl=600)
+	return resp
 
 
 def _resolve_sort_field(args):

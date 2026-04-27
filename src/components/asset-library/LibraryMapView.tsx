@@ -1,4 +1,4 @@
-import { useEffect, useRef, useMemo, useCallback, useState } from "react";
+import { useEffect, useRef, useMemo, useCallback } from "react";
 import {
   MapContainer,
   TileLayer,
@@ -6,7 +6,8 @@ import {
 } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import type { AssetRecord } from "@/types/asset";
+import Supercluster from "supercluster";
+import type { MapData } from "@/types/asset";
 import { useLabelMap, type ResolvedMap } from "@/contexts/LabelMapContext";
 import { isAssetIconExist, getAssetIconFromId } from "@/components/settings/iconConfig";
 
@@ -16,6 +17,24 @@ const DEFAULT_RADIUS = 6;
 const SELECTED_RADIUS = 10;
 const LINE_SIDED_COLOR = "#22d3ee";    // cyan-400
 const LINE_UNSIDED_COLOR = "#f59e0b";  // amber-500
+
+// Supercluster tuning. radius is screen-pixel grouping distance; maxZoom is
+// the zoom past which clustering stops — points render individually so
+// singletons can be highlighted on selection without forcing a deeper zoom.
+const CLUSTER_RADIUS_PX = 10;
+const CLUSTER_MAX_ZOOM = 13;
+const CLUSTER_MIN_POINTS = 3;
+
+const DAMAGED_CONDITIONS = new Set([
+  'overgrown', 'fadedpaint', 'dirty', 'missing', 'broken', 'bent', 'damaged',
+]);
+
+function conditionToColor(condition: string | undefined): string {
+  const c = (condition ?? '').toLowerCase();
+  if (DAMAGED_CONDITIONS.has(c)) return '#ef4444'; // red-500
+  if (c === 'good') return '#22c55e'; // green-500
+  return '#f59e0b'; // amber for unknown
+}
 
 /* ── Helper: metres between two lat/lngs (Haversine) ────── */
 function haversineM(lat1: number, lng1: number, lat2: number, lng2: number): number {
@@ -50,17 +69,40 @@ type LineKeypoint = {
   box?: { x: number; y: number; width: number; height: number };
 };
 
-/* ── Props ──────────────────────────────────────────────── */
+/** Per-row override that flows out of a click. Lines forward the snap
+ *  point (lat/lng/frame/box of the nearest keypoint) so the page can show
+ *  the right frame in the sidebar. */
+export interface MapClickOverrides {
+  frameNumber?: number;
+  box?: { x: number; y: number; width: number; height: number };
+  lat?: number;
+  lng?: number;
+}
+
+/* ── Supercluster property shape ─────────────────────────── */
+type ClusterProps = {
+  id: string;
+  condition: string;
+  // Accumulated condition counts so reduce() can pick the dominant.
+  conds: Record<string, number>;
+};
+
 interface LibraryMapViewProps {
-  assets: AssetRecord[];
+  /** Columnar map-points payload. LibraryMapView indexes into the parallel
+   *  arrays by position; it never materializes one AssetRecord per row. */
+  data: MapData;
   selectedId: string | null;
-  onSelect: (asset: AssetRecord) => void;
-  /** Fetch keypoints for a line asset on-demand. Keypoints are no longer in
-   * the initial map-points payload — they load on first line click. */
+  /** Called with the master_display_id of the clicked asset. Lines also
+   *  pass `overrides` carrying the nearest-keypoint snap (lat/lng/frame/box)
+   *  so the sidebar shows the right observation frame. */
+  onSelect: (id: string, overrides?: MapClickOverrides) => void;
+  /** Display name resolver, used in tooltips. Pages already hold a
+   *  labelMap-aware version of this — passing it down avoids touching
+   *  labelMap inside the map view. */
+  getAssetDisplayName: (a: { asset_id?: string; assetId?: string }) => string;
+  /** Fetch keypoints for a line asset on-demand. */
   onFetchLineKeypoints?: (masterDisplayId: string) => Promise<LineKeypoint[]>;
-  /** Fetch the full (un-simplified) geometry for a line asset on-demand.
-   * /map-points ships a Douglas-Peucker simplified polyline to keep the
-   * payload small; full geometry is swapped in on click for accurate shape. */
+  /** Fetch the full (un-simplified) geometry for a line on-demand. */
   onFetchLineGeometry?: (masterDisplayId: string) => Promise<{
     type: "LineString";
     coordinates: [number, number][];
@@ -70,33 +112,39 @@ interface LibraryMapViewProps {
 /* ── Fast unmount: bypass per-layer teardown on unmount.
  * Leaflet's map.remove() iterates every layer synchronously — with tens of
  * thousands of CircleMarkers this stalls the main thread for seconds when
- * navigating away. Child-effect cleanup runs before MapContainer's own
- * cleanup, so stubbing map._layers here leaves nothing for the subsequent
- * map.remove() to walk. Unreachable markers are collected by GC later.
- * Only runs on true unmount (stable [map] dep), not on re-renders. */
+ * navigating away. Stubbing _layers leaves nothing for remove() to walk. */
 function FastUnmount() {
   const map = useMap();
   useEffect(() => {
     return () => {
-      try { (map as any)._layers = {}; } catch { /* noop */ }
+      try { (map as unknown as { _layers: Record<string, unknown> })._layers = {}; } catch { /* noop */ }
     };
   }, [map]);
   return null;
 }
 
-/* ── Fits bounds whenever assets change ─────────────────── */
-function FitBounds({ assets }: { assets: AssetRecord[] }) {
+/* ── Fits bounds whenever data first appears ───────────── */
+function FitBounds({ data }: { data: MapData }) {
   const map = useMap();
   const fitted = useRef(false);
 
   useEffect(() => {
-    if (fitted.current || assets.length === 0) return;
+    if (fitted.current || data.count === 0) return;
+    // Sample up to 5000 points for fit — fitting on 1M lat/lngs is wasteful
+    // and the bounds computation result is identical at any reasonable
+    // sample size (we already cap zoom at 16).
+    const stride = Math.max(1, Math.floor(data.count / 5000));
     const latlngs: [number, number][] = [];
-    for (const a of assets) {
-      if (a.kind === "line" && a.geometry?.coordinates?.length) {
-        for (const c of a.geometry.coordinates) latlngs.push([c[1], c[0]]);
-      } else {
-        latlngs.push([a.lat, a.lng]);
+    for (let i = 0; i < data.count; i += stride) {
+      latlngs.push([data.lats[i], data.lngs[i]]);
+    }
+    // Lines: include first coord of each line geometry so a route-only
+    // dataset still fits.
+    for (const id of data.lineSet) {
+      const g = data.line_extras[id]?.geometry;
+      if (g?.coordinates?.length) {
+        const c = g.coordinates[0];
+        latlngs.push([c[1], c[0]]);
       }
     }
     if (!latlngs.length) return;
@@ -105,17 +153,18 @@ function FitBounds({ assets }: { assets: AssetRecord[] }) {
       map.fitBounds(bounds, { padding: [10, 10], maxZoom: 16 });
       fitted.current = true;
     }
-  }, [assets, map]);
+  }, [data, map]);
 
   return null;
 }
 
-/* ── Flies to selected asset ────────────────────────────── */
+/* ── Flies to selected asset; jumps past CLUSTER_MAX_ZOOM so the asset is
+ * never hidden inside a cluster cell when highlighted. */
 function FlyToSelected({
-  assets,
+  data,
   selectedId,
 }: {
-  assets: AssetRecord[];
+  data: MapData;
   selectedId: string | null;
 }) {
   const map = useMap();
@@ -125,38 +174,46 @@ function FlyToSelected({
     if (selectedId === prevId.current) return;
     prevId.current = selectedId;
     if (!selectedId) return;
-    const asset = assets.find((a) => a.assetDisplayId === selectedId);
-    if (!asset) return;
-    // For lines centre on first coord; for points use lat/lng.
-    let lat = asset.lat;
-    let lng = asset.lng;
-    if (asset.kind === "line" && asset.geometry?.coordinates?.[0]) {
-      lng = asset.geometry.coordinates[0][0];
-      lat = asset.geometry.coordinates[0][1];
+    const idx = data.idIndex.get(selectedId);
+    if (idx === undefined) return;
+    let lat = data.lats[idx];
+    let lng = data.lngs[idx];
+    if (data.lineSet.has(selectedId)) {
+      const g = data.line_extras[selectedId]?.geometry;
+      if (g?.coordinates?.[0]) {
+        lng = g.coordinates[0][0];
+        lat = g.coordinates[0][1];
+      }
     }
-    map.setView([lat, lng], Math.max(map.getZoom(), 16), { animate: false });
-  }, [selectedId, assets, map]);
+    map.setView([lat, lng], Math.max(map.getZoom(), CLUSTER_MAX_ZOOM + 1), { animate: false });
+  }, [selectedId, data, map]);
 
   return null;
 }
 
-/* ── Canvas marker + polyline layer ────────────────────── */
-function CanvasMarkerLayer({
-  markerAssets,
-  lineAssets,
+/* ── Client-side cluster + line render layer ─────────────
+ * Supercluster builds a kdbush index over the point indices once per
+ * dataset. On every move/zoom we ask the index for the cells in the current
+ * viewport and render each cell as one marker — visually identical to a
+ * singleton, so the user can't tell a cluster from a real asset. Clicking
+ * a cluster zooms in to its expansion zoom; clicking a singleton fires
+ * onSelect(id). Lines bypass clustering entirely. */
+function ClusterLayer({
+  data,
   selectedId,
   onSelect,
   wantsIcons,
   labelMapData,
+  getAssetDisplayName,
   onFetchLineKeypoints,
   onFetchLineGeometry,
 }: {
-  markerAssets: AssetRecord[];
-  lineAssets: AssetRecord[];
+  data: MapData;
   selectedId: string | null;
-  onSelect: (asset: AssetRecord) => void;
+  onSelect: (id: string, overrides?: MapClickOverrides) => void;
   wantsIcons: boolean;
   labelMapData: ResolvedMap | null;
+  getAssetDisplayName: (a: { asset_id?: string }) => string;
   onFetchLineKeypoints?: (masterDisplayId: string) => Promise<LineKeypoint[]>;
   onFetchLineGeometry?: (masterDisplayId: string) => Promise<{
     type: "LineString";
@@ -164,276 +221,287 @@ function CanvasMarkerLayer({
   } | null>;
 }) {
   const map = useMap();
-  // Viewport bounds — only assets inside this rect are turned into Leaflet
-  // objects. Caps marker count regardless of dataset size, so the Leaflet
-  // teardown cost on unmount stays bounded. Updates on pan/zoom end (no
-  // thrashing during motion).
-  const [bounds, setBounds] = useState<L.LatLngBounds | null>(() => {
-    try { const b = map.getBounds(); return b.isValid() ? b : null; } catch { return null; }
-  });
-  useEffect(() => {
-    const update = () => {
-      try { const b = map.getBounds(); if (b.isValid()) setBounds(b); } catch { /* noop */ }
-    };
-    map.on("moveend", update);
-    map.on("zoomend", update);
-    update();
-    return () => {
-      map.off("moveend", update);
-      map.off("zoomend", update);
-    };
-  }, [map]);
 
-  const visibleMarkerAssets = useMemo(() => {
-    // Until the map has reported a valid viewport, render nothing. Earlier
-    // we fell back to the full markerAssets list here, which created ~70k
-    // Leaflet objects on first mount (before bounds settled) and defeated
-    // the whole purpose of the viewport filter.
-    if (!bounds) return [];
-    const padded = bounds.pad(0.3);
-    let filtered: AssetRecord[] = [];
-    for (const a of markerAssets) {
-      if (padded.contains([a.lat, a.lng] as [number, number])) filtered.push(a);
-    }
-    // Hard cap regardless of viewport. fitBounds zooms out to fit the whole
-    // dataset on first mount, which puts every point inside the viewport;
-    // without this cap we'd still create 70k Leaflet markers on overview
-    // views. As the user zooms in, the filter narrows naturally and the
-    // cap stops mattering. Sampled uniformly so spatial distribution is
-    // preserved (vs. truncating to first N which clusters geographically).
-    const MAX_VISIBLE = 2000;
-    if (filtered.length > MAX_VISIBLE) {
-      const stride = filtered.length / MAX_VISIBLE;
-      const sampled: AssetRecord[] = [];
-      for (let i = 0; i < MAX_VISIBLE; i++) sampled.push(filtered[Math.floor(i * stride)]);
-      filtered = sampled;
-    }
-    // Selected asset must always render so the fast-path restyle can find it,
-    // even if it sits outside the current viewport (e.g. table-click before
-    // the map pans to it).
-    if (selectedId && !filtered.some(a => a.assetDisplayId === selectedId)) {
-      const sel = markerAssets.find(a => a.assetDisplayId === selectedId);
-      if (sel) filtered.push(sel);
-    }
-    return filtered;
-  }, [markerAssets, bounds, selectedId]);
-
-  const layerRef = useRef<L.LayerGroup>(L.layerGroup());
+  // Layer groups: separate so we can blow away markers on every render
+  // without disturbing the line diff state.
+  const markerLayerRef = useRef<L.LayerGroup>(L.layerGroup());
+  const lineLayerRef = useRef<L.LayerGroup>(L.layerGroup());
   const tooltipRef = useRef<L.Tooltip>(L.tooltip({ direction: "top", offset: [0, -8], opacity: 0.95 }));
-  const markerMapRef = useRef<Map<string, L.CircleMarker>>(new Map());
-  const iconMarkerMapRef = useRef<Map<string, L.Marker>>(new Map());
-  const lineMapRef = useRef<Map<string, L.Polyline>>(new Map());
-  const iconHighlightRef = useRef<L.CircleMarker | null>(null);
-  const prevSelectedRef = useRef<string | null>(null);
-  const assetLookupRef = useRef<Map<string, AssetRecord>>(new Map());
-  // Per-line keypoints cache so repeated clicks on the same line don't refetch.
+  // Per-line caches (keypoints for nearest-frame snap, full geometry).
   const lineKeypointsCacheRef = useRef<Map<string, LineKeypoint[]>>(new Map());
-  // Per-line full-geometry cache (positions in Leaflet [lat,lng] order).
-  // When present, takes priority over the simplified geometry from assets.
   const lineFullGeomCacheRef = useRef<Map<string, [number, number][]>>(new Map());
-  // Structural deps — when these change we tear down and rebuild (rare).
-  const prevStructuralRef = useRef<{ wantsIcons: boolean; labelMapData: ResolvedMap | null } | null>(null);
-  // Keep latest fetchers reachable from stable click closures.
+  const lineMapRef = useRef<Map<string, L.Polyline>>(new Map());
+  // Latest fetcher refs so click closures stay stable.
   const fetchKeypointsRef = useRef(onFetchLineKeypoints);
   fetchKeypointsRef.current = onFetchLineKeypoints;
   const fetchGeometryRef = useRef(onFetchLineGeometry);
   fetchGeometryRef.current = onFetchLineGeometry;
+  const onSelectRef = useRef(onSelect);
+  onSelectRef.current = onSelect;
+  const dataRef = useRef(data);
+  dataRef.current = data;
+  const getNameRef = useRef(getAssetDisplayName);
+  getNameRef.current = getAssetDisplayName;
 
+  // ── Build supercluster index when data changes ────
+  // Features are seeded from POINT indices (anything not in lineSet that has
+  // valid coords). Lines are diff-rendered separately below.
+  const indexRef = useRef<Supercluster<ClusterProps> | null>(null);
   useEffect(() => {
-    const layer = layerRef.current;
-    const tooltip = tooltipRef.current;
-    const markerMap = markerMapRef.current;
-    const iconMarkerMap = iconMarkerMapRef.current;
-    const lineMap = lineMapRef.current;
-    const assetLookup = assetLookupRef.current;
-
-    // Structural change (icons toggled or label map swapped) — full teardown.
-    const structural = prevStructuralRef.current;
-    const structuralChanged = structural === null
-      || structural.wantsIcons !== wantsIcons
-      || structural.labelMapData !== labelMapData;
-    prevStructuralRef.current = { wantsIcons, labelMapData };
-
-    if (structuralChanged) {
-      layer.clearLayers();
-      markerMap.clear();
-      iconMarkerMap.clear();
-      lineMap.clear();
-      iconHighlightRef.current = null;
+    type Feat = GeoJSON.Feature<GeoJSON.Point, ClusterProps>;
+    const features: Feat[] = [];
+    for (let i = 0; i < data.count; i++) {
+      const id = data.ids[i];
+      if (!id) continue;
+      if (data.lineSet.has(id)) continue;
+      const cond = (data.conditions[i] ?? 'unknown').toLowerCase();
+      features.push({
+        type: 'Feature',
+        geometry: { type: 'Point', coordinates: [data.lngs[i], data.lats[i]] },
+        properties: {
+          id,
+          condition: cond,
+          conds: { [cond]: 1 },
+        },
+      });
     }
+    const idx = new Supercluster<ClusterProps>({
+      radius: CLUSTER_RADIUS_PX,
+      maxZoom: CLUSTER_MAX_ZOOM,
+      minPoints: CLUSTER_MIN_POINTS,
+      // map() runs on each leaf's properties to seed cluster aggregation.
+      // reduce() merges accumulated cluster props pairwise.
+      map: (props) => ({
+        id: props.id,
+        condition: props.condition,
+        conds: { ...props.conds },
+      }),
+      reduce: (acc, props) => {
+        for (const k in props.conds) {
+          acc.conds[k] = (acc.conds[k] || 0) + props.conds[k];
+        }
+        let best = acc.condition;
+        let bestN = -1;
+        for (const k in acc.conds) {
+          if (acc.conds[k] > bestN) { bestN = acc.conds[k]; best = k; }
+        }
+        acc.condition = best;
+      },
+    });
+    idx.load(features);
+    indexRef.current = idx;
+  }, [data]);
 
-    // Rebuild lookup fresh so click handlers resolve to the latest asset data.
-    // Only visible markers are rendered (and therefore clickable), so lookup
-    // only needs the visible set + all lines.
-    assetLookup.clear();
-    for (const a of visibleMarkerAssets) if (a.assetDisplayId) assetLookup.set(a.assetDisplayId, a);
-    for (const a of lineAssets) if (a.assetDisplayId) assetLookup.set(a.assetDisplayId, a);
-
-    const attachMarkerHover = (marker: L.Layer, asset: AssetRecord) => {
-      marker.on("mouseover", (e: any) => {
-        tooltip.setLatLng(e.latlng);
-        tooltip.setContent(
-          `<div class="text-xs leading-tight">` +
-          `<div class="font-semibold">${asset.assetType}</div>` +
-          `<div class="text-[10px] text-muted-foreground font-mono">${asset.lat.toFixed(5)}, ${asset.lng.toFixed(5)}</div>` +
-          `</div>`
-        );
-        if (!map.hasLayer(tooltip)) tooltip.addTo(map);
-      });
-      marker.on("mouseout", () => {
-        if (map.hasLayer(tooltip)) map.removeLayer(tooltip);
-      });
+  // ── Mount layer groups on the map ─────────────────────
+  useEffect(() => {
+    const ml = markerLayerRef.current;
+    const ll = lineLayerRef.current;
+    ml.addTo(map);
+    ll.addTo(map);
+    return () => {
+      try { map.removeLayer(ml); } catch { /* noop */ }
+      try { map.removeLayer(ll); } catch { /* noop */ }
     };
+  }, [map]);
 
-    // ── Point markers: diff ────────────────────────────────
-    const newMarkerIds = new Set<string>();
-    const newIconIds = new Set<string>();
-    for (const a of visibleMarkerAssets) {
-      const displayId = a.assetDisplayId;
-      if (!displayId) continue;
-      const assetKey = a.asset_id || a.assetId;
-      const useIcon = wantsIcons && assetKey && isAssetIconExist(assetKey, labelMapData);
-      if (useIcon) newIconIds.add(displayId);
-      else newMarkerIds.add(displayId);
-    }
+  // ── Tooltip helper. Builds content from MapData by index — no per-row
+  // AssetRecord allocation. ────────────────────────
+  const attachHover = useCallback((marker: L.Layer, id: string) => {
+    marker.on('mouseover', (e: L.LeafletMouseEvent) => {
+      const d = dataRef.current;
+      const i = d.idIndex.get(id);
+      if (i === undefined) return;
+      const tooltip = tooltipRef.current;
+      const name = getNameRef.current({ asset_id: d.asset_ids[i] }) || '';
+      const lat = d.lats[i];
+      const lng = d.lngs[i];
+      tooltip.setLatLng(e.latlng);
+      tooltip.setContent(
+        `<div class="text-xs leading-tight">` +
+        `<div class="font-semibold">${name}</div>` +
+        `<div class="text-[10px] text-muted-foreground font-mono">${lat.toFixed(5)}, ${lng.toFixed(5)}</div>` +
+        `</div>`
+      );
+      if (!map.hasLayer(tooltip)) tooltip.addTo(map);
+    });
+    marker.on('mouseout', () => {
+      const tooltip = tooltipRef.current;
+      if (map.hasLayer(tooltip)) map.removeLayer(tooltip);
+    });
+  }, [map]);
 
-    for (const [id, marker] of markerMap) {
-      if (!newMarkerIds.has(id)) {
-        layer.removeLayer(marker);
-        markerMap.delete(id);
-      }
-    }
-    for (const [id, marker] of iconMarkerMap) {
-      if (!newIconIds.has(id)) {
-        layer.removeLayer(marker);
-        iconMarkerMap.delete(id);
-      }
-    }
+  // ── Render markers (clusters + singletons) on every viewport change ──
+  const renderMarkers = useCallback(() => {
+    const idx = indexRef.current;
+    const layer = markerLayerRef.current;
+    layer.clearLayers();
+    if (!idx) return;
 
-    for (const asset of visibleMarkerAssets) {
-      const displayId = asset.assetDisplayId;
-      if (!displayId) continue;
-      const isSelected = displayId === selectedId;
-      const assetKey = asset.asset_id || asset.assetId;
-      const useIcon = wantsIcons && assetKey && isAssetIconExist(assetKey, labelMapData);
+    const bounds = map.getBounds();
+    const bbox: [number, number, number, number] = [
+      bounds.getWest(), bounds.getSouth(), bounds.getEast(), bounds.getNorth(),
+    ];
+    const zoom = Math.min(map.getZoom(), CLUSTER_MAX_ZOOM + 1);
+    const features = idx.getClusters(bbox, Math.floor(zoom));
+    const selId = selectedId;
+    const d = dataRef.current;
 
-      if (useIcon) {
-        let marker = iconMarkerMap.get(displayId);
-        if (!marker) {
-          const icon = getAssetIconFromId(assetKey!, labelMapData);
-          marker = L.marker([asset.lat, asset.lng], { icon });
-          marker.on("click", () => {
-            const a = assetLookupRef.current.get(displayId);
-            if (a) onSelect(a);
-          });
-          attachMarkerHover(marker, asset);
-          layer.addLayer(marker);
-          iconMarkerMap.set(displayId, marker);
-        } else {
-          marker.setLatLng([asset.lat, asset.lng]);
+    for (const f of features) {
+      const [lng, lat] = f.geometry.coordinates as [number, number];
+      const props = f.properties as unknown as (ClusterProps & { cluster?: boolean; cluster_id?: number; point_count?: number });
+      const isCluster = !!props.cluster;
+      const cond = props.condition ?? 'unknown';
+      const id = props.id;
+      const isSelected = !isCluster && id === selId;
+      const fillColor = isSelected ? SELECTED_COLOR : conditionToColor(cond);
+      const radius = isSelected ? SELECTED_RADIUS : DEFAULT_RADIUS;
+      const weight = isSelected ? 1.8 : 1.5;
+      const fillOpacity = isSelected ? 0.9 : 0.7;
+
+      // Singleton with a known asset_id and an icon mapping → render as icon.
+      if (!isCluster) {
+        const i = d.idIndex.get(id);
+        if (i === undefined) continue;
+        const assetKey = d.asset_ids[i];
+        const useIcon = wantsIcons && assetKey && isAssetIconExist(assetKey, labelMapData);
+        if (useIcon && !isSelected) {
+          const icon = getAssetIconFromId(assetKey, labelMapData);
+          const m = L.marker([lat, lng], { icon });
+          m.on('click', () => onSelectRef.current(id));
+          attachHover(m, id);
+          layer.addLayer(m);
+          continue;
         }
-      } else {
-        const fillColor = isSelected ? SELECTED_COLOR : (asset.markerColor ?? "red");
-        const radius = isSelected ? SELECTED_RADIUS : DEFAULT_RADIUS;
-        const weight = isSelected ? 1.8 : 1.5;
-        const fillOpacity = isSelected ? 0.9 : 0.7;
-
-        let marker = markerMap.get(displayId);
-        if (!marker) {
-          marker = L.circleMarker([asset.lat, asset.lng], {
-            radius, color: "#fff", weight, fillColor, fillOpacity,
+        // Selected icon-marker: draw the icon AND a highlight circle on top.
+        if (useIcon && isSelected) {
+          const icon = getAssetIconFromId(assetKey, labelMapData);
+          const m = L.marker([lat, lng], { icon });
+          m.on('click', () => onSelectRef.current(id));
+          attachHover(m, id);
+          layer.addLayer(m);
+          const hi = L.circleMarker([lat, lng], {
+            radius: SELECTED_RADIUS,
+            color: SELECTED_COLOR,
+            fillColor: SELECTED_COLOR,
+            fillOpacity: 0.3,
+            weight: 2,
           });
-          (marker as any)._assetDisplayId = displayId;
-          marker.on("click", () => {
-            const a = assetLookupRef.current.get(displayId);
-            if (a) onSelect(a);
-          });
-          attachMarkerHover(marker, asset);
-          layer.addLayer(marker);
-          markerMap.set(displayId, marker);
-        } else {
-          marker.setLatLng([asset.lat, asset.lng]);
-          marker.setRadius(radius);
-          marker.setStyle({ fillColor, fillOpacity, weight });
+          layer.addLayer(hi);
+          continue;
         }
+        const marker = L.circleMarker([lat, lng], {
+          radius, color: '#fff', weight, fillColor, fillOpacity,
+        });
+        marker.on('click', () => onSelectRef.current(id));
+        attachHover(marker, id);
+        layer.addLayer(marker);
+        if (isSelected) marker.bringToFront();
+        continue;
       }
+
+      // Cluster cell — drawn as one plain circle marker.
+      const marker = L.circleMarker([lat, lng], {
+        radius: DEFAULT_RADIUS,
+        color: '#fff',
+        weight: 1.5,
+        fillColor: conditionToColor(cond),
+        fillOpacity: 0.7,
+      });
+      marker.on('click', () => {
+        // Jump past CLUSTER_MAX_ZOOM in one go — supercluster stops clustering
+        // beyond it, so the click resolves directly to individual markers.
+        const targetZoom = Math.max(map.getZoom() + 1, CLUSTER_MAX_ZOOM + 1);
+        map.setView([lat, lng], Math.min(targetZoom, 18), { animate: false });
+      });
+      layer.addLayer(marker);
     }
+  }, [map, selectedId, wantsIcons, labelMapData, attachHover]);
 
-    // ── Line assets: diff ──────────────────────────────────
-    const newLineIds = new Set<string>();
-    for (const a of lineAssets) if (a.assetDisplayId) newLineIds.add(a.assetDisplayId);
+  // Re-render markers on viewport / data / selection changes.
+  useEffect(() => {
+    renderMarkers();
+    const onMove = () => renderMarkers();
+    map.on('moveend', onMove);
+    map.on('zoomend', onMove);
+    return () => {
+      map.off('moveend', onMove);
+      map.off('zoomend', onMove);
+    };
+  }, [map, renderMarkers, data, selectedId]);
 
+  // ── Lines: diff render driven by data.lineSet ────
+  useEffect(() => {
+    const layer = lineLayerRef.current;
+    const tooltip = tooltipRef.current;
+    const lineMap = lineMapRef.current;
+
+    // Drop polylines that are no longer in the dataset.
     for (const [id, line] of lineMap) {
-      if (!newLineIds.has(id)) {
+      if (!data.lineSet.has(id)) {
         layer.removeLayer(line);
         lineMap.delete(id);
       }
     }
 
-    for (const asset of lineAssets) {
-      const displayId = asset.assetDisplayId;
-      if (!displayId) continue;
-      // Prefer cached full geometry (fetched on click) over the simplified
-      // geometry that came down in /map-points, so previously-clicked lines
-      // keep their accurate shape across diff updates.
-      const cachedFull = lineFullGeomCacheRef.current.get(displayId);
-      const coords = asset.geometry?.coordinates ?? [];
+    // Add / update polylines for current line ids.
+    for (const id of data.lineSet) {
+      const i = data.idIndex.get(id);
+      if (i === undefined) continue;
+      const extras = data.line_extras[id];
+      const cachedFull = lineFullGeomCacheRef.current.get(id);
+      const coords = extras?.geometry?.coordinates ?? [];
       const positions: [number, number][] = cachedFull
         ? cachedFull
         : coords.map((c) => [c[1], c[0]]);
       if (positions.length < 2) continue;
-      const isSelected = displayId === selectedId;
-      const routeKey = String(asset.routeId ?? displayId);
-      const baseColor = asset.classification === "linear_sided"
+
+      const isSelected = id === selectedId;
+      const rid = data.route_ids[i];
+      const routeKey = String(rid ?? id);
+      const classification = extras?.classification;
+      const baseColor = classification === 'linear_sided'
         ? LINE_SIDED_COLOR
-        : asset.classification === "linear_unsided"
+        : classification === 'linear_unsided'
           ? LINE_UNSIDED_COLOR
           : routeColor(routeKey, isSelected);
       const color = isSelected ? SELECTED_COLOR : baseColor;
       const weight = isSelected ? 7 : 5;
       const opacity = isSelected ? 1 : 0.85;
 
-      let line = lineMap.get(displayId);
+      let line = lineMap.get(id);
       if (!line) {
-        line = L.polyline(positions, { color, weight, opacity, lineCap: "round", lineJoin: "round" });
+        line = L.polyline(positions, { color, weight, opacity, lineCap: 'round', lineJoin: 'round' });
 
-        line.on("click", async (e: any) => {
-          const rec = assetLookupRef.current.get(displayId);
-          if (!rec) return;
+        line.on('click', async (e: L.LeafletMouseEvent) => {
           const { lat, lng } = e.latlng ?? {};
           if (lat == null || lng == null) {
-            onSelect(rec);
+            onSelectRef.current(id);
             return;
           }
-          const cacheKey = rec.masterDisplayId ?? displayId;
 
-          // Kick off full-geometry fetch in parallel — the simplified line
-          // is fine for snap-to-nearest, but we want the accurate shape in
-          // place for when the user looks closer.
           if (
-            !lineFullGeomCacheRef.current.has(cacheKey) &&
-            fetchGeometryRef.current &&
-            rec.masterDisplayId
+            !lineFullGeomCacheRef.current.has(id) &&
+            fetchGeometryRef.current
           ) {
-            fetchGeometryRef.current(rec.masterDisplayId)
+            fetchGeometryRef.current(id)
               .then((geom) => {
                 const fullCoords = geom?.coordinates;
                 if (!fullCoords || fullCoords.length < 2) return;
                 const fullPositions: [number, number][] = fullCoords.map(
                   (c) => [c[1], c[0]]
                 );
-                lineFullGeomCacheRef.current.set(cacheKey, fullPositions);
-                const liveLine = lineMap.get(displayId);
+                lineFullGeomCacheRef.current.set(id, fullPositions);
+                const liveLine = lineMap.get(id);
                 if (liveLine) liveLine.setLatLngs(fullPositions);
               })
               .catch(() => { /* fall back to simplified geometry */ });
           }
 
-          let kps = lineKeypointsCacheRef.current.get(cacheKey);
-          if (!kps && fetchKeypointsRef.current && rec.masterDisplayId) {
+          let kps = lineKeypointsCacheRef.current.get(id);
+          if (!kps && fetchKeypointsRef.current) {
             try {
-              kps = await fetchKeypointsRef.current(rec.masterDisplayId);
-              lineKeypointsCacheRef.current.set(cacheKey, kps);
+              kps = await fetchKeypointsRef.current(id);
+              lineKeypointsCacheRef.current.set(id, kps);
             } catch {
               kps = [];
             }
@@ -441,201 +509,92 @@ function CanvasMarkerLayer({
           if (kps && kps.length > 0) {
             let best = kps[0];
             let bestD = haversineM(lat, lng, best.lat, best.lng);
-            for (let i = 1; i < kps.length; i++) {
-              const d = haversineM(lat, lng, kps[i].lat, kps[i].lng);
-              if (d < bestD) { bestD = d; best = kps[i]; }
+            for (let j = 1; j < kps.length; j++) {
+              const dist = haversineM(lat, lng, kps[j].lat, kps[j].lng);
+              if (dist < bestD) { bestD = dist; best = kps[j]; }
             }
-            onSelect({
-              ...rec,
+            onSelectRef.current(id, {
               frameNumber: best.frame,
-              box: best.box ?? rec.box,
+              box: best.box,
               lat: best.lat,
               lng: best.lng,
             });
             return;
           }
-          onSelect(rec);
+          onSelectRef.current(id);
         });
 
-        line.on("mouseover", (e) => {
-          const rec = assetLookupRef.current.get(displayId) ?? asset;
+        line.on('mouseover', (e) => {
+          const d = dataRef.current;
+          const ii = d.idIndex.get(id);
+          if (ii === undefined) return;
+          const name = getNameRef.current({ asset_id: d.asset_ids[ii] }) || '';
+          const cls = d.line_extras[id]?.classification ?? 'line';
+          const sd = d.sides[ii];
           tooltip.setLatLng(e.latlng);
           tooltip.setContent(
             `<div class="text-xs leading-tight">` +
-            `<div class="font-semibold">${rec.assetType}</div>` +
-            `<div class="text-[10px] text-muted-foreground">${rec.classification ?? "line"}` +
-            (rec.side ? ` · ${rec.side}` : "") + `</div>` +
+            `<div class="font-semibold">${name}</div>` +
+            `<div class="text-[10px] text-muted-foreground">${cls}` +
+            (sd ? ` · ${sd}` : "") + `</div>` +
             `</div>`
           );
           if (!map.hasLayer(tooltip)) tooltip.addTo(map);
         });
-        line.on("mouseout", () => {
+        line.on('mouseout', () => {
           if (map.hasLayer(tooltip)) map.removeLayer(tooltip);
         });
 
         layer.addLayer(line);
-        lineMap.set(displayId, line);
+        lineMap.set(id, line);
       } else {
         line.setLatLngs(positions);
         line.setStyle({ color, weight, opacity });
       }
     }
 
-    if (!map.hasLayer(layer)) layer.addTo(map);
-
-    // Maintain selected highlight for icon markers (icons are images, so we
-    // overlay a circleMarker highlight like the old rebuild path did).
-    if (iconHighlightRef.current) {
-      layer.removeLayer(iconHighlightRef.current);
-      iconHighlightRef.current = null;
-    }
-    if (selectedId) {
-      const iconMarker = iconMarkerMap.get(selectedId);
-      if (iconMarker) {
-        const latlng = iconMarker.getLatLng();
-        const highlight = L.circleMarker(latlng, {
-          radius: SELECTED_RADIUS,
-          color: SELECTED_COLOR,
-          fillColor: SELECTED_COLOR,
-          fillOpacity: 0.3,
-          weight: 2,
-        });
-        layer.addLayer(highlight);
-        iconHighlightRef.current = highlight;
-      }
-    }
-
-    prevSelectedRef.current = selectedId;
-
     return () => {
       if (map.hasLayer(tooltip)) map.removeLayer(tooltip);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visibleMarkerAssets, lineAssets, map, onSelect, wantsIcons, labelMapData]);
-
-  // Fast-path selection restyle without rebuild
-  useEffect(() => {
-    const markerMap = markerMapRef.current;
-    const iconMarkerMap = iconMarkerMapRef.current;
-    const lineMap = lineMapRef.current;
-    const layer = layerRef.current;
-    const prev = prevSelectedRef.current;
-
-    if (prev === selectedId) return;
-
-    if (iconHighlightRef.current) {
-      layer.removeLayer(iconHighlightRef.current);
-      iconHighlightRef.current = null;
-    }
-
-    // Restore previous
-    if (prev) {
-      const prevMarker = markerMap.get(prev);
-      if (prevMarker) {
-        const asset = assetLookupRef.current.get(prev);
-        prevMarker.setRadius(DEFAULT_RADIUS);
-        prevMarker.setStyle({
-          fillColor: asset?.markerColor ?? "red",
-          fillOpacity: 0.7,
-          weight: 1.5,
-        });
-      }
-      const prevLine = lineMap.get(prev);
-      if (prevLine) {
-        const asset = assetLookupRef.current.get(prev);
-        const routeKey = String(asset?.routeId ?? prev);
-        const baseColor = asset?.classification === "linear_sided"
-          ? LINE_SIDED_COLOR
-          : asset?.classification === "linear_unsided"
-            ? LINE_UNSIDED_COLOR
-            : routeColor(routeKey, false);
-        prevLine.setStyle({ color: baseColor, weight: 5, opacity: 0.85 });
-      }
-    }
-
-    // Highlight new
-    if (selectedId) {
-      const newCircle = markerMap.get(selectedId);
-      if (newCircle) {
-        newCircle.setRadius(SELECTED_RADIUS);
-        newCircle.setStyle({
-          fillColor: SELECTED_COLOR,
-          fillOpacity: 0.9,
-          weight: 1.8,
-        });
-        newCircle.bringToFront();
-      }
-
-      const iconMarker = iconMarkerMap.get(selectedId);
-      if (iconMarker) {
-        const latlng = iconMarker.getLatLng();
-        const highlight = L.circleMarker(latlng, {
-          radius: SELECTED_RADIUS,
-          color: SELECTED_COLOR,
-          fillColor: SELECTED_COLOR,
-          fillOpacity: 0.3,
-          weight: 2,
-        });
-        layer.addLayer(highlight);
-        iconHighlightRef.current = highlight;
-      }
-
-      const selLine = lineMap.get(selectedId);
-      if (selLine) {
-        selLine.setStyle({ color: SELECTED_COLOR, weight: 7, opacity: 1 });
-        selLine.bringToFront();
-      }
-    }
-
-    prevSelectedRef.current = selectedId;
-  }, [selectedId]);
+  }, [data, selectedId, map]);
 
   return null;
 }
 
 /* ── Main component ─────────────────────────────────────── */
 export default function LibraryMapView({
-  assets,
+  data,
   selectedId,
   onSelect,
+  getAssetDisplayName,
   onFetchLineKeypoints,
   onFetchLineGeometry,
 }: LibraryMapViewProps) {
   const { data: labelMapData } = useLabelMap();
   const wantsIcons = localStorage.getItem('wants_icons') === 'true';
 
+  // Initial center: first row's lat/lng (or first line's start), with
+  // Doha fallback when the dataset is empty.
   const center = useMemo<[number, number]>(() => {
-    if (assets.length === 0) return [25.3548, 51.1839];
-    const a = assets[0];
-    if (a.kind === "line" && a.geometry?.coordinates?.[0]) {
-      const c = a.geometry.coordinates[0];
-      return [c[1], c[0]];
+    if (data.count === 0) return [25.3548, 51.1839];
+    const firstId = data.ids[0];
+    if (firstId && data.lineSet.has(firstId)) {
+      const c = data.line_extras[firstId]?.geometry?.coordinates?.[0];
+      if (c) return [c[1], c[0]];
     }
-    return [a.lat, a.lng];
-  }, [assets]);
-
-  // Partition: line vs point. Line = kind==="line" with usable geometry.
-  const { markerAssets, lineAssets } = useMemo(() => {
-    const markers: AssetRecord[] = [];
-    const lines: AssetRecord[] = [];
-    for (const a of assets) {
-      const hasGeom = (a.geometry?.coordinates?.length ?? 0) >= 2;
-      if (a.kind === "line" && hasGeom) lines.push(a);
-      else markers.push(a);
-    }
-    return { markerAssets: markers, lineAssets: lines };
-  }, [assets]);
+    return [data.lats[0], data.lngs[0]];
+  }, [data]);
 
   const onSelectRef = useRef(onSelect);
   onSelectRef.current = onSelect;
-  const stableOnSelect = useCallback((asset: AssetRecord) => {
-    onSelectRef.current(asset);
+  const stableOnSelect = useCallback((id: string, overrides?: MapClickOverrides) => {
+    onSelectRef.current(id, overrides);
   }, []);
 
   return (
     <MapContainer
       center={center}
-      zoom={14}
+      zoom={9}
       className="h-full w-full"
       style={{ minHeight: 200 }}
       zoomControl={true}
@@ -647,17 +606,17 @@ export default function LibraryMapView({
         url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
       />
 
-      <FitBounds assets={assets} />
-      <FlyToSelected assets={assets} selectedId={selectedId} />
+      <FitBounds data={data} />
+      <FlyToSelected data={data} selectedId={selectedId} />
       <FastUnmount />
 
-      <CanvasMarkerLayer
-        markerAssets={markerAssets}
-        lineAssets={lineAssets}
+      <ClusterLayer
+        data={data}
         selectedId={selectedId}
         onSelect={stableOnSelect}
         wantsIcons={wantsIcons}
         labelMapData={labelMapData}
+        getAssetDisplayName={getAssetDisplayName}
         onFetchLineKeypoints={onFetchLineKeypoints}
         onFetchLineGeometry={onFetchLineGeometry}
       />

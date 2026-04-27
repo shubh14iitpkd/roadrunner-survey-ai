@@ -125,20 +125,27 @@ def init_app_db(app: Flask) -> None:
 	db["master_assets"].create_index([("zone", ASCENDING), ("side", ASCENDING)], name="idx_master_zone_side")
 	db["master_assets"].create_index([("last_seen_date", DESCENDING)], name="idx_master_last_seen")
 	db["master_assets"].create_index([("group_id", ASCENDING)], name="idx_master_group_id")
-	db["master_assets"].create_index(
-		[
-			("group_id", "text"),
-			("route_name", "text"),
-			("issue", "text"),
-		],
-		name="idx_master_text",
-		default_language="english",
-		weights={
-			"group_id": 10,
-			"route_name": 5,
-			"issue": 3,
-		}
-	)
+	# H3 cluster indexes were retired when map clustering moved client-side.
+	# Drop on startup so writes aren't slowed maintaining unused indexes.
+	for _idx in (
+		"idx_master_h3_r8",
+		"idx_master_h3_r10",
+		"idx_master_h3r8_condition",
+		"idx_master_h3r8_route",
+	):
+		try:
+			db["master_assets"].drop_index(_idx)
+		except Exception:
+			pass
+	# Search is served by an unanchored lookahead regex over multiple fields
+	# ($or in _build_master_filter). No text index — it would have to be
+	# kept in sync on every issue/group/route edit and the regex doesn't
+	# use it anyway. Drop any text index from prior schemas.
+	for _idx in ("idx_master_text", "idx_master_search_text"):
+		try:
+			db["master_assets"].drop_index(_idx)
+		except Exception:
+			pass
 
 	# Assets — additional sort and linkage indexes
 	db["assets"].create_index([("detected_at", DESCENDING)], name="idx_assets_detected")

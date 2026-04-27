@@ -4,6 +4,7 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import PageLoader from "./components/PageLoader";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { ThemeProvider } from "next-themes";
 import { AuthProvider } from "./contexts/AuthContext";
@@ -32,7 +33,21 @@ const QCLayer = lazy(() => import("./pages/QCLayer"));
 const VideoAnnotator = lazy(() => import("./pages/VideoAnnotator"));
 import AssetPreviewMap from "./AssetPreviewMap";
 
-const queryClient = new QueryClient();
+const isAuthError = (err: unknown): boolean => {
+  const msg = (err as Error)?.message ?? "";
+  return msg.includes("HTTP 401") || msg.includes("HTTP 403");
+};
+
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 30_000,
+      gcTime: 5 * 60_000,
+      refetchOnWindowFocus: false,
+      retry: (n, err) => n < 2 && !isAuthError(err),
+    },
+  },
+});
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
@@ -89,6 +104,7 @@ const App = () => (
         </BrowserRouter>
       </TooltipProvider>
     </ThemeProvider>
+    {import.meta.env.DEV && <ReactQueryDevtools initialIsOpen={false} />}
   </QueryClientProvider>
 );
 

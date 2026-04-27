@@ -279,8 +279,9 @@ def _update_master_asset(db, master_doc: dict, asset_doc: dict,
     # avg_lon = (old_coords[0] * existing_count + new_coords[0]) / (existing_count + 1)
     # avg_lat = (old_coords[1] * existing_count + new_coords[1]) / (existing_count + 1)
 
+    new_canonical = {"type": "Point", "coordinates": new_coords}
     set_fields = {
-        "canonical_location":      {"type": "Point", "coordinates": new_coords},
+        "canonical_location":      new_canonical,
         "last_seen_date":          survey_date,
         "latest_condition":        asset_doc.get("condition"),
         "latest_survey_id":        ObjectId(survey_id) if survey_id else None,
@@ -520,4 +521,11 @@ def link_assets_for_video(
 
     summary = {"linked": linked, "created": created, "skipped": skipped}
     print(f"[LINKER] Done for video {video_id}: {summary}")
+    # Linker mutates master_assets (insert + update) — wipe cache so the
+    # asset library reflects new/updated cells on next read.
+    try:
+        from cache import invalidate_assets_cache
+        invalidate_assets_cache()
+    except Exception:  # noqa: BLE001
+        pass
     return summary

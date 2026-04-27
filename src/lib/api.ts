@@ -209,7 +209,10 @@ export const api = {
 			const q = qs.toString();
 			return apiFetch(`/api/assets/master${q ? `?${q}` : ""}`, { method: "POST" });
 		},
-		getMasterMapPoints: async (params?: { route_id?: number; category?: string; condition?: string; zone?: string; side?: string; asset_type?: string; search?: string; include_defect?: boolean }) => {
+		getMasterMapPoints: async (params?: {
+			route_id?: number; category?: string; condition?: string; zone?: string;
+			side?: string; asset_type?: string; search?: string; include_defect?: boolean;
+		}) => {
 			const qs = new URLSearchParams();
 			if (params?.route_id != null) qs.set("route_id", String(params.route_id));
 			if (params?.category) qs.set("category", params.category);
@@ -221,40 +224,50 @@ export const api = {
 			if (params?.include_defect) qs.set("include_defect", "1");
 			const q = qs.toString();
 			const resp = await apiFetch(`/api/assets/master/map-points${q ? `?${q}` : ""}`);
-			// Decode columnar response back into the array shape consumers expect.
-			if (resp?.format === "columnar" && resp.columns) {
-				const c = resp.columns;
-				const n = c.ids?.length ?? 0;
-				const extras = resp.line_extras || {};
-				const points = new Array(n);
-				for (let i = 0; i < n; i++) {
-					const id = c.ids[i];
-					const kind = c.kinds?.[i] ?? "point";
-					const p: any = {
-						master_display_id: id,
-						asset_id: c.asset_ids?.[i] ?? "",
-						asset_type: c.types?.[i] ?? "",
-						lat: c.lats?.[i] ?? 0,
-						lng: c.lngs?.[i] ?? 0,
-						condition: c.conditions?.[i] ?? "unknown",
-						group_id: c.group_ids?.[i] ?? undefined,
-						side: c.sides?.[i] ?? "Unknown",
-						zone: c.zones?.[i] ?? "Unknown",
-						route_id: c.route_ids?.[i] ?? undefined,
-						route_name: c.route_names?.[i] ?? "",
-						category_id: c.category_ids?.[i] ?? "",
-						last_seen_date: c.last_seen_dates?.[i] ?? "",
-						kind,
-					};
-					// Optional defect columns — only present when caller passed include_defect.
-					if (c.defect_ids) p.latest_defect_id = c.defect_ids[i] ?? "";
-					if (c.issues) p.issue = c.issues[i] ?? "";
-					if (kind === "line" && extras[id]) Object.assign(p, extras[id]);
-					points[i] = p;
-				}
-				return { points, count: resp.count ?? n };
-			}
-			return resp;
+			if (resp?.format !== "columnar" || !resp.columns) return resp;
+
+			// Pass-through columnar. Building 1M row-object copies here was
+			// the single biggest source of JS-heap pressure in the map flow;
+			// we now hand the columnar arrays straight to the consumer and
+			// let it index by position. The id→index map is built once so
+			// click handlers, optimistic mutations, and FlyToSelected can
+			// resolve in O(1) without an array scan.
+			//
+			// Wire trims (matched by `assets:map:v4` server build):
+			//   - `asset_type` removed; resolve display name via labelMap.
+			//   - `kinds[]` removed; backend ships `line_ids: string[]`,
+			//     point is the default. Built into a Set here for O(1).
+			//   - `route_names[]` removed; `route_dict` keyed by route_id.
+			//   - `last_seen_dates[]` removed; detail fetch fills it.
+			const c = resp.columns;
+			const n = c.ids?.length ?? 0;
+			const lineSet = new Set<string>(resp.line_ids || []);
+			const idIndex = new Map<string, number>();
+			for (let i = 0; i < n; i++) idIndex.set(c.ids[i], i);
+			return {
+				count: n,
+				ids: c.ids ?? [],
+				asset_ids: c.asset_ids ?? [],
+				lats: c.lats ?? [],
+				lngs: c.lngs ?? [],
+				conditions: c.conditions ?? [],
+				group_ids: c.group_ids ?? [],
+				sides: c.sides ?? [],
+				zones: c.zones ?? [],
+				route_ids: c.route_ids ?? [],
+				category_ids: c.category_ids ?? [],
+				defect_ids: c.defect_ids,
+				issues: c.issues,
+				lineSet,
+				idIndex,
+				routeDict: (resp.route_dict || {}) as Record<string, string>,
+				line_extras: (resp.line_extras || {}) as Record<string, {
+					classification?: string;
+					geometry?: { type: "LineString"; coordinates: [number, number][] };
+					first_frame?: number;
+					last_frame?: number;
+				}>,
+			};
 		},
 		searchMasterAssets: (q: string) => {
 			const qs = new URLSearchParams({ q });
