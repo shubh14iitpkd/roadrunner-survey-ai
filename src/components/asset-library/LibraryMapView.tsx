@@ -529,14 +529,14 @@ function ClusterLayer({
           const ii = d.idIndex.get(id);
           if (ii === undefined) return;
           const name = getNameRef.current({ asset_id: d.asset_ids[ii] }) || '';
-          const cls = d.line_extras[id]?.classification ?? 'line';
+          // const cls = d.line_extras[id]?.classification ?? 'line';
           const sd = d.sides[ii];
           tooltip.setLatLng(e.latlng);
           tooltip.setContent(
             `<div class="text-xs leading-tight">` +
-            `<div class="font-semibold">${name}</div>` +
-            `<div class="text-[10px] text-muted-foreground">${cls}` +
-            (sd ? ` · ${sd}` : "") + `</div>` +
+            `<div class="font-semibold">${name}` +
+            `<span class="text-[11px] pl-1 text-muted-foreground">` +
+            (sd ? `${sd}` : "") + `</span></div>` +
             `</div>`
           );
           if (!map.hasLayer(tooltip)) tooltip.addTo(map);
