@@ -30,14 +30,11 @@ import { cn } from "@/lib/utils";
 import {
   Trash2, ZoomIn, ZoomOut, RotateCcw, Eye, EyeOff, Save,
   Layers, ArrowLeft, Square, Undo2, Redo2, MousePointer,
-  Search, Pencil,
+  Search,
 } from "lucide-react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from "@/components/ui/select";
 
 // ─── Types ───────────────────────────────────────────────────────────
 interface Annotation {
@@ -54,38 +51,41 @@ interface Annotation {
   color: string;
 }
 
+// Active (selected) state — solid fill. Aligned with AssetLibrary/DefectLibrary
+// which use the `destructive` semantic token + emerald for dark-theme parity.
 const CONDITION_COLORS_ACTIVE: Record<string, string> = {
   Good: "bg-emerald-500 text-white border-emerald-500",
   Fine: "bg-emerald-500 text-white border-emerald-500",
-  Damaged: "bg-red-500 text-white border-red-500",
-  Defective: "bg-red-500 text-white border-red-500",
+  Damaged: "bg-destructive text-destructive-foreground border-destructive",
+  Defective: "bg-destructive text-destructive-foreground border-destructive",
   Dirty: "bg-amber-500 text-white border-amber-500",
   Overgrown: "bg-amber-500 text-white border-amber-500",
   NoDisplay: "bg-orange-500 text-white border-orange-500",
   FadedPaint: "bg-amber-500 text-white border-amber-500",
   PaintFaded: "bg-amber-500 text-white border-amber-500",
-  Missing: "bg-red-500 text-white border-red-500",
-  MissingPanel: "bg-red-500 text-white border-red-500",
-  Broken: "bg-red-500 text-white border-red-500",
+  Missing: "bg-destructive text-destructive-foreground border-destructive",
+  MissingPanel: "bg-destructive text-destructive-foreground border-destructive",
+  Broken: "bg-destructive text-destructive-foreground border-destructive",
   Bent: "bg-orange-500 text-white border-orange-500",
-  Poor: "bg-red-500 text-white border-red-500",
+  Poor: "bg-destructive text-destructive-foreground border-destructive",
 };
 
+// Inactive — tinted, dark-mode friendly.
 const CONDITION_COLORS: Record<string, string> = {
-  Good: "bg-emerald-500/15 text-emerald-700 border-emerald-300",
-  Fine: "bg-emerald-500/15 text-emerald-700 border-emerald-300",
-  Damaged: "bg-red-500/15 text-red-700 border-red-300",
-  Defective: "bg-red-500/15 text-red-700 border-red-300",
-  Dirty: "bg-amber-500/15 text-amber-700 border-amber-300",
-  Overgrown: "bg-amber-500/15 text-amber-700 border-amber-300",
-  NoDisplay: "bg-orange-500/15 text-orange-700 border-orange-300",
-  FadedPaint: "bg-amber-500/15 text-amber-700 border-amber-300",
-  PaintFaded: "bg-amber-500/15 text-amber-700 border-amber-300",
-  Missing: "bg-red-500/15 text-red-700 border-red-300",
-  MissingPanel: "bg-red-500/15 text-red-700 border-red-300",
-  Broken: "bg-red-500/15 text-red-700 border-red-300",
-  Bent: "bg-orange-500/15 text-orange-700 border-orange-300",
-  Poor: "bg-red-500/15 text-red-700 border-red-300",
+  Good: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30",
+  Fine: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30",
+  Damaged: "bg-destructive/10 text-destructive border-destructive/30",
+  Defective: "bg-destructive/10 text-destructive border-destructive/30",
+  Dirty: "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30",
+  Overgrown: "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30",
+  NoDisplay: "bg-orange-500/10 text-orange-600 dark:text-orange-400 border-orange-500/30",
+  FadedPaint: "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30",
+  PaintFaded: "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30",
+  Missing: "bg-destructive/10 text-destructive border-destructive/30",
+  MissingPanel: "bg-destructive/10 text-destructive border-destructive/30",
+  Broken: "bg-destructive/10 text-destructive border-destructive/30",
+  Bent: "bg-orange-500/10 text-orange-600 dark:text-orange-400 border-orange-500/30",
+  Poor: "bg-destructive/10 text-destructive border-destructive/30",
 };
 
 function generateId() { return Math.random().toString(36).substring(2, 10); }
@@ -225,10 +225,6 @@ export default function QCLayer() {
   const [labelSearch, setLabelSearch] = useState("");
 
   // Edit dialog
-  const [editingAnnotation, setEditingAnnotation] = useState<Annotation | null>(null);
-  const [editCategoryId, setEditCategoryId] = useState("");
-  const [editLabel, setEditLabel] = useState("");
-  const [editCondition, setEditCondition] = useState("");
 
   // Pre-selected label from right sidebar (used when drawing new rectangle)
   const [selectedLabel, setSelectedLabel] = useState("");
@@ -238,37 +234,22 @@ export default function QCLayer() {
   const [dragState, setDragState] = useState<{ startX: number; startY: number; origX: number; origY: number } | null>(null);
   const [resizeState, setResizeState] = useState<{ handle: string; startX: number; startY: number; orig: { x: number; y: number; width: number; height: number } } | null>(null);
 
-  // ─── Derive labels and categories from LabelMapContext ────────────
-  const { categories, labelsByCategory, allLabels, labelToCategoryId } = useMemo(() => {
-    if (!labelMap) return { categories: {} as Record<string, string>, labelsByCategory: {} as Record<string, string[]>, allLabels: [] as string[], labelToCategoryId: {} as Record<string, string> };
+  // ─── Derive labels from LabelMapContext ────────────
+  const { allLabels, labelToCategoryId } = useMemo(() => {
+    if (!labelMap) return { allLabels: [] as string[], labelToCategoryId: {} as Record<string, string> };
 
-    const cats: Record<string, string> = {};
-    for (const [catId, cat] of Object.entries(labelMap.categories)) {
-      cats[catId] = cat.display_name;
-    }
-
-    // Group labels by category using group_id for display
-    const byCategory: Record<string, Set<string>> = {};
+    const seen = new Set<string>();
     const l2c: Record<string, string> = {};
     for (const label of Object.values(labelMap.labels)) {
       const catId = label.category_id || "";
       const groupId = label.group_id || label.display_name;
-      if (!byCategory[catId]) byCategory[catId] = new Set();
-      byCategory[catId].add(groupId);
+      seen.add(groupId);
       l2c[groupId] = catId;
     }
 
-    const byCategoryArr: Record<string, string[]> = {};
-    for (const [catId, labelSet] of Object.entries(byCategory)) {
-      byCategoryArr[catId] = Array.from(labelSet).sort();
-    }
-
-    const all = Object.values(byCategoryArr).flat().sort();
-
-    return { categories: cats, labelsByCategory: byCategoryArr, allLabels: all, labelToCategoryId: l2c };
+    const all = Array.from(seen).sort();
+    return { allLabels: all, labelToCategoryId: l2c };
   }, [labelMap]);
-
-  const categoryIds = useMemo(() => Object.keys(categories), [categories]);
 
   // Color helper using CategoryBadge's getCategoryColorCode
   const getColorForLabel = useCallback((label: string): string => {
@@ -400,6 +381,13 @@ export default function QCLayer() {
     setIsAnnotationSelected(false);
     setHistory([ann ? JSON.parse(JSON.stringify(ann)) : null]);
     setHistoryIndex(0);
+    // Sidebar is the editor — keep its selection in sync with the current
+    // annotation's asset type + condition so the user can see (and change)
+    // them in one place.
+    if (ann) {
+      setSelectedLabel(ann.label);
+      setSelectedCondition(ann.condition);
+    }
     // dirtyKp + pendingMeta are read on each rebuild but not driving it —
     // we only re-init when masterAsset / current keypoint / image dims
     // change. Listing them in deps would clear annotation history on every
@@ -568,45 +556,39 @@ export default function QCLayer() {
     toast.success("Annotation deleted");
   };
 
-  const openEditDialog = () => {
-    if (!annotation) return;
-    setEditingAnnotation(annotation);
-    setEditCategoryId(annotation.category_id);
-    setEditLabel(annotation.label);
-    setEditCondition(annotation.condition);
-  };
-
-  const saveEdit = () => {
-    if (!editingAnnotation || !annotation) return;
-    // For line assets the annotation is rebuilt from masterAsset every time
-    // the user navigates to a different keypoint. Stash the asset-level
-    // fields in pendingMeta so the rebuild reads them and the edit
-    // survives nav. Set only the fields that actually differ from master
-    // so the no-op save guard doesn't think non-edits are changes.
-    if (isLine) {
-      const masterGroup = masterAsset?.group_id ?? masterAsset?.asset_type ?? "";
-      const masterCat = masterAsset?.category_id ?? "";
-      const masterCondStored = conditionToStorage(masterAsset?.latest_condition ?? "Good");
-      const newCondStored = conditionToStorage(editCondition);
-      const meta: { group_id?: string; category_id?: string; condition?: string } = {};
-      if (editLabel !== masterGroup) meta.group_id = editLabel;
-      if (editCategoryId !== masterCat) meta.category_id = editCategoryId;
-      if (newCondStored !== masterCondStored) meta.condition = newCondStored;
-      setPendingMeta(Object.keys(meta).length ? meta : null);
-    }
-    const updated: Annotation = {
-      ...annotation,
-      label: editLabel,
-      category_id: editCategoryId,
-      condition: editCondition,
-      color: getCategoryColorCode(editCategoryId),
-      status: annotation.status === "ai" ? "edited" : annotation.status,
-    };
-    setAnnotation(updated);
-    pushHistory(updated);
-    setEditingAnnotation(null);
-    toast.success("Annotation updated");
-  };
+  // Mutate the current annotation's asset-level meta in place. Sidebar
+  // (label list + condition strip) is the editor — no modal.
+  // For line assets we also stash the diff in pendingMeta so the
+  // annotation rebuild on keypoint nav preserves the edit.
+  const applyAssetMeta = useCallback((patch: { label?: string; category_id?: string; condition?: string }) => {
+    setAnnotation((prev) => {
+      if (!prev) return prev;
+      const newLabel = patch.label ?? prev.label;
+      const newCat = patch.category_id ?? prev.category_id;
+      const newCond = patch.condition ?? prev.condition;
+      if (isLine && masterAsset) {
+        const masterGroup = masterAsset.group_id ?? masterAsset.asset_type ?? "";
+        const masterCat = masterAsset.category_id ?? "";
+        const masterCondStored = conditionToStorage(masterAsset.latest_condition ?? "Good");
+        const newCondStored = conditionToStorage(newCond);
+        const meta: { group_id?: string; category_id?: string; condition?: string } = {};
+        if (newLabel !== masterGroup) meta.group_id = newLabel;
+        if (newCat !== masterCat) meta.category_id = newCat;
+        if (newCondStored !== masterCondStored) meta.condition = newCondStored;
+        setPendingMeta(Object.keys(meta).length ? meta : null);
+      }
+      const updated: Annotation = {
+        ...prev,
+        label: newLabel,
+        category_id: newCat,
+        condition: newCond,
+        color: getCategoryColorCode(newCat),
+        status: prev.status === "ai" ? "edited" : prev.status,
+      };
+      pushHistory(updated);
+      return updated;
+    });
+  }, [isLine, masterAsset, pushHistory]);
 
   const [saving, setSaving] = useState(false);
 
@@ -790,18 +772,6 @@ export default function QCLayer() {
     return labelSearch ? `No ${kind} assets match` : `No ${kind} assets available`;
   }, [isLine, labelSearch]);
 
-  // Categories that have at least one allowed label. Used by the edit
-  // dialog's category Select to hide categories that would otherwise
-  // show an empty Asset Type dropdown.
-  const allowedCategoryHasLabels = useMemo(() => {
-    if (!allowedLabels) return null;
-    const out: Record<string, boolean> = {};
-    for (const [catId, labels] of Object.entries(labelsByCategory)) {
-      out[catId] = labels.some((l) => allowedLabels.has(l));
-    }
-    return out;
-  }, [labelsByCategory, allowedLabels]);
-
   // Drop a previously-selected sidebar label that fell outside the
   // compatible filter (e.g. user navigated to a master of different kind).
   // Clearing also drops the dependent condition so the badge isn't stuck.
@@ -837,12 +807,26 @@ export default function QCLayer() {
           <ArrowLeft className="h-3.5 w-3.5" /> Back
         </Button>
         <div className="flex items-center gap-2 mr-4">
-          <Layers className="h-4 w-4 text-primary" />
+          <Layers className="h-4 w-4 text-primary dark:text-muted-secondary" />
           <span className="text-xs font-semibold">QC Layer</span>
           {masterDisplayId && (
             <span className="text-[10px] text-muted-foreground">
               {masterDisplayId}
             </span>
+          )}
+          {masterAsset && (
+            <Badge
+              variant="outline"
+              className={cn(
+                "text-[9px] h-5 px-1.5 uppercase tracking-wider font-semibold",
+                isLine
+                  ? "border-violet-500/40 text-violet-600 dark:text-violet-400 bg-violet-500/10"
+                  : "border-sky-500/40 text-sky-600 dark:text-sky-400 bg-sky-500/10"
+              )}
+              title={isLine ? "Linear (continuous) asset — keypoints walk along the road" : "Point asset — single observation"}
+            >
+              {isLine ? "Linear" : "Point"}
+            </Badge>
           )}
         </div>
 
@@ -1059,7 +1043,14 @@ export default function QCLayer() {
                       backgroundColor: isAnnotationSelected ? `${annotation.color}33` : `${annotation.color}15`,
                     }}
                     onMouseDown={e => { e.stopPropagation(); startDrag(e); }}
-                    onClick={e => { e.stopPropagation(); setIsAnnotationSelected(true); }}
+                    onClick={e => {
+                      e.stopPropagation();
+                      setIsAnnotationSelected(true);
+                      if (annotation) {
+                        setSelectedLabel(annotation.label);
+                        setSelectedCondition(annotation.condition);
+                      }
+                    }}
                   >
                     {showLabels && (
                       <div
@@ -1116,12 +1107,19 @@ export default function QCLayer() {
 
         {/* ─── RIGHT: Labels List ─── */}
         <div className="w-[280px] border-l border-border bg-card flex flex-col">
-          <div className="px-3 py-2.5 border-b border-border flex items-center justify-between">
-            <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
-              Labels ({allLabels.length})
-            </span>
-            {selectedLabel && (
-              <Badge className="text-[8px] bg-primary text-primary-foreground">{selectedLabel}</Badge>
+          <div className="px-3 py-2 border-b border-border">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+                Labels ({filteredLabels.length})
+              </span>
+              {selectedLabel && (
+                <Badge className="text-[8px] bg-primary text-primary-foreground">{selectedLabel}</Badge>
+              )}
+            </div>
+            {masterAsset && (
+              <p className="text-[9px] text-muted-foreground mt-1">
+                Showing {isLine ? "linear" : "point"} asset types only.
+              </p>
             )}
           </div>
           <div className="px-2 py-2 border-b border-border">
@@ -1147,7 +1145,10 @@ export default function QCLayer() {
                       "rounded px-2 py-1 text-[9px] font-semibold border transition-all",
                       selectedCondition === c ? (CONDITION_COLORS_ACTIVE[c] || "bg-primary text-primary-foreground") : (CONDITION_COLORS[c] || "bg-muted")
                     )}
-                    onClick={() => setSelectedCondition(c)}
+                    onClick={() => {
+                      setSelectedCondition(c);
+                      if (annotation) applyAssetMeta({ condition: c });
+                    }}
                   >
                     {c}
                   </button>
@@ -1174,15 +1175,34 @@ export default function QCLayer() {
                       isActive ? "bg-primary/10 ring-1 ring-primary/30 font-medium" : "hover:bg-muted/50"
                     )}
                     onClick={() => {
-                      if (isActive) { setSelectedLabel(""); setSelectedCondition(""); }
-                      else { setSelectedLabel(label); setSelectedCondition(getConditionsForLabel(label)[0]); }
+                      // Sidebar IS the editor when an annotation exists —
+                      // never deselect (would orphan the annotation's
+                      // displayed type). Clicking a different label rewrites
+                      // the annotation's type. Without an annotation it's
+                      // just the draw tool's pending pick (toggle allowed).
+                      if (annotation) {
+                        const conds = getConditionsForLabel(label);
+                        const nextCond = conds.includes(selectedCondition) ? selectedCondition : (conds[0] ?? "Good");
+                        setSelectedLabel(label);
+                        setSelectedCondition(nextCond);
+                        applyAssetMeta({
+                          label,
+                          category_id: labelToCategoryId[label] || "",
+                          condition: nextCond,
+                        });
+                      } else if (isActive) {
+                        setSelectedLabel(""); setSelectedCondition("");
+                      } else {
+                        setSelectedLabel(label);
+                        setSelectedCondition(getConditionsForLabel(label)[0]);
+                      }
                     }}
                   >
                     <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: color }} />
                     <span className="flex-1 truncate">{label}</span>
-                    {isCurrentAnnotation && (
+                    {/* {isCurrentAnnotation && (
                       <Badge variant="secondary" className="text-[8px] h-4 min-w-[16px] px-1">1</Badge>
-                    )}
+                    )} */}
                   </div>
                 );
               })}
@@ -1209,7 +1229,11 @@ export default function QCLayer() {
                         ? "border-primary/40 bg-primary/5 ring-1 ring-primary/20"
                         : "border-transparent hover:bg-muted/50"
                     )}
-                    onClick={() => setIsAnnotationSelected(!isAnnotationSelected)}
+                    onClick={() => {
+                      setIsAnnotationSelected(!isAnnotationSelected);
+                      setSelectedLabel(annotation.label);
+                      setSelectedCondition(annotation.condition);
+                    }}
                   >
                     <div className="flex items-center gap-2">
                       <div className="w-2.5 h-2.5 rounded-sm flex-shrink-0" style={{ backgroundColor: annotation.color }} />
@@ -1231,9 +1255,6 @@ export default function QCLayer() {
                     <div className="flex items-center gap-1 mt-1 ml-4">
                       <span className="text-[9px] text-muted-foreground">{annotation.condition}</span>
                       <span className="flex-1" />
-                      <button className="text-[9px] text-muted-foreground hover:bg-muted rounded px-1 py-0.5" onClick={e => { e.stopPropagation(); openEditDialog(); }}>
-                        <Pencil className="h-3 w-3 inline mr-0.5" />Edit
-                      </button>
                       <button className="text-[9px] text-destructive hover:bg-destructive/10 rounded px-1 py-0.5" onClick={e => { e.stopPropagation(); handleDelete(); }}>
                         <Trash2 className="h-3 w-3 inline mr-0.5" />Del
                       </button>
@@ -1245,81 +1266,6 @@ export default function QCLayer() {
           </div>
         </div>
       </div>
-
-      {/* ─── Edit Annotation Dialog ─── */}
-      <Dialog open={!!editingAnnotation} onOpenChange={open => { if (!open) setEditingAnnotation(null); }}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle className="text-sm">Edit Annotation</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-3 pt-2">
-            <div>
-              <label className="text-[10px] font-semibold text-muted-foreground uppercase mb-1 block">Category</label>
-              <Select value={editCategoryId} onValueChange={v => { setEditCategoryId(v); setEditLabel(""); }}>
-                <SelectTrigger className="h-8 text-[11px]"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {categoryIds
-                    // For line assets, drop categories that contain only
-                    // point labels — picking one would leave the Asset Type
-                    // dropdown empty.
-                    .filter((catId) => !allowedCategoryHasLabels || allowedCategoryHasLabels[catId])
-                    .map(catId => (
-                      <SelectItem key={catId} value={catId} className="text-[11px]">
-                        <div className="flex items-center gap-2">
-                          <div className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: getCategoryColorCode(catId) }} />
-                          {categories[catId]}
-                        </div>
-                      </SelectItem>
-                    ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <label className="text-[10px] font-semibold text-muted-foreground uppercase mb-1 block">Asset Type</label>
-              <Select value={editLabel} onValueChange={setEditLabel}>
-                <SelectTrigger className="h-8 text-[11px]"><SelectValue placeholder="Select type..." /></SelectTrigger>
-                <SelectContent className="max-h-52">
-                  {(() => {
-                    const opts = (labelsByCategory[editCategoryId] || [])
-                      .filter((l) => !allowedLabels || allowedLabels.has(l));
-                    if (opts.length === 0) {
-                      return (
-                        <div className="px-2 py-3 text-[10px] text-muted-foreground italic text-center">
-                          {isLine ? "No linear assets in this category" : "No point assets in this category"}
-                        </div>
-                      );
-                    }
-                    return opts.map(l => (
-                      <SelectItem key={l} value={l} className="text-[11px]">{l}</SelectItem>
-                    ));
-                  })()}
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <label className="text-[10px] font-semibold text-muted-foreground uppercase mb-1 block">Condition</label>
-              <div className="flex gap-2">
-                {getConditionsForLabel(editLabel).map(c => (
-                  <button
-                    key={c}
-                    className={cn(
-                      "flex-1 rounded-md py-1.5 text-[11px] font-semibold border transition-all",
-                      editCondition === c ? (CONDITION_COLORS_ACTIVE[c] || "bg-primary text-white") : (CONDITION_COLORS[c] || "bg-muted")
-                    )}
-                    onClick={() => setEditCondition(c)}
-                  >
-                    {c}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div className="flex justify-end gap-2 pt-2">
-              <Button variant="outline" size="sm" onClick={() => setEditingAnnotation(null)}>Cancel</Button>
-              <Button size="sm" onClick={saveEdit} disabled={!editLabel}>Save</Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
 
       {/* ─── Keypoint Navigation Guard Dialog ─── */}
       {/* Linear-asset rule: one keypoint at a time. If the user tries to
