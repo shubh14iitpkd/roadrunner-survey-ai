@@ -267,21 +267,67 @@ export default function QCLayer() {
     setHistoryIndex(prev => prev + 1);
   }, [historyIndex]);
 
+  // Sync sidebar + line-asset nav-stash state (pendingMeta, dirtyKp) to a
+  // history snapshot. Without this, undoing back to the original state would
+  // leave dirtyKp / pendingMeta set from the user's earlier edits — the
+  // nav guard then blocks keypoint navigation even though the annotation
+  // visibly matches the persisted state.
+  const restoreFromHistory = useCallback((snap: Annotation | null) => {
+    setAnnotation(snap ? JSON.parse(JSON.stringify(snap)) : null);
+    if (snap) {
+      setSelectedLabel(snap.label);
+      setSelectedCondition(snap.condition);
+      if (isLine && masterAsset) {
+        const masterGroup = masterAsset.group_id ?? masterAsset.asset_type ?? "";
+        const masterCat = masterAsset.category_id ?? "";
+        const masterCondStored = conditionToStorage(masterAsset.latest_condition ?? "Good");
+        const snapCondStored = conditionToStorage(snap.condition);
+        const meta: { group_id?: string; category_id?: string; condition?: string } = {};
+        if (snap.label !== masterGroup) meta.group_id = snap.label;
+        if (snap.category_id !== masterCat) meta.category_id = snap.category_id;
+        if (snapCondStored !== masterCondStored) meta.condition = snapCondStored;
+        setPendingMeta(Object.keys(meta).length ? meta : null);
+
+        // Reconcile dirtyKp against the persisted keypoint box. The init
+        // effect builds history[0] from this same conversion, so an undo
+        // to the base entry produces an exact-match no-op here.
+        if (currentKeypoint && frameWidth && frameHeight) {
+          const kpBox = currentKeypoint.box || ({} as { x?: number; y?: number; width?: number; height?: number });
+          const isPixel = (kpBox.x ?? 0) > 1 || (kpBox.y ?? 0) > 1 || (kpBox.width ?? 0) > 1 || (kpBox.height ?? 0) > 1;
+          const baseFrac = {
+            x: isPixel ? (kpBox.x ?? 0) / frameWidth : (kpBox.x ?? 0),
+            y: isPixel ? (kpBox.y ?? 0) / frameHeight : (kpBox.y ?? 0),
+            width: isPixel ? (kpBox.width ?? 0.05) / frameWidth : (kpBox.width ?? 0.05),
+            height: isPixel ? (kpBox.height ?? 0.05) / frameHeight : (kpBox.height ?? 0.05),
+          };
+          const same = snap.x === baseFrac.x && snap.y === baseFrac.y
+            && snap.width === baseFrac.width && snap.height === baseFrac.height;
+          if (same) {
+            setDirtyKp(null);
+          } else {
+            setDirtyKp({
+              frame: currentKeypoint.frame,
+              box: { x: snap.x, y: snap.y, width: snap.width, height: snap.height },
+            });
+          }
+        }
+      }
+    }
+  }, [isLine, masterAsset, currentKeypoint, frameWidth, frameHeight]);
+
   const undo = useCallback(() => {
     if (historyIndex <= 0) return;
     const newIdx = historyIndex - 1;
     setHistoryIndex(newIdx);
-    const prev = history[newIdx];
-    setAnnotation(prev ? JSON.parse(JSON.stringify(prev)) : null);
-  }, [history, historyIndex]);
+    restoreFromHistory(history[newIdx]);
+  }, [history, historyIndex, restoreFromHistory]);
 
   const redo = useCallback(() => {
     if (historyIndex >= history.length - 1) return;
     const newIdx = historyIndex + 1;
     setHistoryIndex(newIdx);
-    const next = history[newIdx];
-    setAnnotation(next ? JSON.parse(JSON.stringify(next)) : null);
-  }, [history, historyIndex]);
+    restoreFromHistory(history[newIdx]);
+  }, [history, historyIndex, restoreFromHistory]);
 
   // ─── Load master asset ────────────────────────────────────────
   useEffect(() => {
@@ -561,34 +607,37 @@ export default function QCLayer() {
   // For line assets we also stash the diff in pendingMeta so the
   // annotation rebuild on keypoint nav preserves the edit.
   const applyAssetMeta = useCallback((patch: { label?: string; category_id?: string; condition?: string }) => {
-    setAnnotation((prev) => {
-      if (!prev) return prev;
-      const newLabel = patch.label ?? prev.label;
-      const newCat = patch.category_id ?? prev.category_id;
-      const newCond = patch.condition ?? prev.condition;
-      if (isLine && masterAsset) {
-        const masterGroup = masterAsset.group_id ?? masterAsset.asset_type ?? "";
-        const masterCat = masterAsset.category_id ?? "";
-        const masterCondStored = conditionToStorage(masterAsset.latest_condition ?? "Good");
-        const newCondStored = conditionToStorage(newCond);
-        const meta: { group_id?: string; category_id?: string; condition?: string } = {};
-        if (newLabel !== masterGroup) meta.group_id = newLabel;
-        if (newCat !== masterCat) meta.category_id = newCat;
-        if (newCondStored !== masterCondStored) meta.condition = newCondStored;
-        setPendingMeta(Object.keys(meta).length ? meta : null);
-      }
-      const updated: Annotation = {
-        ...prev,
-        label: newLabel,
-        category_id: newCat,
-        condition: newCond,
-        color: getCategoryColorCode(newCat),
-        status: prev.status === "ai" ? "edited" : prev.status,
-      };
-      pushHistory(updated);
-      return updated;
-    });
-  }, [isLine, masterAsset, pushHistory]);
+    if (!annotation) return;
+    const newLabel = patch.label ?? annotation.label;
+    const newCat = patch.category_id ?? annotation.category_id;
+    const newCond = patch.condition ?? annotation.condition;
+    // No-op guard: identical patch shouldn't bloat history (every duplicate
+    // entry would silently absorb an undo press, which read as "undo broken").
+    if (newLabel === annotation.label && newCat === annotation.category_id && newCond === annotation.condition) {
+      return;
+    }
+    if (isLine && masterAsset) {
+      const masterGroup = masterAsset.group_id ?? masterAsset.asset_type ?? "";
+      const masterCat = masterAsset.category_id ?? "";
+      const masterCondStored = conditionToStorage(masterAsset.latest_condition ?? "Good");
+      const newCondStored = conditionToStorage(newCond);
+      const meta: { group_id?: string; category_id?: string; condition?: string } = {};
+      if (newLabel !== masterGroup) meta.group_id = newLabel;
+      if (newCat !== masterCat) meta.category_id = newCat;
+      if (newCondStored !== masterCondStored) meta.condition = newCondStored;
+      setPendingMeta(Object.keys(meta).length ? meta : null);
+    }
+    const updated: Annotation = {
+      ...annotation,
+      label: newLabel,
+      category_id: newCat,
+      condition: newCond,
+      color: getCategoryColorCode(newCat),
+      status: annotation.status === "ai" ? "edited" : annotation.status,
+    };
+    setAnnotation(updated);
+    pushHistory(updated);
+  }, [annotation, isLine, masterAsset, pushHistory]);
 
   const [saving, setSaving] = useState(false);
 
