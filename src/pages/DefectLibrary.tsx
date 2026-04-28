@@ -1192,6 +1192,10 @@ export default function DefectLibrary() {
                                   if (item.log.type_changed) changes.push(`Type: ${item.log.previous_state?.group_id} → ${item.log.new_state?.group_id}`);
                                   if (item.log.condition_changed) changes.push(`Condition: ${displayCondition(item.log.previous_state?.condition)} → ${displayCondition(item.log.new_state?.condition)}`);
                                   if (item.log.box_moved) changes.push('Bounding box adjusted');
+                                  const kpCount = Array.isArray(item.log.keypoint_box_updates) ? item.log.keypoint_box_updates.length : 0;
+                                  if (kpCount > 0) changes.push(`Bounding box adjusted (${kpCount} keypoint${kpCount === 1 ? '' : 's'})`);
+                                  if (item.log.defect_id_assigned && item.log.new_state?.defect_id) changes.push(`Defect ID assigned: ${item.log.new_state.defect_id}`);
+                                  if (changes.length === 0) changes.push('No tracked field changes');
                                   return (
                                     <div key={`log-${mIdx}`} className="flex items-start gap-3">
                                       <div className="shrink-0 flex items-center justify-center w-[18px] pt-1">
