@@ -52,6 +52,8 @@ export const qk = {
       ["assets", "geometry", masterDisplayId] as const,
     conditionLogs: (mongoId: string) =>
       ["assets", "conditionLogs", mongoId] as const,
+    labelClassifications: () =>
+      ["assets", "labelClassifications"] as const,
   },
   roads: {
     all: ["roads"] as const,

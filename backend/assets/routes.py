@@ -769,6 +769,33 @@ def _conditional_response_gz(body_gz: bytes) -> Response:
 	return resp
 
 
+@assets_bp.get("/label-classifications", endpoint="assets_label_classifications")
+@role_required(["super_admin", "admin", "surveyor", "viewer"])
+def get_label_classifications():
+	"""
+	Return classification (point | linear_sided | linear_unsided | other)
+	for every group_id known to the system. Used by the QC layer to filter
+	the asset-type dropdown so a linear master can only be re-typed to
+	another linear group, and a point master to another point group.
+	---
+	tags:
+	  - Assets
+	security:
+	  - Bearer: []
+	responses:
+	  200:
+	    description: Map of group_id → classification string
+	"""
+	from services.local_processor import classify_group
+
+	db = get_db()
+	# Distinct group_ids across system_asset_labels (the canonical source
+	# the label map is built from).
+	group_ids = db.system_asset_labels.distinct("group_id")
+	out = {gid: classify_group(gid) for gid in group_ids if gid}
+	return jsonify({"classifications": out})
+
+
 @assets_bp.get("/master/<master_display_id>/keypoints", endpoint="assets_master_keypoints")
 @role_required(["super_admin", "admin", "surveyor", "viewer"])
 def get_master_asset_keypoints(master_display_id: str):
@@ -1633,9 +1660,16 @@ def unmark_asset_good(asset_id: str):
 		except Exception:
 			sid = None
 
+	from utils.ids import generate_defect_id
+	new_defect_id = generate_defect_id(db=db)
+
 	res = db.master_assets.find_one_and_update(
 		{"_id": master_oid},
-		{"$set": {"latest_condition": "damaged", "updated_at": now}},
+		{"$set": {
+			"latest_condition": "damaged",
+			"latest_defect_id": new_defect_id,
+			"updated_at": now,
+		}},
 	)
 	if not res:
 		return jsonify({"error": "not found"}), 404
@@ -1647,6 +1681,7 @@ def unmark_asset_good(asset_id: str):
 		"action": "marked_damaged",
 		"previous_condition": "good",
 		"new_condition": "damaged",
+		"defect_id": new_defect_id,
 		"name": surveyor_name,
 		"user_id": surveyor_user_id,
 		"survey_id": sid,
@@ -1661,10 +1696,10 @@ def unmark_asset_good(asset_id: str):
 		if latest_obs_id:
 			db.assets.update_one(
 				{"_id": latest_obs_id},
-				{"$set": {"condition": "damaged"}},
+				{"$set": {"condition": "damaged", "defect_id": new_defect_id}},
 			)
 
-	return jsonify({"ok": True})
+	return jsonify({"ok": True, "defect_id": new_defect_id})
 
 
 @assets_bp.get("/<asset_id>/condition-logs", endpoint="assets_condition_logs")
@@ -1764,9 +1799,9 @@ def qc_update_asset(master_display_id: str):
 	new_category_id = (body.get("category_id") or "").strip()
 	new_condition = (body.get("condition") or "").strip()
 	new_box = body.get("box")
-
-	if not new_box:
-		return jsonify({"error": "box is required"}), 400
+	# Linear assets: per-keypoint bbox edits batched in one save.
+	# Shape: [{"frame": int, "box": {x,y,width,height}}, ...]
+	keypoint_updates_raw = body.get("keypoint_updates") or []
 
 	db = get_db()
 	now = get_now_iso()
@@ -1777,6 +1812,38 @@ def qc_update_asset(master_display_id: str):
 		return jsonify({"error": "not found"}), 404
 
 	master_oid = master["_id"]
+	is_line = master.get("kind") == "line"
+
+	# `box` is required for point assets (the only bbox they have). Line
+	# assets carry their bboxes per-keypoint, so any save shape is valid:
+	# pure asset-level edits (type/category/condition), per-keypoint bbox
+	# edits, or both. The end-of-flow "no changes detected" guard catches
+	# true no-ops.
+	if not is_line and not new_box:
+		return jsonify({"error": "box is required"}), 400
+
+	# --- Sanitize keypoint_updates against the master's keypoints array ---
+	kp_updates = []
+	if is_line and keypoint_updates_raw:
+		existing_kps = master.get("keypoints") or []
+		frame_to_idx = {kp.get("frame"): i for i, kp in enumerate(existing_kps)}
+		for entry in keypoint_updates_raw:
+			frame = entry.get("frame")
+			box = entry.get("box")
+			if frame is None or not box:
+				continue
+			idx = frame_to_idx.get(frame)
+			if idx is None:
+				continue
+			old_kp_box = existing_kps[idx].get("box") or {}
+			if (
+				box.get("x") == old_kp_box.get("x")
+				and box.get("y") == old_kp_box.get("y")
+				and box.get("width") == old_kp_box.get("width")
+				and box.get("height") == old_kp_box.get("height")
+			):
+				continue  # unchanged
+			kp_updates.append({"idx": idx, "frame": frame, "box": box, "old_box": old_kp_box})
 
 	# --- Determine what changed ---
 	old_group_id = master.get("group_id", "")
@@ -1787,14 +1854,16 @@ def qc_update_asset(master_display_id: str):
 
 	type_changed = bool(new_group_id and new_group_id != old_group_id)
 	condition_changed = bool(new_condition and new_condition.lower() != old_condition.lower())
-	box_moved = bool(new_box and (
+	# Point assets compare against latest_box; line assets carry their bbox
+	# state in keypoints[] so we never promote the body-level box to latest.
+	box_moved = (not is_line) and bool(new_box and (
 		new_box.get("x") != old_box.get("x") or
 		new_box.get("y") != old_box.get("y") or
 		new_box.get("width") != old_box.get("width") or
 		new_box.get("height") != old_box.get("height")
 	))
 
-	if not type_changed and not condition_changed and not box_moved:
+	if not type_changed and not condition_changed and not box_moved and not kp_updates:
 		return jsonify({"ok": True, "message": "no changes detected"})
 
 	# --- Resolve new asset_id from system_asset_labels if type changed ---
@@ -1803,6 +1872,13 @@ def qc_update_asset(master_display_id: str):
 		label_doc = db.system_asset_labels.find_one({"group_id": new_group_id})
 		if label_doc:
 			new_asset_id = label_doc.get("asset_id", old_asset_id)
+
+	# --- Allocate fresh defect_id on any good→non-good transition ---
+	# Always mint a new id (overwrites historical one), matching unmark-good.
+	new_defect_id = None
+	if condition_changed and new_condition.lower() != "good":
+		from utils.ids import generate_defect_id
+		new_defect_id = generate_defect_id(db=db)
 
 	# --- Build update for master_assets ---
 	master_update = {"updated_at": now}
@@ -1816,6 +1892,8 @@ def qc_update_asset(master_display_id: str):
 		master_update["latest_condition"] = new_condition.lower()
 	if box_moved:
 		master_update["latest_box"] = new_box
+	if new_defect_id:
+		master_update["latest_defect_id"] = new_defect_id
 
 	db.master_assets.update_one(
 		{"_id": master_oid},
@@ -1838,6 +1916,8 @@ def qc_update_asset(master_display_id: str):
 				asset_update["condition"] = new_condition.lower()
 			if box_moved:
 				asset_update["box"] = new_box
+			if new_defect_id:
+				asset_update["defect_id"] = new_defect_id
 			if asset_update:
 				db.assets.update_one(
 					{"_id": latest_obs_id},
@@ -1857,38 +1937,113 @@ def qc_update_asset(master_display_id: str):
 				{"$set": sh_update},
 			)
 
-	# --- Regenerate CLIP embedding if bounding box changed ---
-	if box_moved and survey_history:
-		latest_obs = survey_history[-1]
-		vid_id = latest_obs.get("video_id")
-		frame_num = latest_obs.get("frame_number")
-		if vid_id and frame_num is not None:
-			video_doc = db.videos.find_one(
-				{"_id": ObjectId(str(vid_id))},
-				{"storage_url": 1},
-			)
-			if video_doc and video_doc.get("storage_url"):
-				from pathlib import Path as _Path
-				from services.asset_linker import regenerate_embedding
+	# --- Persist per-keypoint bbox updates for linear assets ---
+	# Schema reminder: a line asset stores ONE row in `assets` per track
+	# (anchor frame), with a `keypoints[]` array embedded on it. The same
+	# array is mirrored to `master_assets.keypoints[]` via _merge_linear_fields
+	# at link time. Editing keypoint i means writing keypoints[i].box on
+	# BOTH documents. Plus, when the edited keypoint is the anchor frame,
+	# the row's top-level `box` (and master's denormalised `latest_box` /
+	# `survey_history[-1].box`) also need to follow — those fields are
+	# anchor-keyed by design.
+	#
+	# `latest_obs_id` (resolved below for the embedding block) is the same
+	# `assets._id` we want for the keypoints write, so we share it.
+	kp_writes_master = 0
+	kp_writes_assets = 0
+	anchor_frame = None
+	latest_obs_id_for_kp = None
+	if kp_updates:
+		# survey_history[-1].asset_observation_id is the canonical pointer
+		# to the assets row for this master's latest survey — same anchor
+		# the point flow uses below. Resolve once, share with embedding.
+		if survey_history:
+			latest_obs_id_for_kp = survey_history[-1].get("asset_observation_id")
+			anchor_frame = survey_history[-1].get("frame_number")
 
-				upload_dir = _Path(os.environ.get("UPLOAD_DIR") or os.path.join(
-					os.path.dirname(os.path.abspath(__file__)), "..", "uploads"
-				))
-				up = _Path("/uploads")
-				video_path = upload_dir / _Path(video_doc["storage_url"]).relative_to(up)
+		# 1. master_assets.keypoints[i].box for every edited keypoint.
+		kp_set = {f"keypoints.{u['idx']}.box": u["box"] for u in kp_updates}
+		kp_set["updated_at"] = now
+		# Anchor-frame edits also bring latest_box back in sync so the
+		# map / list / detail-view denormalised fields don't drift.
+		if anchor_frame is not None:
+			anchor_update = next((u for u in kp_updates if u["frame"] == anchor_frame), None)
+			if anchor_update is not None:
+				kp_set["latest_box"] = anchor_update["box"]
+		db.master_assets.update_one({"_id": master_oid}, {"$set": kp_set})
+		kp_writes_master = len(kp_updates)
 
-				new_embedding = regenerate_embedding(video_path, int(frame_num), new_box)
-				if new_embedding is not None:
+		# 2. assets.<latest_obs>.keypoints[i].box for every edited keypoint.
+		# Plus assets.box and survey_history.<idx>.box when anchor frame.
+		if latest_obs_id_for_kp:
+			obs_set = {f"keypoints.{u['idx']}.box": u["box"] for u in kp_updates}
+			if anchor_frame is not None:
+				anchor_update = next((u for u in kp_updates if u["frame"] == anchor_frame), None)
+				if anchor_update is not None:
+					obs_set["box"] = anchor_update["box"]
+			db.assets.update_one({"_id": latest_obs_id_for_kp}, {"$set": obs_set})
+			kp_writes_assets = len(kp_updates)
+
+			# survey_history[-1].box rolls forward only when anchor frame
+			# was the one edited (the entry's frame_number is anchor).
+			if anchor_frame is not None:
+				anchor_update = next((u for u in kp_updates if u["frame"] == anchor_frame), None)
+				if anchor_update is not None:
+					sh_idx = len(survey_history) - 1
 					db.master_assets.update_one(
 						{"_id": master_oid},
+						{"$set": {f"survey_history.{sh_idx}.box": anchor_update["box"]}},
+					)
+
+	# --- Regenerate CLIP embedding if any bounding box changed ---
+	# Point asset: regen from latest_obs.frame_number + new top-level box.
+	# Line asset: regen from the last edited keypoint (its frame + new box).
+	embed_vid_id = None
+	embed_frame = None
+	embed_box = None
+	embed_obs_id = None
+	if box_moved and survey_history:
+		latest_obs = survey_history[-1]
+		embed_vid_id = latest_obs.get("video_id")
+		embed_frame = latest_obs.get("frame_number")
+		embed_box = new_box
+		embed_obs_id = latest_obs.get("asset_observation_id")
+	elif kp_updates:
+		last_kp = kp_updates[-1]
+		embed_vid_id = master.get("latest_video_id")
+		embed_frame = last_kp["frame"]
+		embed_box = last_kp["box"]
+		# `assets._id` is whichever row survey_history[-1] points at — same
+		# pointer we already resolved for the keypoints write above. There
+		# is exactly one assets row per (master, survey) for line assets.
+		embed_obs_id = latest_obs_id_for_kp
+
+	if embed_vid_id and embed_frame is not None and embed_box:
+		video_doc = db.videos.find_one(
+			{"_id": ObjectId(str(embed_vid_id))},
+			{"storage_url": 1},
+		)
+		if video_doc and video_doc.get("storage_url"):
+			from pathlib import Path as _Path
+			from services.asset_linker import regenerate_embedding
+
+			upload_dir = _Path(os.environ.get("UPLOAD_DIR") or os.path.join(
+				os.path.dirname(os.path.abspath(__file__)), "..", "uploads"
+			))
+			up = _Path("/uploads")
+			video_path = upload_dir / _Path(video_doc["storage_url"]).relative_to(up)
+
+			new_embedding = regenerate_embedding(video_path, int(embed_frame), embed_box)
+			if new_embedding is not None:
+				db.master_assets.update_one(
+					{"_id": master_oid},
+					{"$set": {"embedding": new_embedding}},
+				)
+				if embed_obs_id:
+					db.assets.update_one(
+						{"_id": embed_obs_id},
 						{"$set": {"embedding": new_embedding}},
 					)
-					latest_obs_id = latest_obs.get("asset_observation_id")
-					if latest_obs_id:
-						db.assets.update_one(
-							{"_id": latest_obs_id},
-							{"$set": {"embedding": new_embedding}},
-						)
 
 	# --- Log to asset_condition_logs ---
 	log_entry = {
@@ -1901,6 +2056,18 @@ def qc_update_asset(master_display_id: str):
 		"type_changed": type_changed,
 		"condition_changed": condition_changed,
 		"box_moved": box_moved,
+		# Per-keypoint bbox edits for linear assets — empty list for points.
+		"keypoint_box_updates": [
+			{"frame": u["frame"], "previous_box": u["old_box"], "new_box": u["box"]}
+			for u in kp_updates
+		],
+		# Traceability: how many master_assets / assets writes the kp block
+		# actually landed. A 0 here on a kp save flags a routing bug.
+		"keypoint_box_updates_applied": {
+			"master_writes": kp_writes_master,
+			"assets_writes": kp_writes_assets,
+			"anchor_frame": anchor_frame,
+		},
 		# Store previous state for revert
 		"previous_state": {
 			"group_id": old_group_id,
@@ -1908,6 +2075,7 @@ def qc_update_asset(master_display_id: str):
 			"category_id": old_category_id,
 			"condition": old_condition,
 			"box": old_box,
+			"defect_id": master.get("latest_defect_id"),
 		},
 		# Store new state
 		"new_state": {
@@ -1916,7 +2084,11 @@ def qc_update_asset(master_display_id: str):
 			"category_id": new_category_id or old_category_id,
 			"condition": new_condition.lower() if new_condition else old_condition,
 			"box": new_box,
+			"defect_id": new_defect_id or master.get("latest_defect_id"),
 		},
+		# True when the QC flip allocated a fresh DEF-### id (good→non-good
+		# transition with no prior defect_id on master).
+		"defect_id_assigned": bool(new_defect_id),
 	}
 	db.asset_condition_logs.insert_one(log_entry)
 

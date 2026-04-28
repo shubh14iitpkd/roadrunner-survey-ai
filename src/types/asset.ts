@@ -39,6 +39,10 @@ export interface AssetRecord {
   }[];
   /** UI-only: true when this asset has been marked as good in this session */
   isGood?: boolean;
+  /** UI-only: index into `keypoints[]` for the slider's current point.
+   *  Required identity for linear_unsided assets where two keypoints can
+   *  share a frame number — frame alone is ambiguous. */
+  kpIdx?: number;
   /** Cross-survey timeline from master_assets.survey_history */
   surveyHistory?: {
     survey_display_id?: string;

@@ -1,10 +1,26 @@
+/*
+Rules of point asset QC:
+- User can only have one annotation at a time, representing the latest observation.
+- Need to regenerate embedding on box changes
+- user can change condition
+
+Rules of line asset QC:
+- User can edit only one keypoint at a time and has to save before moving to next keypoint(we should show a dialog for save or discard before user moves)
+- Changing condition changes condition of whole line (we don't store condition with keypoints) if any keypoint is damaged wole line becomes damaged
+- for linear asset, we have to ensure that user can change its asset type to other linear assets only
+- need to regenerate embedding when box changes are saved
+*/
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
+import { qk } from "@/lib/queryKeys";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLabelMap } from "@/contexts/LabelMapContext";
 import { getCategoryColorCode } from "@/components/CategoryBadge";
 import { useFrameImage } from "@/hooks/useFrameImage";
+import LinearAssetFrameSlider from "@/components/LinearAssetFrameSlider";
+import type { AssetRecord, LineKeypoint } from "@/types/asset";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -103,10 +119,83 @@ export default function QCLayer() {
     return masterAsset.survey_history[masterAsset.survey_history.length - 1];
   }, [masterAsset]);
 
-  // Fetch frame image using existing hook
+  const isLine = masterAsset?.kind === "line";
+
+  // ─── Linear-asset keypoint state ──────────────────────────────
+  // QC rule: edit ONE keypoint at a time. Save (or discard) before
+  // navigating away. `dirtyKp` is the unsaved bbox for the current keypoint;
+  // it gets cleared on save, on discard, and on confirmed navigation.
+  const qc = useQueryClient();
+  const [keypoints, setKeypoints] = useState<LineKeypoint[] | null>(null);
+  const [currentKpIdx, setCurrentKpIdx] = useState(0);
+  const [dirtyKp, setDirtyKp] = useState<{
+    frame: number;
+    box: { x: number; y: number; width: number; height: number };
+  } | null>(null);
+  // Pending navigation guard — set when user tries to move while dirtyKp
+  // exists. Resolved by the dialog's Save/Discard/Cancel actions.
+  const [pendingNavIdx, setPendingNavIdx] = useState<number | null>(null);
+  // Asset-level edits (label / category / condition) live here so they
+  // survive keypoint navigation — the annotation init effect rebuilds
+  // annotation from masterAsset on every kp change, which would otherwise
+  // wipe an in-memory edit.
+  const [pendingMeta, setPendingMeta] = useState<{
+    group_id?: string;
+    category_id?: string;
+    condition?: string;
+  } | null>(null);
+
+  // Label classifications cache — used to filter the type-picker for
+  // linear assets. Single small payload, refreshed every 30 minutes.
+  const labelClassQuery = useQuery({
+    queryKey: qk.assets.labelClassifications(),
+    queryFn: () => api.assets.getLabelClassifications(),
+    staleTime: 30 * 60_000,
+  });
+  const labelClassifications = labelClassQuery.data?.classifications ?? {};
+
+  useEffect(() => {
+    if (!isLine || !masterDisplayId) {
+      setKeypoints(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const resp = await qc.fetchQuery({
+          queryKey: qk.assets.keypoints(masterDisplayId),
+          queryFn: () => api.assets.getMasterAssetKeypoints(masterDisplayId),
+          staleTime: 5 * 60_000,
+        });
+        if (cancelled) return;
+        const all: LineKeypoint[] = (resp as { keypoints?: LineKeypoint[] } | null)?.keypoints ?? [];
+        const masterSide = masterAsset?.side;
+        const anyHasSide = all.some((kp) => !!kp.side);
+        const filtered = (masterSide && anyHasSide)
+          ? all.filter((kp) => kp.side === masterSide)
+          : all;
+        const sorted = [...filtered].sort((a, b) => a.frame - b.frame);
+        setKeypoints(sorted);
+        setCurrentKpIdx(0);
+        setDirtyKp(null);
+        setPendingMeta(null);
+        setPendingNavIdx(null);
+      } catch {
+        if (!cancelled) setKeypoints(null);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [isLine, masterDisplayId, masterAsset?.side, qc]);
+
+  const currentKeypoint = isLine && keypoints ? keypoints[currentKpIdx] ?? null : null;
+
+  // Frame image source: line assets follow the current keypoint's frame;
+  // point assets stay on the latest observation. videoId is shared across
+  // all keypoints on a line (single survey).
+  const frameForImage = isLine ? currentKeypoint?.frame : latestObservation?.frame_number;
   const { imageUrl: frameImageUrl, frameWidth, frameHeight, loading: imageLoading } = useFrameImage({
     videoId: latestObservation?.video_id,
-    frameNumber: latestObservation?.frame_number,
+    frameNumber: frameForImage,
   });
 
   // Annotation state — single annotation
@@ -236,44 +325,90 @@ export default function QCLayer() {
   }, [masterDisplayId]);
 
   // ─── Build initial annotation once asset AND image are ready ───
+  // For line assets the source bbox is `currentKeypoint.box` (or the user's
+  // pending override for that frame). For point assets it stays the latest
+  // observation's box.
   useEffect(() => {
     if (!masterAsset || !latestObservation) { setAnnotation(null); return; }
     // Wait for the frame image to finish loading so we have dimensions
     if (imageLoading) return;
+    if (isLine && !currentKeypoint) { setAnnotation(null); return; }
 
-    const box = latestObservation.box || masterAsset.box;
-    const groupId = masterAsset.group_id || masterAsset.asset_type || "Unknown";
-    const catId = masterAsset.category_id || "";
-    const rawCondition = latestObservation.condition || masterAsset.latest_condition || "Good";
+    // Asset-level fields prefer the in-flight pendingMeta over the master
+    // doc so navigating across keypoints doesn't undo a label/condition
+    // edit the user has made but not yet saved.
+    const groupId = pendingMeta?.group_id ?? masterAsset.group_id ?? masterAsset.asset_type ?? "Unknown";
+    const catId = pendingMeta?.category_id ?? masterAsset.category_id ?? "";
+    const rawCondition = pendingMeta?.condition
+      ?? latestObservation.condition
+      ?? masterAsset.latest_condition
+      ?? "Good";
     const condition = conditionToDisplay(rawCondition);
 
     let ann: Annotation | null = null;
-    if (box) {
-      // Normalise: if any coordinate > 1 treat as pixel values
-      const isPixel = box.x > 1 || box.y > 1 || box.width > 1 || box.height > 1;
+    if (isLine && currentKeypoint) {
       const fw = frameWidth || 2560;
       const fh = frameHeight || 1440;
-
-      ann = {
-        id: generateId(),
-        label: groupId,
-        category_id: catId,
-        condition,
-        x: isPixel ? (box.x ?? 0) / fw : (box.x ?? 0),
-        y: isPixel ? (box.y ?? 0) / fh : (box.y ?? 0),
-        width: isPixel ? (box.width ?? 0.05) / fw : (box.width ?? 0.05),
-        height: isPixel ? (box.height ?? 0.05) / fh : (box.height ?? 0.05),
-        confidence: latestObservation.confidence || masterAsset.latest_confidence,
-        status: "ai",
-        color: getCategoryColorCode(catId),
-      };
+      const isDirtyHere = dirtyKp && dirtyKp.frame === currentKeypoint.frame;
+      let frac: { x: number; y: number; width: number; height: number } | null = null;
+      if (isDirtyHere) {
+        frac = dirtyKp.box;
+      } else if (currentKeypoint.box) {
+        const b = currentKeypoint.box;
+        const isPixel = b.x > 1 || b.y > 1 || b.width > 1 || b.height > 1;
+        frac = {
+          x: isPixel ? (b.x ?? 0) / fw : (b.x ?? 0),
+          y: isPixel ? (b.y ?? 0) / fh : (b.y ?? 0),
+          width: isPixel ? (b.width ?? 0.05) / fw : (b.width ?? 0.05),
+          height: isPixel ? (b.height ?? 0.05) / fh : (b.height ?? 0.05),
+        };
+      }
+      if (frac) {
+        ann = {
+          id: generateId(),
+          label: groupId,
+          category_id: catId,
+          condition,
+          ...frac,
+          status: isDirtyHere ? "edited" : "ai",
+          color: getCategoryColorCode(catId),
+        };
+      }
+    } else {
+      const box = latestObservation.box || masterAsset.box;
+      if (box) {
+        const isPixel = box.x > 1 || box.y > 1 || box.width > 1 || box.height > 1;
+        const fw = frameWidth || 2560;
+        const fh = frameHeight || 1440;
+        ann = {
+          id: generateId(),
+          label: groupId,
+          category_id: catId,
+          condition,
+          x: isPixel ? (box.x ?? 0) / fw : (box.x ?? 0),
+          y: isPixel ? (box.y ?? 0) / fh : (box.y ?? 0),
+          width: isPixel ? (box.width ?? 0.05) / fw : (box.width ?? 0.05),
+          height: isPixel ? (box.height ?? 0.05) / fh : (box.height ?? 0.05),
+          confidence: latestObservation.confidence || masterAsset.latest_confidence,
+          status: "ai",
+          color: getCategoryColorCode(catId),
+        };
+      }
     }
 
     setAnnotation(ann);
     setIsAnnotationSelected(false);
     setHistory([ann ? JSON.parse(JSON.stringify(ann)) : null]);
     setHistoryIndex(0);
-  }, [masterAsset, latestObservation, imageLoading, frameWidth, frameHeight]);
+    // dirtyKp + pendingMeta are read on each rebuild but not driving it —
+    // we only re-init when masterAsset / current keypoint / image dims
+    // change. Listing them in deps would clear annotation history on every
+    // tiny edit.
+    // Identity is `currentKpIdx`, not `currentKeypoint?.frame` — linear_unsided
+    // assets can have two keypoints sharing the same frame number, and a
+    // frame-keyed dep would skip the rebuild when navigating between them.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [masterAsset, latestObservation, imageLoading, frameWidth, frameHeight, isLine, currentKpIdx]);
 
   // ─── Canvas position helpers ──────────────────────────────────
   const getRelativePos = (e: React.MouseEvent) => {
@@ -355,6 +490,7 @@ export default function QCLayer() {
           };
           setAnnotation(newAnn);
           pushHistory(newAnn);
+          commitPendingKeypointBox(newAnn);
           toast.success(`Added: ${selectedLabel} (${cond})`);
         }
         setActiveTool("select");
@@ -363,15 +499,43 @@ export default function QCLayer() {
       setDrawCurrent(null);
     }
     if (dragState) {
-      pushHistory(annotation);
+      // Only mark dirty if the bbox actually moved. Mere mouseDown+mouseUp
+      // (clicking the bbox to select it) used to set dirtyKp, which then
+      // blocked the slider's next button with the unsaved-changes dialog.
+      const moved = !!annotation && (
+        annotation.x !== dragState.origX || annotation.y !== dragState.origY
+      );
+      if (moved) {
+        pushHistory(annotation);
+        commitPendingKeypointBox(annotation);
+      }
       setDragState(null);
     }
     if (resizeState) {
-      pushHistory(annotation);
+      const o = resizeState.orig;
+      const resized = !!annotation && (
+        annotation.x !== o.x || annotation.y !== o.y
+        || annotation.width !== o.width || annotation.height !== o.height
+      );
+      if (resized) {
+        pushHistory(annotation);
+        commitPendingKeypointBox(annotation);
+      }
       setResizeState(null);
     }
     setIsPanning(false);
   };
+
+  // Stash the current annotation's bbox as the dirty edit for this
+  // keypoint so the navigation guard can detect unsaved changes.
+  // No-op for point assets — those save via the existing latest_box path.
+  const commitPendingKeypointBox = useCallback((ann: Annotation | null) => {
+    if (!isLine || !currentKeypoint || !ann) return;
+    setDirtyKp({
+      frame: currentKeypoint.frame,
+      box: { x: ann.x, y: ann.y, width: ann.width, height: ann.height },
+    });
+  }, [isLine, currentKeypoint]);
 
   // ─── Annotation drag/resize starters ──────────────────────────
   const startDrag = (e: React.MouseEvent) => {
@@ -395,6 +559,12 @@ export default function QCLayer() {
     setAnnotation(null);
     pushHistory(null);
     setIsAnnotationSelected(false);
+    // Drop any pending edits too — otherwise Save would still emit a
+    // keypoint_update / meta change for the just-deleted state.
+    if (isLine) {
+      setDirtyKp(null);
+      setPendingMeta(null);
+    }
     toast.success("Annotation deleted");
   };
 
@@ -408,6 +578,22 @@ export default function QCLayer() {
 
   const saveEdit = () => {
     if (!editingAnnotation || !annotation) return;
+    // For line assets the annotation is rebuilt from masterAsset every time
+    // the user navigates to a different keypoint. Stash the asset-level
+    // fields in pendingMeta so the rebuild reads them and the edit
+    // survives nav. Set only the fields that actually differ from master
+    // so the no-op save guard doesn't think non-edits are changes.
+    if (isLine) {
+      const masterGroup = masterAsset?.group_id ?? masterAsset?.asset_type ?? "";
+      const masterCat = masterAsset?.category_id ?? "";
+      const masterCondStored = conditionToStorage(masterAsset?.latest_condition ?? "Good");
+      const newCondStored = conditionToStorage(editCondition);
+      const meta: { group_id?: string; category_id?: string; condition?: string } = {};
+      if (editLabel !== masterGroup) meta.group_id = editLabel;
+      if (editCategoryId !== masterCat) meta.category_id = editCategoryId;
+      if (newCondStored !== masterCondStored) meta.condition = newCondStored;
+      setPendingMeta(Object.keys(meta).length ? meta : null);
+    }
     const updated: Annotation = {
       ...annotation,
       label: editLabel,
@@ -424,29 +610,142 @@ export default function QCLayer() {
 
   const [saving, setSaving] = useState(false);
 
-  const handleSaveAll = async () => {
-    if (!annotation || !masterDisplayId || !user) return;
-    const fw = frameWidth || 2560;
-    const fh = frameHeight || 1440;
+  const handleSaveAll = async (): Promise<boolean> => {
+    if (!masterDisplayId || !user) return false;
+    // Hard-guard: a save without a bbox is meaningless — the asset *is* the
+    // bbox. This catches the "delete then save" path where annotation is
+    // null and any prior dirty edit must be discarded too.
+    if (!annotation) {
+      toast.error("Draw a bounding box before saving");
+      return false;
+    }
+    // Refuse to save while we don't yet know the frame's pixel dims —
+    // multiplying fractional bbox by a fallback (2560×1440) would emit
+    // corrupt pixel coordinates for any other resolution.
+    if (!frameWidth || !frameHeight) {
+      toast.error("Frame not loaded yet — try again in a moment");
+      return false;
+    }
+    const fw = frameWidth;
+    const fh = frameHeight;
+
+    // Snapshot the current annotation as the dirty kp if the user pressed
+    // Save without a prior drag/resize finishing through mouseUp.
+    let activeDirty = dirtyKp;
+    if (isLine && currentKeypoint) {
+      const same = activeDirty
+        && activeDirty.frame === currentKeypoint.frame
+        && activeDirty.box.x === annotation.x
+        && activeDirty.box.y === annotation.y
+        && activeDirty.box.width === annotation.width
+        && activeDirty.box.height === annotation.height;
+      if (!same) {
+        activeDirty = {
+          frame: currentKeypoint.frame,
+          box: { x: annotation.x, y: annotation.y, width: annotation.width, height: annotation.height },
+        };
+      }
+    }
+
+    // Detect "no actual change" before we burn a network round-trip. Backend
+    // also returns "no changes detected" defensively but this gives a
+    // tighter, cheaper UX for the common case.
+    const masterCondStored = conditionToStorage(masterAsset?.latest_condition ?? "Good");
+    const newCondStored = conditionToStorage(annotation.condition);
+    const groupChanged = annotation.label !== (masterAsset?.group_id ?? masterAsset?.asset_type ?? "");
+    const categoryChanged = annotation.category_id !== (masterAsset?.category_id ?? "");
+    const conditionChanged = newCondStored !== masterCondStored;
+    const lineBoxChanged = isLine && !!activeDirty;
+    const pointBoxChanged = !isLine; // points always send box; backend dedupes
+    const anyChange = groupChanged || categoryChanged || conditionChanged || lineBoxChanged || pointBoxChanged;
+    if (!anyChange) {
+      toast.message("No changes to save");
+      return false;
+    }
 
     setSaving(true);
     try {
-      await api.assets.qcUpdate(masterDisplayId, {
+      const payload: Parameters<typeof api.assets.qcUpdate>[1] = {
         name: `${user.first_name} ${user.last_name}`.trim(),
         user_id: user.id,
         group_id: annotation.label,
         category_id: annotation.category_id,
-        condition: conditionToStorage(annotation.condition),
-        box: {
+        condition: newCondStored,
+      };
+
+      if (isLine) {
+        if (activeDirty) {
+          payload.keypoint_updates = [{
+            frame: activeDirty.frame,
+            box: {
+              x: activeDirty.box.x * fw, y: activeDirty.box.y * fh,
+              width: activeDirty.box.width * fw, height: activeDirty.box.height * fh,
+            },
+          }];
+        }
+      } else {
+        payload.box = {
           x: annotation.x * fw,
           y: annotation.y * fh,
           width: annotation.width * fw,
           height: annotation.height * fh,
-        },
-      });
+        };
+      }
+
+      const resp = await api.assets.qcUpdate(masterDisplayId, payload);
+      // Backend returns `{ok: true, message: "no changes detected"}` when its
+      // own diff says nothing changed. Don't lie to the user with a success
+      // toast in that case.
+      if (resp && (resp as { message?: string }).message === "no changes detected") {
+        toast.message("No changes to save");
+        return false;
+      }
+      if (isLine) {
+        setDirtyKp(null);
+        setPendingMeta(null);
+        // Mirror the just-saved bbox into our local keypoints copy so
+        // navigating back to this point reads the new box (not the stale
+        // server payload from the initial fetch).
+        if (activeDirty) {
+          setKeypoints((prev) => {
+            if (!prev) return prev;
+            return prev.map((kp) =>
+              kp.frame === activeDirty!.frame
+                ? {
+                    ...kp,
+                    box: {
+                      x: activeDirty!.box.x * fw,
+                      y: activeDirty!.box.y * fh,
+                      width: activeDirty!.box.width * fw,
+                      height: activeDirty!.box.height * fh,
+                    },
+                  }
+                : kp,
+            );
+          });
+        }
+      }
+      // Refresh master so any type/category/condition change is reflected
+      // immediately (label list, condition picker, default category).
+      if (groupChanged || categoryChanged || conditionChanged) {
+        try {
+          const fresh = await api.assets.getMasterByDisplayId(masterDisplayId);
+          if (fresh?.item) setMasterAsset(fresh.item);
+        } catch { /* non-fatal — UI just stays on the old master snapshot */ }
+      }
+      // Wipe every assets-scoped React Query cache so AssetLibrary /
+      // DefectLibrary / map / detail / conditionLogs / keypoints all
+      // re-fetch fresh server truth the next time they read. QC edits can
+      // touch type, category, condition, or bbox — any of which shifts
+      // sort order, map markers, paginated rows, or detail fields. Backend
+      // already drops its assets:* Redis cache via the assets blueprint
+      // after_request hook, so the refetch returns up-to-date data.
+      qc.invalidateQueries({ queryKey: qk.assets.all });
       toast.success("Annotation saved");
+      return true;
     } catch {
       toast.error("Failed to save annotation");
+      return false;
     } finally {
       setSaving(false);
     }
@@ -457,12 +756,62 @@ export default function QCLayer() {
   const handleZoomOut = () => setZoom(prev => Math.max(0.5, prev - 0.25));
   const handleZoomReset = () => { setZoom(1); setPan({ x: 0, y: 0 }); };
 
-  // Filtered labels
+  // Filtered labels — restrict the type-picker to compatible kinds:
+  // linear masters → linear_sided ∪ linear_unsided (no point re-type),
+  // point masters  → point (no linear re-type).
+  // Falls back to the full list while the classifications query is in flight.
+  const allowedLabels = useMemo(() => {
+    if (Object.keys(labelClassifications).length === 0) return null;
+    const allowed = new Set<string>();
+    for (const label of allLabels) {
+      const cls = labelClassifications[label];
+      if (isLine) {
+        if (cls === "linear_sided" || cls === "linear_unsided") allowed.add(label);
+      } else {
+        if (cls === "point") allowed.add(label);
+      }
+    }
+    return allowed;
+  }, [isLine, allLabels, labelClassifications]);
+
   const filteredLabels = useMemo(() => {
-    if (!labelSearch.trim()) return allLabels;
+    let pool = allLabels;
+    if (allowedLabels) pool = pool.filter((l) => allowedLabels.has(l));
+    if (!labelSearch.trim()) return pool;
     const q = labelSearch.toLowerCase();
-    return allLabels.filter(l => l.toLowerCase().includes(q));
-  }, [labelSearch, allLabels]);
+    return pool.filter(l => l.toLowerCase().includes(q));
+  }, [labelSearch, allLabels, allowedLabels]);
+
+  // Empty-state copy for the sidebar list — distinguishes "no compatible
+  // labels available at all" from "search yields no matches" so the user
+  // knows whether to clear the search or pick a different category.
+  const sidebarEmptyLabel = useMemo(() => {
+    const kind = isLine ? "linear" : "point";
+    return labelSearch ? `No ${kind} assets match` : `No ${kind} assets available`;
+  }, [isLine, labelSearch]);
+
+  // Categories that have at least one allowed label. Used by the edit
+  // dialog's category Select to hide categories that would otherwise
+  // show an empty Asset Type dropdown.
+  const allowedCategoryHasLabels = useMemo(() => {
+    if (!allowedLabels) return null;
+    const out: Record<string, boolean> = {};
+    for (const [catId, labels] of Object.entries(labelsByCategory)) {
+      out[catId] = labels.some((l) => allowedLabels.has(l));
+    }
+    return out;
+  }, [labelsByCategory, allowedLabels]);
+
+  // Drop a previously-selected sidebar label that fell outside the
+  // compatible filter (e.g. user navigated to a master of different kind).
+  // Clearing also drops the dependent condition so the badge isn't stuck.
+  useEffect(() => {
+    if (!selectedLabel) return;
+    if (allowedLabels && !allowedLabels.has(selectedLabel)) {
+      setSelectedLabel("");
+      setSelectedCondition("");
+    }
+  }, [selectedLabel, allowedLabels]);
 
   // Conditions for a label — derive from labelMap attributes or fallback
   const getConditionsForLabel = useCallback((label: string): string[] => {
@@ -576,11 +925,47 @@ export default function QCLayer() {
         {/* Right side: annotation count + save */}
         <div className="flex-1" />
         {annotation && (
-          <Button size="sm" className="h-8 text-xs gap-1" onClick={handleSaveAll} disabled={saving}>
-            <Save className="h-3.5 w-3.5" /> {saving ? "Saving..." : "Save"}
+          <Button size="sm" className="h-8 text-xs gap-1" onClick={() => { handleSaveAll(); }} disabled={saving}>
+            <Save className="h-3.5 w-3.5" />
+            {saving ? "Saving..." : (isLine && dirtyKp ? "Save Point" : "Save")}
           </Button>
         )}
       </div>
+
+      {/* Linear-asset frame slider — walks all keypoints on the line so the
+       *  user can review/edit the bbox at every observation. */}
+      {isLine && keypoints && keypoints.length > 1 && (
+        <div className="border-b border-border bg-card">
+          <LinearAssetFrameSlider
+            asset={{
+              masterDisplayId: masterDisplayId,
+              side: masterAsset?.side ?? "",
+              frameNumber: currentKeypoint?.frame,
+              kind: "line",
+              // Fields below required by AssetRecord type but unused by slider.
+              defectId: "", assetId: "", assetType: "", assetCategory: "",
+              lat: currentKeypoint?.lat ?? 0, lng: currentKeypoint?.lng ?? 0,
+              roadName: "", lastSurveyDate: "", issue: "", severity: "",
+            } as AssetRecord}
+            keypoints={keypoints}
+            idx={currentKpIdx}
+            onFrameChange={(patch) => {
+              if (!keypoints) return;
+              // Use idx from patch (canonical) — frame alone is ambiguous on
+              // linear_unsided assets where two keypoints can share a frame.
+              const i = patch.idx;
+              if (i < 0 || i >= keypoints.length || i === currentKpIdx) return;
+              // QC rule: any unsaved change (bbox or asset-level meta)
+              // must be saved or discarded before navigating.
+              if (dirtyKp || pendingMeta) {
+                setPendingNavIdx(i);
+                return;
+              }
+              setCurrentKpIdx(i);
+            }}
+          />
+        </div>
+      )}
 
       {/* ─── Main: Center Canvas + Right Labels ─── */}
       <div className="flex-1 flex overflow-hidden">
@@ -603,7 +988,12 @@ export default function QCLayer() {
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}
           onMouseLeave={() => {
+            // Reset every transient interaction state so the user doesn't
+            // come back to a stuck drag/resize from a mouseUp the canvas
+            // never received.
             if (isDrawing) { setIsDrawing(false); setDrawStart(null); setDrawCurrent(null); }
+            if (dragState) setDragState(null);
+            if (resizeState) setResizeState(null);
             setIsPanning(false);
           }}
         >
@@ -767,6 +1157,11 @@ export default function QCLayer() {
           )}
           <ScrollArea className="flex-1">
             <div className="p-2 space-y-0.5">
+              {filteredLabels.length === 0 && (
+                <div className="px-2 py-6 text-center text-[10px] text-muted-foreground italic">
+                  {sidebarEmptyLabel}
+                </div>
+              )}
               {filteredLabels.map(label => {
                 const color = getColorForLabel(label);
                 const isCurrentAnnotation = annotation?.label === label;
@@ -819,7 +1214,7 @@ export default function QCLayer() {
                     <div className="flex items-center gap-2">
                       <div className="w-2.5 h-2.5 rounded-sm flex-shrink-0" style={{ backgroundColor: annotation.color }} />
                       <span className="text-[11px] font-medium truncate flex-1">{annotation.label}</span>
-                      <Badge
+                      {/* <Badge
                         variant="outline"
                         className={cn("text-[8px] px-1 py-0", {
                           "border-sky-400/30 text-sky-500": annotation.status === "ai",
@@ -828,7 +1223,7 @@ export default function QCLayer() {
                         })}
                       >
                         {annotation.status.toUpperCase()}
-                      </Badge>
+                      </Badge> */}
                     </div>
                     <div className="text-[8px] text-muted-foreground mt-0.5 ml-4 font-mono">
                       x:{Math.round(annotation.x * 1000)/10} y:{Math.round(annotation.y * 1000)/10} w:{Math.round(annotation.width * 1000)/10} h:{Math.round(annotation.height * 1000)/10}
@@ -863,14 +1258,19 @@ export default function QCLayer() {
               <Select value={editCategoryId} onValueChange={v => { setEditCategoryId(v); setEditLabel(""); }}>
                 <SelectTrigger className="h-8 text-[11px]"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {categoryIds.map(catId => (
-                    <SelectItem key={catId} value={catId} className="text-[11px]">
-                      <div className="flex items-center gap-2">
-                        <div className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: getCategoryColorCode(catId) }} />
-                        {categories[catId]}
-                      </div>
-                    </SelectItem>
-                  ))}
+                  {categoryIds
+                    // For line assets, drop categories that contain only
+                    // point labels — picking one would leave the Asset Type
+                    // dropdown empty.
+                    .filter((catId) => !allowedCategoryHasLabels || allowedCategoryHasLabels[catId])
+                    .map(catId => (
+                      <SelectItem key={catId} value={catId} className="text-[11px]">
+                        <div className="flex items-center gap-2">
+                          <div className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: getCategoryColorCode(catId) }} />
+                          {categories[catId]}
+                        </div>
+                      </SelectItem>
+                    ))}
                 </SelectContent>
               </Select>
             </div>
@@ -879,9 +1279,20 @@ export default function QCLayer() {
               <Select value={editLabel} onValueChange={setEditLabel}>
                 <SelectTrigger className="h-8 text-[11px]"><SelectValue placeholder="Select type..." /></SelectTrigger>
                 <SelectContent className="max-h-52">
-                  {(labelsByCategory[editCategoryId] || []).map(l => (
-                    <SelectItem key={l} value={l} className="text-[11px]">{l}</SelectItem>
-                  ))}
+                  {(() => {
+                    const opts = (labelsByCategory[editCategoryId] || [])
+                      .filter((l) => !allowedLabels || allowedLabels.has(l));
+                    if (opts.length === 0) {
+                      return (
+                        <div className="px-2 py-3 text-[10px] text-muted-foreground italic text-center">
+                          {isLine ? "No linear assets in this category" : "No point assets in this category"}
+                        </div>
+                      );
+                    }
+                    return opts.map(l => (
+                      <SelectItem key={l} value={l} className="text-[11px]">{l}</SelectItem>
+                    ));
+                  })()}
                 </SelectContent>
               </Select>
             </div>
@@ -906,6 +1317,61 @@ export default function QCLayer() {
               <Button variant="outline" size="sm" onClick={() => setEditingAnnotation(null)}>Cancel</Button>
               <Button size="sm" onClick={saveEdit} disabled={!editLabel}>Save</Button>
             </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ─── Keypoint Navigation Guard Dialog ─── */}
+      {/* Linear-asset rule: one keypoint at a time. If the user tries to
+       *  navigate (slider / chevron) with an unsaved edit (bbox OR asset-
+       *  level label/category/condition), force a decision: save it first,
+       *  throw it away, or stay put. */}
+      <Dialog open={pendingNavIdx !== null} onOpenChange={(open) => { if (!open) setPendingNavIdx(null); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-sm">Unsaved changes</DialogTitle>
+          </DialogHeader>
+          <p className="text-xs text-muted-foreground">
+            {dirtyKp && pendingMeta
+              ? `You've edited the bbox and asset details for Point ${currentKpIdx + 1}.`
+              : dirtyKp
+                ? `You've edited the bbox for Point ${currentKpIdx + 1}.`
+                : `You've changed the asset details.`}
+            {" "}Save before moving to a different point, or discard these changes.
+          </p>
+          <div className="flex justify-end gap-2 mt-2">
+            <Button
+              variant="ghost" size="sm" className="h-8 text-xs"
+              onClick={() => setPendingNavIdx(null)}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="outline" size="sm" className="h-8 text-xs"
+              onClick={() => {
+                const target = pendingNavIdx;
+                setDirtyKp(null);
+                setPendingMeta(null);
+                setPendingNavIdx(null);
+                if (target !== null) setCurrentKpIdx(target);
+              }}
+            >
+              Discard
+            </Button>
+            <Button
+              size="sm" className="h-8 text-xs gap-1" disabled={saving}
+              onClick={async () => {
+                const target = pendingNavIdx;
+                const ok = await handleSaveAll();
+                if (ok) {
+                  setPendingNavIdx(null);
+                  if (target !== null) setCurrentKpIdx(target);
+                }
+              }}
+            >
+              <Save className="h-3.5 w-3.5" />
+              {saving ? "Saving..." : "Save & Go"}
+            </Button>
           </div>
         </DialogContent>
       </Dialog>

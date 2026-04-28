@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { Slider } from "@/components/ui/slider";
@@ -7,47 +7,50 @@ import { qk } from "@/lib/queryKeys";
 import type { AssetRecord, LineKeypoint } from "@/types/asset";
 
 interface LinearAssetFrameSliderProps {
-  /** Currently selected asset. Component is a no-op unless `kind === "line"`. */
   asset: AssetRecord | null;
-  /** Called with the next keypoint's anchor when the user steps/scrubs.
-   *  Parent should merge the patch into its `selectedAsset` state — this
-   *  re-drives `useFrameImage` and the popup's `frameData`. */
+  /** Called every time the user picks a different point. `idx` is the
+   *  canonical identity (linear_unsided assets can carry two keypoints on
+   *  the same frame, so frameNumber alone is ambiguous). */
   onFrameChange: (patch: {
+    idx: number;
     frameNumber: number;
     box?: { x: number; y: number; width: number; height: number };
     lat: number;
     lng: number;
   }) => void;
+  /** Controlled mode: when supplied the component uses these keypoints
+   *  directly and skips the internal fetch. Useful for parents
+   *  (QCLayer) that already own the keypoint list. */
+  keypoints?: LineKeypoint[] | null;
+  /** Parent-owned current index. Required for linear_unsided assets where
+   *  two keypoints can share a frame; without it the slider falls back to
+   *  frame-based lookup and lands on the first match. */
+  idx?: number;
   className?: string;
 }
 
-/* Frame slider shown below FrameComparisonPopup in the Detailed View dialog
- * for linear assets. Each tick = one observation point along the line, so
- * the slider walks `keypoints.length` discrete points (not raw frame
- * numbers, which are sparse). Side-filters keypoints to match the polyline
- * side the user clicked (linear_sided assets). */
+/* Walks one observation point at a time along a linear asset. Display
+ * unit is **point index** (`Point i of N`), never the raw frame number. */
 export default function LinearAssetFrameSlider({
   asset,
   onFrameChange,
+  keypoints: controlledKeypoints,
+  idx: controlledIdx,
   className,
 }: LinearAssetFrameSliderProps) {
   const qc = useQueryClient();
-  const [keypoints, setKeypoints] = useState<LineKeypoint[] | null>(null);
-  // Local idx — slider thumb tracks this directly so dragging is smooth even
-  // while the parent is busy fetching frame images. Synced from the asset's
-  // current frame number on external changes (e.g. map clicks a new point).
-  const [idx, setIdx] = useState(0);
+  const [internalKeypoints, setInternalKeypoints] = useState<LineKeypoint[] | null>(null);
 
-  // Fetch keypoints whenever the dialog opens for any asset — the table-row
-  // click path doesn't carry an authoritative `kind` (the paginated endpoint
-  // omits it for speed), so we treat the keypoints endpoint as the source of
-  // truth: empty array = point asset → component renders nothing.
+  const isControlled = controlledKeypoints !== undefined;
+  const keypoints = isControlled ? controlledKeypoints : internalKeypoints;
+
   const masterId = asset?.masterDisplayId;
   const side = asset?.side;
 
   useEffect(() => {
+    if (isControlled) return;
     if (!masterId) {
-      setKeypoints(null);
+      setInternalKeypoints(null);
       return;
     }
     let cancelled = false;
@@ -65,70 +68,84 @@ export default function LinearAssetFrameSlider({
           ? all.filter((kp) => kp.side === side)
           : all;
         const sorted = [...filtered].sort((a, b) => a.frame - b.frame);
-        setKeypoints(sorted);
+        setInternalKeypoints(sorted);
       } catch {
-        if (!cancelled) setKeypoints(null);
+        if (!cancelled) setInternalKeypoints(null);
       }
     })();
     return () => { cancelled = true; };
-  }, [masterId, side, qc]);
+  }, [isControlled, masterId, side, qc]);
 
-  // Re-sync idx whenever the keypoint list changes (new asset / new side) or
-  // the asset's frame number changes from outside (map click). When the
-  // change came from this slider, idx already matches and the effect is a
-  // no-op.
-  useEffect(() => {
-    if (!keypoints || keypoints.length === 0) return;
-    if (asset?.frameNumber == null) {
-      setIdx(0);
-      return;
+  // Single source of truth: idx is owned by the parent. No internal idx
+  // state — that lets a rejected commit (e.g. QC nav-guard cancel) snap
+  // the thumb right back.
+  // Two resolution modes:
+  //  - Parent supplies `controlledIdx` → use it verbatim. Required for
+  //    linear_unsided assets where two keypoints can share a frame number;
+  //    findIndex-by-frame would always land on the first match.
+  //  - Otherwise fall back to frame lookup. Read-only call sites
+  //    (AssetLibrary detail panel, DefectLibrary) don't track an idx and
+  //    accept this ambiguity since they don't navigate keypoints.
+  const idx = useMemo(() => {
+    if (!keypoints || keypoints.length === 0) return 0;
+    if (controlledIdx != null) {
+      return Math.max(0, Math.min(keypoints.length - 1, controlledIdx));
     }
-    if (keypoints[idx]?.frame === asset.frameNumber) return;
+    if (asset?.frameNumber == null) return 0;
     const i = keypoints.findIndex((kp) => kp.frame === asset.frameNumber);
-    setIdx(i === -1 ? 0 : i);
-    // idx intentionally omitted — we only re-sync on external changes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [keypoints, asset?.frameNumber]);
+    return i === -1 ? 0 : i;
+  }, [keypoints, controlledIdx, asset?.frameNumber]);
 
   if (!asset || !keypoints || keypoints.length <= 1) return null;
 
-  const change = (next: number) => {
-    const clamped = Math.max(0, Math.min(keypoints.length - 1, next));
-    if (clamped === idx) return;
-    const kp = keypoints[clamped];
+  const total = keypoints.length;
+
+  // Goto: route every navigation (chevron click OR slider change) through
+  // a single function so behaviour can't drift between paths. Each call
+  // = one onFrameChange. If parent rejects, derivedIdx stays put, thumb
+  // snaps back next render.
+  const goto = (next: number) => {
+    const target = Math.max(0, Math.min(total - 1, Math.round(next)));
+    if (target === idx) return;
+    const kp = keypoints[target];
     if (!kp) return;
-    setIdx(clamped);
-    onFrameChange({ frameNumber: kp.frame, box: kp.box, lat: kp.lat, lng: kp.lng });
+    onFrameChange({ idx: target, frameNumber: kp.frame, box: kp.box, lat: kp.lat, lng: kp.lng });
   };
+
+  const atFirst = idx <= 0;
+  const atLast = idx >= total - 1;
 
   return (
     <div className={`flex items-center gap-3 px-3 py-2 ${className ?? ""}`}>
       <button
         type="button"
-        disabled={idx <= 0}
-        onClick={() => change(idx - 1)}
-        className="h-6 w-6 shrink-0 rounded-full inline-flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
+        disabled={atFirst}
+        onClick={() => goto(idx - 1)}
+        className="h-7 w-7 shrink-0 rounded-full inline-flex items-center justify-center cursor-pointer text-muted-foreground hover:text-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
+        aria-label="Previous point"
       >
-        <ChevronLeft className="h-3.5 w-3.5" />
+        <ChevronLeft className="h-4 w-4" />
       </button>
       <Slider
         min={0}
-        max={keypoints.length - 1}
+        max={total - 1}
         step={1}
         value={[idx]}
-        onValueChange={([v]) => change(v)}
-        className="flex-1 [&_[role=slider]]:h-3 [&_[role=slider]]:w-3 [&_[role=slider]]:border [&>span:first-child]:h-1"
+        onValueChange={([v]) => goto(v)}
+        className="flex-1 cursor-pointer [&_[role=slider]]:cursor-grab [&_[role=slider]:active]:cursor-grabbing"
+        aria-label={`Point ${idx + 1} of ${total}`}
       />
       <button
         type="button"
-        disabled={idx >= keypoints.length - 1}
-        onClick={() => change(idx + 1)}
-        className="h-6 w-6 shrink-0 rounded-full inline-flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
+        disabled={atLast}
+        onClick={() => goto(idx + 1)}
+        className="h-7 w-7 shrink-0 rounded-full inline-flex items-center justify-center cursor-pointer text-muted-foreground hover:text-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
+        aria-label="Next point"
       >
-        <ChevronRight className="h-3.5 w-3.5" />
+        <ChevronRight className="h-4 w-4" />
       </button>
-      <span className="text-[10px] text-muted-foreground tabular-nums shrink-0">
-        Point {idx + 1} of {keypoints.length}
+      <span className="text-[11px] font-medium text-muted-foreground tabular-nums shrink-0 select-none">
+        Point {idx + 1} of {total}
       </span>
     </div>
   );

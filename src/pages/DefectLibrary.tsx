@@ -1088,7 +1088,8 @@ export default function DefectLibrary() {
                     />
                     <LinearAssetFrameSlider
                       asset={selectedDefect}
-                      onFrameChange={(patch) => setSelectedDefect((prev) => prev ? { ...prev, ...patch } : prev)}
+                      idx={selectedDefect.kpIdx}
+                      onFrameChange={({ idx, ...rest }) => setSelectedDefect((prev) => prev ? { ...prev, ...rest, kpIdx: idx } : prev)}
                     />
                   </div>
                 );

@@ -277,6 +277,10 @@ export const api = {
 		getMasterAssetGeometry: (masterDisplayId: string) => {
 			return apiFetch(`/api/assets/master/${encodeURIComponent(masterDisplayId)}/geometry`);
 		},
+		getLabelClassifications: () =>
+			apiFetch("/api/assets/label-classifications") as Promise<{
+				classifications: Record<string, "point" | "linear_sided" | "linear_unsided" | "other">;
+			}>,
 		getMasterPaginated: (params?: {
 			page?: number; limit?: number; sort_key?: string; sort_dir?: string;
 			route_id?: number; category?: string; condition?: string;
@@ -351,7 +355,14 @@ export const api = {
 		qcUpdate: (masterDisplayId: string, payload: {
 			name: string; user_id: string;
 			group_id: string; category_id: string; condition: string;
-			box: { x: number; y: number; width: number; height: number };
+			/** Required for point assets; optional for line assets when only
+			 *  keypoint_updates are sent. */
+			box?: { x: number; y: number; width: number; height: number };
+			/** Per-keypoint bbox edits for linear assets, batched in one save. */
+			keypoint_updates?: Array<{
+				frame: number;
+				box: { x: number; y: number; width: number; height: number };
+			}>;
 		}) => apiFetch(`/api/assets/master/${masterDisplayId}/qc-update`, {
 			method: "PATCH", body: JSON.stringify(payload),
 		}),

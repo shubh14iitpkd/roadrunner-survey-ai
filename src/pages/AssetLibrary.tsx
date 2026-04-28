@@ -1093,7 +1093,8 @@ export default function AssetLibrary() {
                 />
                 <LinearAssetFrameSlider
                   asset={selectedAsset}
-                  onFrameChange={(patch) => setSelectedAsset((prev) => prev ? { ...prev, ...patch } : prev)}
+                  idx={selectedAsset.kpIdx}
+                  onFrameChange={({ idx, ...rest }) => setSelectedAsset((prev) => prev ? { ...prev, ...rest, kpIdx: idx } : prev)}
                 />
               </div>
             );
