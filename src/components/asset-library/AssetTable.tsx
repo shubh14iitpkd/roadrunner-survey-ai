@@ -220,7 +220,7 @@ export default function AssetTable({
         <div className="relative">
           <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
           <Input
-            placeholder="Search by Asset ID, Road, Type, Issue..."
+            placeholder="Search by Asset ID, Route, Type, Issue..."
             value={searchQuery}
             onChange={(e) => onSearchChange(e.target.value)}
             className="h-7 pl-7 text-[11px] bg-muted/30 border-border/50"

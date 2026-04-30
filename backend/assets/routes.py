@@ -2150,9 +2150,10 @@ def save_manual_annotations():
 	"""
 	from pathlib import Path as _Path
 	import cv2
-	from services.asset_linker import regenerate_embedding, _generate_master_display_id
+	from services.asset_linker import regenerate_embedding, _generate_master_display_id, _merge_linear_fields
 	from services.ZoneMapper import ZoneMapper
 	from services.LatLongEstimator import LatLongEstimator
+	from services.local_processor import classify_group
 	from utils.gpx_helpers import parse_gpx, interpolate_gpx
 
 	body = request.get_json(silent=True) or {}
@@ -2308,6 +2309,16 @@ def save_manual_annotations():
 				"coordinates": [estimated["lon"], estimated["lat"]],
 			}
 
+		# Classify the asset so linear groups (fence, kerb, guardrail, …)
+		# carry kind/keypoints/frames/etc. like the AI pipeline emits. Each
+		# manual annotation is stored as its own master — no cross-frame
+		# linking is performed here, so geometry is omitted (a single obs
+		# can't form a LineString) and we degrade to a single-keypoint line.
+		classification = classify_group(group_id)
+		is_linear = classification in ("linear_sided", "linear_unsided")
+		stored_kind = "line" if is_linear else "point"
+		stored_classification = classification if classification != "other" else "point"
+
 		# Create asset document
 		asset_doc = {
 			"asset_type": group_id,
@@ -2333,7 +2344,45 @@ def save_manual_annotations():
 			"source": "manual",
 			"annotated_by": surveyor_name,
 			"annotated_by_user_id": surveyor_user_id,
+			"kind": stored_kind,
+			"classification": stored_classification,
 		}
+
+		# Linear-asset fields: mirror local_processor.py shape so downstream
+		# code (QC layer, asset_linker._merge_linear_fields, /map-points) sees
+		# a uniform schema regardless of source. With only one observation
+		# the geometry is a degenerate 2-coord LineString (single point
+		# duplicated) — keeps the schema valid (GeoJSON LineStrings need
+		# >= 2 coords) and consistent with the AI pipeline.
+		if is_linear:
+			loc_coords = (asset_location or {}).get("coordinates")
+			if loc_coords and len(loc_coords) >= 2:
+				kp_lon, kp_lat = loc_coords[0], loc_coords[1]
+				asset_doc["geometry"] = {
+					"type": "LineString",
+					"coordinates": [
+						[round(kp_lon, 6), round(kp_lat, 6)],
+						[round(kp_lon, 6), round(kp_lat, 6)],
+					],
+				}
+				kp_lat_r = round(kp_lat, 6)
+				kp_lon_r = round(kp_lon, 6)
+			else:
+				# No GPX → no geometry. Asset still flagged as line so QC
+				# layer's kind-lock works; the map endpoint just skips it.
+				kp_lat_r = None
+				kp_lon_r = None
+			keypoint = {
+				"frame": frame_number,
+				"lat": kp_lat_r,
+				"lng": kp_lon_r,
+				"side": asset_side,
+				"box": box,
+			}
+			asset_doc["keypoints"] = [keypoint]
+			asset_doc["frames"] = [frame_number]
+			asset_doc["first_frame"] = frame_number
+			asset_doc["last_frame"] = frame_number
 
 		result = db.assets.insert_one(asset_doc)
 		asset_doc["_id"] = result.inserted_id
@@ -2398,7 +2447,15 @@ def save_manual_annotations():
 			"source": "manual",
 			"created_at": now,
 			"updated_at": now,
+			"kind": stored_kind,
+			"classification": stored_classification,
 		}
+
+		# Mirror linear-asset fields onto the master so QC layer + map endpoints
+		# treat manually-added linear assets identically to AI-produced ones.
+		# _merge_linear_fields copies kind/classification/geometry/keypoints/
+		# frames/first_frame/last_frame and computes geometry_simplified.
+		_merge_linear_fields(master_doc, asset_doc)
 
 		master_result = db.master_assets.insert_one(master_doc)
 

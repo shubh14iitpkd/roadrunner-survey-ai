@@ -13,14 +13,8 @@ import { cn } from "@/lib/utils";
 import {
   ArrowLeft, Square, Save, Layers, Search, Play, Pause,
   Undo2, Redo2, MousePointer, Trash2, Eye, EyeOff,
-  ZoomIn, ZoomOut, RotateCcw, Pencil,
+  ZoomIn, ZoomOut, RotateCcw,
 } from "lucide-react";
-import {
-  Dialog, DialogContent, DialogHeader, DialogTitle,
-} from "@/components/ui/dialog";
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from "@/components/ui/select";
 
 // ─── Types ───────────────────────────────────────────────────────────
 interface Annotation {
@@ -38,28 +32,41 @@ interface Annotation {
   color: string;
 }
 
+// Active (selected) state — solid fill. Aligned with QC/AssetLibrary which
+// use the `destructive` semantic token + emerald for dark-theme parity.
 const CONDITION_COLORS_ACTIVE: Record<string, string> = {
   Good: "bg-emerald-500 text-white border-emerald-500",
-  Defective: "bg-red-500 text-white border-red-500",
-  Damaged: "bg-red-500 text-white border-red-500",
+  Fine: "bg-emerald-500 text-white border-emerald-500",
+  Damaged: "bg-destructive text-destructive-foreground border-destructive",
+  Defective: "bg-destructive text-destructive-foreground border-destructive",
   Dirty: "bg-amber-500 text-white border-amber-500",
   Overgrown: "bg-amber-500 text-white border-amber-500",
-  Missing: "bg-red-500 text-white border-red-500",
-  Broken: "bg-red-500 text-white border-red-500",
+  NoDisplay: "bg-orange-500 text-white border-orange-500",
+  FadedPaint: "bg-amber-500 text-white border-amber-500",
+  PaintFaded: "bg-amber-500 text-white border-amber-500",
+  Missing: "bg-destructive text-destructive-foreground border-destructive",
+  MissingPanel: "bg-destructive text-destructive-foreground border-destructive",
+  Broken: "bg-destructive text-destructive-foreground border-destructive",
   Bent: "bg-orange-500 text-white border-orange-500",
-  Poor: "bg-red-500 text-white border-red-500",
+  Poor: "bg-destructive text-destructive-foreground border-destructive",
 };
 
+// Inactive — tinted, dark-mode friendly.
 const CONDITION_COLORS: Record<string, string> = {
-  Good: "bg-emerald-500/15 text-emerald-700 border-emerald-300",
-  Defective: "bg-red-500/15 text-red-700 border-red-300",
-  Damaged: "bg-red-500/15 text-red-700 border-red-300",
-  Dirty: "bg-amber-500/15 text-amber-700 border-amber-300",
-  Overgrown: "bg-amber-500/15 text-amber-700 border-amber-300",
-  Missing: "bg-red-500/15 text-red-700 border-red-300",
-  Broken: "bg-red-500/15 text-red-700 border-red-300",
-  Bent: "bg-orange-500/15 text-orange-700 border-orange-300",
-  Poor: "bg-red-500/15 text-red-700 border-red-300",
+  Good: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30",
+  Fine: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30",
+  Damaged: "bg-destructive/10 text-destructive border-destructive/30",
+  Defective: "bg-destructive/10 text-destructive border-destructive/30",
+  Dirty: "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30",
+  Overgrown: "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30",
+  NoDisplay: "bg-orange-500/10 text-orange-600 dark:text-orange-400 border-orange-500/30",
+  FadedPaint: "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30",
+  PaintFaded: "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30",
+  Missing: "bg-destructive/10 text-destructive border-destructive/30",
+  MissingPanel: "bg-destructive/10 text-destructive border-destructive/30",
+  Broken: "bg-destructive/10 text-destructive border-destructive/30",
+  Bent: "bg-orange-500/10 text-orange-600 dark:text-orange-400 border-orange-500/30",
+  Poor: "bg-destructive/10 text-destructive border-destructive/30",
 };
 
 const FPS = 30;
@@ -117,9 +124,17 @@ export default function VideoAnnotator() {
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  // History (undo/redo)
-  const [history, setHistory] = useState<Annotation[][]>([[]]);
+  // History (undo/redo). Each entry carries the annotation list AND the frame
+  // the change happened on, so undo/redo can jump the video back to where
+  // the edit was — otherwise reverting a bbox on frame 240 while currently
+  // looking at frame 80 leaves the user staring at unchanged pixels.
+  const [history, setHistory] = useState<{ list: Annotation[]; frame: number | null }[]>([{ list: [], frame: null }]);
   const [historyIndex, setHistoryIndex] = useState(0);
+
+  // Seeking overlay — set true on `seeking`, cleared on `seeked`. Drives
+  // a blur+spinner over the video so jumping frames isn't a flash of
+  // stale pixels behind a moved bbox.
+  const [isSeeking, setIsSeeking] = useState(false);
 
   // Drawing state
   const [activeTool, setActiveTool] = useState<"select" | "rectangle">("select");
@@ -140,63 +155,62 @@ export default function VideoAnnotator() {
   const [selectedLabel, setSelectedLabel] = useState("");
   const [selectedCondition, setSelectedCondition] = useState("");
 
-  // Edit dialog
-  const [editingAnnotation, setEditingAnnotation] = useState<Annotation | null>(null);
-  const [editCategoryId, setEditCategoryId] = useState("");
-  const [editLabel, setEditLabel] = useState("");
-  const [editCondition, setEditCondition] = useState("");
-
   // Saving
   const [saving, setSaving] = useState(false);
 
   // ─── History helpers ─────────────────────────────────────────────
-  const pushHistory = useCallback((list: Annotation[]) => {
+  const pushHistory = useCallback((list: Annotation[], frame: number | null) => {
     setHistory(prev => {
       const newHist = prev.slice(0, historyIndex + 1);
-      newHist.push(JSON.parse(JSON.stringify(list)));
+      newHist.push({ list: JSON.parse(JSON.stringify(list)), frame });
       return newHist;
     });
     setHistoryIndex(prev => prev + 1);
   }, [historyIndex]);
 
+  const seekTo = useCallback((frame: number | null) => {
+    if (frame == null) return;
+    const v = videoRef.current;
+    if (!v) return;
+    const t = frame / FPS;
+    if (Math.abs(v.currentTime - t) < 1e-3) return;
+    v.currentTime = t;
+  }, []);
+
   const undo = useCallback(() => {
     if (historyIndex <= 0) return;
     const newIdx = historyIndex - 1;
     setHistoryIndex(newIdx);
-    setAnnotations(JSON.parse(JSON.stringify(history[newIdx])));
+    setAnnotations(JSON.parse(JSON.stringify(history[newIdx].list)));
     setSelectedId(null);
-  }, [history, historyIndex]);
+    // Jump to the frame where the change happened — the entry being undone
+    // (history[historyIndex]) is the one with the relevant frame, not the
+    // entry we're moving back to.
+    seekTo(history[historyIndex].frame);
+  }, [history, historyIndex, seekTo]);
 
   const redo = useCallback(() => {
     if (historyIndex >= history.length - 1) return;
     const newIdx = historyIndex + 1;
     setHistoryIndex(newIdx);
-    setAnnotations(JSON.parse(JSON.stringify(history[newIdx])));
+    setAnnotations(JSON.parse(JSON.stringify(history[newIdx].list)));
     setSelectedId(null);
-  }, [history, historyIndex]);
+    seekTo(history[newIdx].frame);
+  }, [history, historyIndex, seekTo]);
 
   // ─── Label map helpers ────────────────────────────────────────────
-  const { categories, labelsByCategory, allLabels, labelToCategoryId } = useMemo(() => {
-    if (!labelMap) return { categories: {} as Record<string, string>, labelsByCategory: {} as Record<string, string[]>, allLabels: [] as string[], labelToCategoryId: {} as Record<string, string> };
-    const cats: Record<string, string> = {};
-    for (const [catId, cat] of Object.entries(labelMap.categories)) {
-      cats[catId] = cat.display_name;
-    }
-    const byCategory: Record<string, Set<string>> = {};
+  const { allLabels, labelToCategoryId } = useMemo(() => {
+    if (!labelMap) return { allLabels: [] as string[], labelToCategoryId: {} as Record<string, string> };
+    const seen = new Set<string>();
     const l2c: Record<string, string> = {};
     for (const label of Object.values(labelMap.labels)) {
       const catId = label.category_id || "";
       const groupId = label.group_id || label.display_name;
-      if (!byCategory[catId]) byCategory[catId] = new Set();
-      byCategory[catId].add(groupId);
+      seen.add(groupId);
       l2c[groupId] = catId;
     }
-    const byCategoryArr: Record<string, string[]> = {};
-    for (const [catId, labelSet] of Object.entries(byCategory)) {
-      byCategoryArr[catId] = Array.from(labelSet).sort();
-    }
-    const all = Object.values(byCategoryArr).flat().sort();
-    return { categories: cats, labelsByCategory: byCategoryArr, allLabels: all, labelToCategoryId: l2c };
+    const all = Array.from(seen).sort();
+    return { allLabels: all, labelToCategoryId: l2c };
   }, [labelMap]);
 
   const getColorForLabel = useCallback((label: string): string => {
@@ -271,17 +285,23 @@ export default function VideoAnnotator() {
       setVideoDims({ w: v.videoWidth, h: v.videoHeight });
       setDuration(v.duration || 0);
     };
+    const onSeeking = () => setIsSeeking(true);
+    const onSeeked = () => setIsSeeking(false);
     v.addEventListener("timeupdate", onTimeUpdate);
     v.addEventListener("play", onPlay);
     v.addEventListener("pause", onPause);
     v.addEventListener("ended", onEnded);
     v.addEventListener("loadedmetadata", onMeta);
+    v.addEventListener("seeking", onSeeking);
+    v.addEventListener("seeked", onSeeked);
     return () => {
       v.removeEventListener("timeupdate", onTimeUpdate);
       v.removeEventListener("play", onPlay);
       v.removeEventListener("pause", onPause);
       v.removeEventListener("ended", onEnded);
       v.removeEventListener("loadedmetadata", onMeta);
+      v.removeEventListener("seeking", onSeeking);
+      v.removeEventListener("seeked", onSeeked);
     };
   }, [videoSrc]);
 
@@ -491,7 +511,7 @@ export default function VideoAnnotator() {
           };
           const next = [...annotations, newAnn];
           setAnnotations(next);
-          pushHistory(next);
+          pushHistory(next, newAnn.frameNumber);
           toast.success(`Added: ${selectedLabel} (${cond})`);
         }
         setActiveTool("select");
@@ -501,19 +521,29 @@ export default function VideoAnnotator() {
       return;
     }
     if (dragState) {
-      pushHistory(annotations);
+      const target = annotations.find(a => a.id === dragState.id);
+      pushHistory(annotations, target?.frameNumber ?? null);
       setDragState(null);
     }
     if (resizeState) {
-      pushHistory(annotations);
+      const target = annotations.find(a => a.id === resizeState.id);
+      pushHistory(annotations, target?.frameNumber ?? null);
       setResizeState(null);
     }
   };
 
   const handleContainerMouseLeave = () => {
     if (isDrawing) { setIsDrawing(false); setDrawStart(null); setDrawCurrent(null); }
-    if (dragState) { pushHistory(annotations); setDragState(null); }
-    if (resizeState) { pushHistory(annotations); setResizeState(null); }
+    if (dragState) {
+      const target = annotations.find(a => a.id === dragState.id);
+      pushHistory(annotations, target?.frameNumber ?? null);
+      setDragState(null);
+    }
+    if (resizeState) {
+      const target = annotations.find(a => a.id === resizeState.id);
+      pushHistory(annotations, target?.frameNumber ?? null);
+      setResizeState(null);
+    }
   };
 
   // ─── Drag / resize starters ──────────────────────────────────────
@@ -533,9 +563,10 @@ export default function VideoAnnotator() {
 
   // ─── Annotation actions ──────────────────────────────────────────
   const handleDeleteAnnotation = (id: string) => {
+    const target = annotations.find(a => a.id === id);
     const next = annotations.filter(a => a.id !== id);
     setAnnotations(next);
-    pushHistory(next);
+    pushHistory(next, target?.frameNumber ?? null);
     if (selectedId === id) setSelectedId(null);
   };
 
@@ -544,27 +575,25 @@ export default function VideoAnnotator() {
     handleDeleteAnnotation(selectedId);
   };
 
-  const openEditDialog = (ann: Annotation) => {
-    setEditingAnnotation(ann);
-    setEditCategoryId(ann.category_id);
-    setEditLabel(ann.label);
-    setEditCondition(ann.condition);
-  };
-
-  const saveEdit = () => {
-    if (!editingAnnotation) return;
+  // Sidebar IS the editor — clicking a label/condition while an annotation
+  // is selected mutates that annotation in place. No modal.
+  const applyAssetMeta = useCallback((id: string, patch: { label?: string; category_id?: string; condition?: string }) => {
+    const target = annotations.find(a => a.id === id);
+    if (!target) return;
+    const newLabel = patch.label ?? target.label;
+    const newCat = patch.category_id ?? target.category_id;
+    const newCond = patch.condition ?? target.condition;
+    if (newLabel === target.label && newCat === target.category_id && newCond === target.condition) {
+      return;
+    }
     const next = annotations.map(a =>
-      a.id === editingAnnotation.id
-        ? { ...a, label: editLabel, category_id: editCategoryId, condition: editCondition, color: getCategoryColorCode(editCategoryId) }
+      a.id === id
+        ? { ...a, label: newLabel, category_id: newCat, condition: newCond, color: getCategoryColorCode(newCat) }
         : a
     );
     setAnnotations(next);
-    pushHistory(next);
-    setEditingAnnotation(null);
-    toast.success("Annotation updated");
-  };
-
-  const categoryIds = useMemo(() => Object.keys(categories), [categories]);
+    pushHistory(next, target.frameNumber);
+  }, [annotations, pushHistory]);
 
   // ─── Zoom handlers ───────────────────────────────────────────────
   const handleZoomIn = () => setZoom(z => Math.min(5, z + 0.25));
@@ -629,7 +658,7 @@ export default function VideoAnnotator() {
         return next;
       });
       setAnnotations([]);
-      setHistory([[]]);
+      setHistory([{ list: [], frame: null }]);
       setHistoryIndex(0);
       setSelectedId(null);
     } catch {
@@ -832,7 +861,12 @@ export default function VideoAnnotator() {
                             backgroundColor: isSelected ? `${ann.color}33` : `${ann.color}15`,
                           }}
                           onMouseDown={e => startDrag(e, ann)}
-                          onClick={e => { e.stopPropagation(); setSelectedId(ann.id); }}
+                          onClick={e => {
+                            e.stopPropagation();
+                            setSelectedId(ann.id);
+                            setSelectedLabel(ann.label);
+                            setSelectedCondition(ann.condition);
+                          }}
                         >
                           {showLabels && (
                             <div
@@ -883,6 +917,18 @@ export default function VideoAnnotator() {
                   <div className="absolute bottom-14 left-1/2 -translate-x-1/2 bg-primary text-primary-foreground px-3 py-1.5 rounded-full text-xs font-medium shadow-lg flex items-center gap-2 z-20">
                     <Square className="h-3.5 w-3.5" />
                     {selectedLabel ? `Drawing: ${selectedLabel}` : "Select a label from sidebar first"}
+                  </div>
+                )}
+
+                {/* Seeking overlay — blur + spinner during currentTime jumps
+                 *  (annotation-list click, undo/redo). Hides the brief stale
+                 *  frame behind a moved bbox until the new frame decodes. */}
+                {isSeeking && (
+                  <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/30 backdrop-blur-sm pointer-events-none">
+                    <div className="flex flex-col items-center gap-2">
+                      <div className="h-6 w-6 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      <span className="text-[10px] text-white/80 font-medium">Loading frame…</span>
+                    </div>
                   </div>
                 )}
               </div>
@@ -966,7 +1012,10 @@ export default function VideoAnnotator() {
                       "rounded px-2 py-1 text-[9px] font-semibold border transition-all",
                       selectedCondition === c ? (CONDITION_COLORS_ACTIVE[c] || "bg-primary text-primary-foreground") : (CONDITION_COLORS[c] || "bg-muted")
                     )}
-                    onClick={() => setSelectedCondition(c)}
+                    onClick={() => {
+                      setSelectedCondition(c);
+                      if (selectedId) applyAssetMeta(selectedId, { condition: c });
+                    }}
                   >
                     {c}
                   </button>
@@ -990,8 +1039,22 @@ export default function VideoAnnotator() {
                       isActive ? "bg-primary/10 ring-1 ring-primary/30 font-medium" : "hover:bg-muted/50"
                     )}
                     onClick={() => {
-                      if (isActive) { setSelectedLabel(""); setSelectedCondition(""); }
-                      else {
+                      // When an annotation is selected the sidebar is its
+                      // editor — clicking a label rewrites that annotation's
+                      // type. With nothing selected it's the draw-tool pick.
+                      if (selectedId) {
+                        const conds = getConditionsForLabel(label);
+                        const nextCond = conds.includes(selectedCondition) ? selectedCondition : (conds[0] ?? "Good");
+                        setSelectedLabel(label);
+                        setSelectedCondition(nextCond);
+                        applyAssetMeta(selectedId, {
+                          label,
+                          category_id: labelToCategoryId[label] || "",
+                          condition: nextCond,
+                        });
+                      } else if (isActive) {
+                        setSelectedLabel(""); setSelectedCondition("");
+                      } else {
                         setSelectedLabel(label);
                         setSelectedCondition(getConditionsForLabel(label)[0]);
                         setActiveTool("rectangle");
@@ -1001,9 +1064,9 @@ export default function VideoAnnotator() {
                   >
                     <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: color }} />
                     <span className="flex-1 truncate">{label}</span>
-                    {count > 0 && (
+                    {/* {count > 0 && (
                       <Badge variant="secondary" className="text-[8px] h-4 min-w-[16px] px-1">{count}</Badge>
-                    )}
+                    )} */}
                   </div>
                 );
               })}
@@ -1035,8 +1098,9 @@ export default function VideoAnnotator() {
                     )}
                     onClick={() => {
                       setSelectedId(ann.id);
-                      const v = videoRef.current;
-                      if (v) v.currentTime = ann.frameNumber / FPS;
+                      setSelectedLabel(ann.label);
+                      setSelectedCondition(ann.condition);
+                      seekTo(ann.frameNumber);
                     }}
                   >
                     <div className="flex items-center gap-2">
@@ -1046,12 +1110,6 @@ export default function VideoAnnotator() {
                     <div className="flex items-center gap-1 mt-1 ml-4">
                       <span className="text-[9px] text-muted-foreground">{ann.condition}</span>
                       <span className="flex-1" />
-                      <button
-                        className="text-[9px] text-muted-foreground hover:bg-muted rounded px-1 py-0.5"
-                        onClick={e => { e.stopPropagation(); openEditDialog(ann); }}
-                      >
-                        <Pencil className="h-3 w-3 inline mr-0.5" />Edit
-                      </button>
                       <button
                         className="text-[9px] text-destructive hover:bg-destructive/10 rounded px-1 py-0.5"
                         onClick={e => { e.stopPropagation(); handleDeleteAnnotation(ann.id); }}
@@ -1067,64 +1125,6 @@ export default function VideoAnnotator() {
         </div>
       </div>
 
-      {/* ─── Edit Annotation Dialog ─── */}
-      <Dialog open={!!editingAnnotation} onOpenChange={open => { if (!open) setEditingAnnotation(null); }}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle className="text-sm">Edit Annotation</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-3 pt-2">
-            <div>
-              <label className="text-[10px] font-semibold text-muted-foreground uppercase mb-1 block">Category</label>
-              <Select value={editCategoryId} onValueChange={v => { setEditCategoryId(v); setEditLabel(""); }}>
-                <SelectTrigger className="h-8 text-[11px]"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {categoryIds.map(catId => (
-                    <SelectItem key={catId} value={catId} className="text-[11px]">
-                      <div className="flex items-center gap-2">
-                        <div className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: getCategoryColorCode(catId) }} />
-                        {categories[catId]}
-                      </div>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <label className="text-[10px] font-semibold text-muted-foreground uppercase mb-1 block">Asset Type</label>
-              <Select value={editLabel} onValueChange={setEditLabel}>
-                <SelectTrigger className="h-8 text-[11px]"><SelectValue placeholder="Select type..." /></SelectTrigger>
-                <SelectContent className="max-h-52">
-                  {(labelsByCategory[editCategoryId] || []).map(l => (
-                    <SelectItem key={l} value={l} className="text-[11px]">{l}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <label className="text-[10px] font-semibold text-muted-foreground uppercase mb-1 block">Condition</label>
-              <div className="flex gap-2 flex-wrap">
-                {getConditionsForLabel(editLabel).map(c => (
-                  <button
-                    key={c}
-                    className={cn(
-                      "flex-1 rounded-md py-1.5 text-[11px] font-semibold border transition-all",
-                      editCondition === c ? (CONDITION_COLORS_ACTIVE[c] || "bg-primary text-white") : (CONDITION_COLORS[c] || "bg-muted")
-                    )}
-                    onClick={() => setEditCondition(c)}
-                  >
-                    {c}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div className="flex justify-end gap-2 pt-2">
-              <Button variant="outline" size="sm" onClick={() => setEditingAnnotation(null)}>Cancel</Button>
-              <Button size="sm" onClick={saveEdit} disabled={!editLabel}>Save</Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

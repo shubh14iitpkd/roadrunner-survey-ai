@@ -265,12 +265,20 @@ export default function AssetLibrary() {
   // expects category_id. Look it up via categoryOptions.
   const categoryOptionsRef = useRef<{id: string; name: string}[]>([]);
 
+  const resolveCategoryId = useCallback((displayName: string): string | undefined => {
+    const cats = labelMapData?.categories || {};
+    const entry = Object.entries(cats).find(([id, info]: any) =>
+      (info?.display_name || info?.default_name || id) === displayName
+    );
+    return entry?.[0];
+  }, [labelMapData]);
+
   const buildFilterParams = useCallback(() => {
     const params: Record<string, any> = {};
     if (selectedRouteId !== null) params.route_id = selectedRouteId;
     if (categoryFilter !== "all") {
-      const match = categoryOptionsRef.current.find(c => c.name === categoryFilter);
-      if (match) params.category = match.id;
+      const id = resolveCategoryId(categoryFilter);
+      if (id) params.category = id;
     }
     if (conditionFilter !== "all") params.condition = conditionFilter;
     if (directionFilter !== "all") params.side = directionFilter;
@@ -278,7 +286,7 @@ export default function AssetLibrary() {
     if (selectedAssetType !== "all") params.asset_type = selectedAssetType;
     if (searchQuery.trim()) params.search = searchQuery.trim();
     return params;
-  }, [selectedRouteId, categoryFilter, conditionFilter, directionFilter, zoneFilter, selectedAssetType, searchQuery]);
+  }, [selectedRouteId, categoryFilter, conditionFilter, directionFilter, zoneFilter, selectedAssetType, searchQuery, resolveCategoryId]);
 
   // ── Data sources via React Query ──
   // All facet filters (route, category, condition, zone, side, type, search)
@@ -302,8 +310,8 @@ export default function AssetLibrary() {
     const f: Record<string, any> = {};
     if (selectedRouteId !== null) f.route_id = selectedRouteId;
     if (categoryFilter !== "all") {
-      const m = categoryOptionsRef.current.find(c => c.name === categoryFilter);
-      if (m) f.category = m.id;
+      const id = resolveCategoryId(categoryFilter);
+      if (id) f.category = id;
     }
     if (conditionFilter !== "all") f.condition = conditionFilter;
     if (directionFilter !== "all") f.side = directionFilter;
@@ -311,7 +319,7 @@ export default function AssetLibrary() {
     if (selectedAssetType !== "all") f.asset_type = selectedAssetType;
     if (debouncedSearchQ) f.search = debouncedSearchQ;
     return f;
-  }, [selectedRouteId, categoryFilter, conditionFilter, directionFilter, zoneFilter, selectedAssetType, debouncedSearchQ]);
+  }, [selectedRouteId, categoryFilter, conditionFilter, directionFilter, zoneFilter, selectedAssetType, debouncedSearchQ, resolveCategoryId]);
 
   const mapPointsQuery = useQuery({
     queryKey: qk.assets.mapPoints(serverFilters),

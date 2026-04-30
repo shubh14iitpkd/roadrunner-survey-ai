@@ -67,7 +67,7 @@ const renderActiveShape = (props: any) => {
       <Sector cx={cx} cy={cy} innerRadius={innerRadius - 3} outerRadius={outerRadius + 4} startAngle={startAngle} endAngle={endAngle} fill={fill} opacity={0.9} />
       <Sector cx={cx} cy={cy} innerRadius={outerRadius + 6} outerRadius={outerRadius + 9} startAngle={startAngle} endAngle={endAngle} fill={fill} opacity={0.4} />
       <text x={cx} y={cy - 10} textAnchor="middle" fill="currentColor" className="text-foreground" fontSize={22} fontWeight={700}>
-        {value}
+        {Number(value).toLocaleString("en-US")}
       </text>
       <text x={cx} y={cy + 8} textAnchor="middle" fill="currentColor" className="text-muted-foreground" fontSize={10}>
         {payload.category}
@@ -87,7 +87,7 @@ const renderActiveConditionShape = (props: any) => {
       <Sector cx={cx} cy={cy} innerRadius={innerRadius - 3} outerRadius={outerRadius + 4} startAngle={startAngle} endAngle={endAngle} fill={fill} opacity={0.9} />
       <Sector cx={cx} cy={cy} innerRadius={outerRadius + 6} outerRadius={outerRadius + 9} startAngle={startAngle} endAngle={endAngle} fill={fill} opacity={0.4} />
       <text x={cx} y={cy - 10} textAnchor="middle" fill="currentColor" className="text-foreground" fontSize={22} fontWeight={700}>
-        {value}
+        {Number(value).toLocaleString("en-US")}
       </text>
       <text x={cx} y={cy + 8} textAnchor="middle" fill="currentColor" className="text-muted-foreground" fontSize={10}>
         {payload.condition}
@@ -408,7 +408,7 @@ export default function Dashboard() {
                     </Pie>
                     {effectiveDonutIndex === undefined && (
                       <text x="50%" y="46%" textAnchor="middle" fill="currentColor" className="text-foreground" fontSize={22} fontWeight={700}>
-                        {categoryChartData.reduce((sum, d) => sum + d.count, 0)}
+                        {categoryChartData.reduce((sum, d) => sum + d.count, 0).toLocaleString("en-US")}
                       </text>
                     )}
                     {effectiveDonutIndex === undefined && (
@@ -513,7 +513,7 @@ export default function Dashboard() {
                     </Pie>
                     {effectiveConditionIndex === undefined && (
                       <text x="50%" y="46%" textAnchor="middle" fill="currentColor" className="text-foreground" fontSize={22} fontWeight={700}>
-                        {conditionSummaryData.reduce((sum, d) => sum + d.count, 0)}
+                        {conditionSummaryData.reduce((sum, d) => sum + d.count, 0).toLocaleString("en-US")}
                       </text>
                     )}
                     {effectiveConditionIndex === undefined && (
