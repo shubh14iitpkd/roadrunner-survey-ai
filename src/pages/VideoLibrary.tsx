@@ -445,7 +445,7 @@ export default function VideoLibrary() {
                         </Button> */}
                         {video.gpxFileUrl && (
                           <Button size="sm" variant="outline" asChild>
-                            <a href={`/asset-library?id=${video.routeId}`} title="View in Asset Library">
+                            <a href={`/asset-library?route_id=${video.routeId}`} title="View in Asset Library">
                               <Database className="h-3 w-3" />
                             </a>
                           </Button>
