@@ -550,6 +550,62 @@ def status_batch():
     return jsonify({"statuses": statuses}), 200
 
 
+@videos_bp.get("/kpi-stats")
+@role_required(["super_admin", "admin", "surveyor", "viewer"])
+def kpi_stats():
+    """
+    Aggregate KPI counts for the videos collection (status-bucketed).
+    ---
+    tags:
+      - Videos
+    security:
+      - Bearer: []
+    parameters:
+      - name: route_id
+        in: query
+        type: integer
+        description: Optional filter by route ID
+      - name: survey_id
+        in: query
+        type: string
+        description: Optional filter by survey ID
+    responses:
+      200:
+        description: Counts grouped into UI-facing buckets
+        schema:
+          type: object
+          properties:
+            total: { type: integer }
+            completed: { type: integer }
+            queued: { type: integer }
+            processing: { type: integer }
+    """
+    query = {}
+    route_id = request.args.get("route_id", type=int)
+    survey_id = request.args.get("survey_id")
+    if route_id is not None:
+        query["route_id"] = route_id
+    if survey_id:
+        query["survey_id"] = ObjectId(survey_id)
+
+    db = get_db()
+    pipeline = [
+        {"$match": query},
+        {"$group": {"_id": "$status", "count": {"$sum": 1}}},
+    ]
+    counts = {row["_id"]: row["count"] for row in db.videos.aggregate(pipeline)}
+
+    queued_statuses = ("queue", "queued")
+    processing_statuses = ("uploading", "anonymizing", "processing", "asset_linking")
+
+    return jsonify({
+        "total": sum(counts.values()),
+        "completed": counts.get("completed", 0),
+        "queued": sum(counts.get(s, 0) for s in queued_statuses),
+        "processing": sum(counts.get(s, 0) for s in processing_statuses),
+    }), 200
+
+
 @videos_bp.get("/")
 @role_required(["super_admin","admin", "surveyor", "viewer"])
 def list_videos():
@@ -581,6 +637,14 @@ def list_videos():
         in: query
         type: integer
         description: Items per page (default 20, max 100)
+      - name: sort_by
+        in: query
+        type: string
+        description: "Sort field: survey_display_id | route_id | survey_date | surveyor_name | gpx_file_url | status | created_at (default)"
+      - name: sort_order
+        in: query
+        type: string
+        description: "asc | desc (default desc)"
     responses:
       200:
         description: Paginated list of videos with survey data
@@ -606,6 +670,21 @@ def list_videos():
     status = request.args.get("status")
     page = max(1, request.args.get("page", 1, type=int))
     per_page = min(100, max(1, request.args.get("per_page", 20, type=int)))
+    sort_by = request.args.get("sort_by") or "created_at"
+    sort_order = (request.args.get("sort_order") or "desc").lower()
+
+    allowed_sort_fields = {
+        "created_at",
+        "route_id",
+        "status",
+        "gpx_file_url",
+        "survey_display_id",
+        "survey_date",
+        "surveyor_name",
+    }
+    if sort_by not in allowed_sort_fields:
+        sort_by = "created_at"
+    sort_dir = pymongo.ASCENDING if sort_order == "asc" else DESCENDING
 
     if route_id is not None:
         query["route_id"] = route_id
@@ -619,33 +698,48 @@ def list_videos():
     total_pages = max(1, (total + per_page - 1) // per_page)
     skip = (page - 1) * per_page
 
-    pipeline = [
-        {"$match": query},
-        {"$sort": {"created_at": DESCENDING}},
-        {"$skip": skip},
-        {"$limit": per_page},
-        {
-            "$lookup": {
-                "from": "surveys",
-                "localField": "survey_id",
-                "foreignField": "_id",
-                "as": "_survey",
-            }
-        },
-        {
-            "$addFields": {
-                "survey_date": {"$arrayElemAt": ["$_survey.survey_date", 0]},
-                "surveyor_name": {"$arrayElemAt": ["$_survey.surveyor_name", 0]},
-                "survey_display_id": {
-                    "$ifNull": [
-                        "$survey_display_id",
-                        {"$arrayElemAt": ["$_survey.survey_display_id", 0]},
-                    ]
-                },
-            }
-        },
-        {"$project": {"_survey": 0}},
-    ]
+    lookup_stage = {
+        "$lookup": {
+            "from": "surveys",
+            "localField": "survey_id",
+            "foreignField": "_id",
+            "as": "_survey",
+        }
+    }
+    add_fields_stage = {
+        "$addFields": {
+            "survey_date": {"$arrayElemAt": ["$_survey.survey_date", 0]},
+            "surveyor_name": {"$arrayElemAt": ["$_survey.surveyor_name", 0]},
+            "survey_display_id": {
+                "$ifNull": [
+                    "$survey_display_id",
+                    {"$arrayElemAt": ["$_survey.survey_display_id", 0]},
+                ]
+            },
+        }
+    }
+
+    joined_sort_fields = {"survey_display_id", "survey_date", "surveyor_name"}
+    if sort_by in joined_sort_fields:
+        pipeline = [
+            {"$match": query},
+            lookup_stage,
+            add_fields_stage,
+            {"$sort": {sort_by: sort_dir}},
+            {"$skip": skip},
+            {"$limit": per_page},
+            {"$project": {"_survey": 0}},
+        ]
+    else:
+        pipeline = [
+            {"$match": query},
+            {"$sort": {sort_by: sort_dir}},
+            {"$skip": skip},
+            {"$limit": per_page},
+            lookup_stage,
+            add_fields_stage,
+            {"$project": {"_survey": 0}},
+        ]
 
     items = list(db.videos.aggregate(pipeline))
 

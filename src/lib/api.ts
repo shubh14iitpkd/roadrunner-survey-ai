@@ -85,15 +85,24 @@ export const api = {
 		delete: (survey_id: string) => apiFetch(`/api/surveys/${survey_id}`, { method: "DELETE" }),
 	},
 	videos: {
-		list: (params?: { route_id?: number; survey_id?: string; status?: string; page?: number; per_page?: number }) => {
+		list: (params?: { route_id?: number; survey_id?: string; status?: string; page?: number; per_page?: number; sort_by?: string; sort_order?: "asc" | "desc" }) => {
 			const qs = new URLSearchParams();
 			if (params?.route_id != null) qs.set("route_id", String(params.route_id));
 			if (params?.survey_id) qs.set("survey_id", params.survey_id);
 			if (params?.status) qs.set("status", params.status);
 			if (params?.page != null) qs.set("page", String(params.page));
 			if (params?.per_page != null) qs.set("per_page", String(params.per_page));
+			if (params?.sort_by) qs.set("sort_by", params.sort_by);
+			if (params?.sort_order) qs.set("sort_order", params.sort_order);
 			const q = qs.toString();
 			return apiFetch(`/api/videos/${q ? `?${q}` : ""}`);
+		},
+		kpiStats: (params?: { route_id?: number; survey_id?: string }) => {
+			const qs = new URLSearchParams();
+			if (params?.route_id != null) qs.set("route_id", String(params.route_id));
+			if (params?.survey_id) qs.set("survey_id", params.survey_id);
+			const q = qs.toString();
+			return apiFetch(`/api/videos/kpi-stats${q ? `?${q}` : ""}`);
 		},
 		statusBatch: (ids: string[]) => {
 			if (ids.length === 0) return Promise.resolve({ statuses: {} });

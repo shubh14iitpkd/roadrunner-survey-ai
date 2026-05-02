@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -33,7 +33,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api, API_BASE } from "@/lib/api";
-import { useUpload, VideoStatus, VideoFile } from "@/contexts/UploadContext";
+import { useUpload, VideoStatus, VideoFile, VideoSortField } from "@/contexts/UploadContext";
 import { useAuth } from "@/contexts/AuthContext";
 
 import VideoLibraryUpload from "@/components/VideoLibraryUpload";
@@ -42,26 +42,44 @@ import { LibraryVideoItem } from "@/contexts/UploadContext";
 
 
 
-type SurveySortKey = "surveyDisplayId" | "routeId" | "surveyDate" | "surveyorName" | "gpxFile" | "status" | null;
+// UI sort keys map 1:1 to backend VideoSortField values
+type SurveySortKey = VideoSortField | null;
 
 export default function SurveyUpload() {
   const navigate = useNavigate();
-  const actionRoles = ["Admin", "Super Admin"]; 
-  const { videos, isUploading, uploadFiles, uploadFromLibrary, uploadGpxForVideo, processWithAI, cancelUpload, resetVideoStatus, loading } = useUpload();
-
-  const [sortBy, setSortBy] = useState<SurveySortKey>(null);
-  const [sortOrder, setSortOrder] = useState<"asc" | "desc" | null>(null);
+  const actionRoles = ["Admin", "Super Admin"];
+  const {
+    videos,
+    isUploading,
+    uploadFiles,
+    uploadFromLibrary,
+    uploadGpxForVideo,
+    processWithAI,
+    cancelUpload,
+    resetVideoStatus,
+    loading,
+    paginating,
+    currentPage,
+    totalPages,
+    total,
+    pageSize,
+    sortBy,
+    sortOrder,
+    setPage,
+    setSort,
+    kpis,
+  } = useUpload();
 
   const handleSortKeySelect = (key: SurveySortKey) => {
+    if (!key) return;
     if (key === sortBy) {
-      setSortOrder(sortOrder === "asc" ? "desc" : "asc");
+      setSort(key, sortOrder === "asc" ? "desc" : "asc");
     } else {
-      setSortBy(key);
-      setSortOrder("asc");
+      setSort(key, "asc");
     }
   };
 
-  const SortIcon = ({ col }: { col: string }) => {
+  const SortIcon = ({ col }: { col: SurveySortKey }) => {
     if (sortBy !== col) return <ArrowUpDown className="h-3 w-3 ml-1 inline opacity-40" />;
     return sortOrder === "asc"
       ? <ArrowUp className="h-3 w-3 ml-1 inline" />
@@ -147,43 +165,15 @@ export default function SurveyUpload() {
 
   // Load videos and polling effects removed (handled in context)
 
-  // Calculate KPIs
-  const totalUploaded = videos.length;
-  const totalProcessed = videos.filter(v => v.status === "completed").length;
-  const inQueue = videos.filter(v => v.status === "queue" || v.status === "queued").length;
-  const processing = videos.filter(v => v.status === "uploading" || v.status === "anonymizing" || v.status === "processing" || v.status === "asset_linking").length;
+  // KPIs come from backend (full-collection counts). `videos` only holds the
+  // current page so we can't derive them locally.
+  const totalUploaded = kpis.total;
+  const totalProcessed = kpis.completed;
+  const inQueue = kpis.queued;
+  const processing = kpis.processing;
 
-  const PAGE_SIZE = 20;
-  const [currentPage, setCurrentPage] = useState(1);
-
-  // Reset to page 1 whenever sort changes
-  useEffect(() => { setCurrentPage(1); }, [sortBy, sortOrder]);
-
-  const sortedVideos = useMemo(() => {
-    if (!sortBy || !sortOrder) return videos;
-    return [...videos].sort((a, b) => {
-      const dir = sortOrder === "asc" ? 1 : -1;
-      if (sortBy === "surveyDisplayId") {
-        return dir * (a.surveyDisplayId || "").localeCompare(b.surveyDisplayId || "");
-      } else if (sortBy === "routeId") {
-        return dir * ((Number(a.routeId) || 0) - (Number(b.routeId) || 0));
-      } else if (sortBy === "surveyDate") {
-        return dir * (a.surveyDate || "").localeCompare(b.surveyDate || "");
-      } else if (sortBy === "surveyorName") {
-        return dir * (a.surveyorName || "").localeCompare(b.surveyorName || "");
-      } else if (sortBy === "gpxFile") {
-        const aVal = a.gpxFile ? 1 : 0;
-        const bVal = b.gpxFile ? 1 : 0;
-        return dir * (aVal - bVal);
-      } else if (sortBy === "status") {
-        return dir * (a.status || "").localeCompare(b.status || "");
-      }
-      return 0;
-    });
-  }, [videos, sortBy, sortOrder]);
-
-  const totalPages = Math.max(1, Math.ceil(sortedVideos.length / PAGE_SIZE));
-  const paginatedVideos = sortedVideos.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+  // Server already paginated/sorted; render `videos` as-is.
+  const paginatedVideos = videos;
 
   // Track uploads in progress for showing status
   const [uploadingItems, setUploadingItems] = useState<string[]>([]);
@@ -609,11 +599,9 @@ export default function SurveyUpload() {
           <Card className="p-8 shadow-elevated border-0 gradient-card animate-fade-in">
             <div className="flex items-center justify-between mb-6">
               <div>
-                <h3 className="font-bold text-2xl mb-1">
-                  {videos.length > 0 ? `Processing Queue` : 'Processing Queue'}
-                </h3>
+                <h3 className="font-bold text-2xl mb-1">Processing Queue</h3>
                 <p className="text-sm text-muted-foreground">
-                  {videos.length > 0 ? `${videos.length} videos • ${inQueue} queued, ${processing} processing, ${totalProcessed} completed` : 'No data yet'}
+                  {total > 0 ? `${total} videos • ${inQueue} queued, ${processing} processing, ${totalProcessed} completed` : 'No data yet'}
                 </p>
               </div>
               {inQueue > 0 && (
@@ -632,7 +620,7 @@ export default function SurveyUpload() {
                 <h3 className="text-xl font-semibold mb-2">Loading Surveys...</h3>
                 <p className="text-sm text-muted-foreground">Fetching latest survey data and AI processing status</p>
               </div>
-            ) : videos.length === 0 ? (
+            ) : total === 0 ? (
               <div className="text-center py-16">
                 <div className="inline-flex p-6 rounded-full bg-primary/10 mb-4">
                   <Database className="h-16 w-16 text-primary" />
@@ -652,20 +640,20 @@ export default function SurveyUpload() {
                     <div className="text-left p-3 font-semibold text-sm flex-1">Preview</div>
                     <div
                       className="text-left p-3 font-semibold text-sm flex-1 whitespace-nowrap cursor-pointer select-none transition-colors"
-                      onClick={() => handleSortKeySelect("surveyDisplayId")}
-                    >Survey ID<SortIcon col="surveyDisplayId" /></div>
+                      onClick={() => handleSortKeySelect("survey_display_id")}
+                    >Survey ID<SortIcon col="survey_display_id" /></div>
                     <div
                       className="text-left p-3 font-semibold text-sm flex-[2.5] whitespace-nowrap cursor-pointer select-none transition-colors"
-                      onClick={() => handleSortKeySelect("routeId")}
-                    >Route<SortIcon col="routeId" /></div>
+                      onClick={() => handleSortKeySelect("route_id")}
+                    >Route<SortIcon col="route_id" /></div>
                     <div
                       className="text-left p-3 font-semibold text-sm flex-1 cursor-pointer select-none transition-colors"
-                      onClick={() => handleSortKeySelect("surveyDate")}
-                    >Survey Date<SortIcon col="surveyDate" /></div>
+                      onClick={() => handleSortKeySelect("survey_date")}
+                    >Survey Date<SortIcon col="survey_date" /></div>
                     <div
                       className="text-left p-3 font-semibold text-sm flex-1 cursor-pointer select-none transition-colors"
-                      onClick={() => handleSortKeySelect("surveyorName")}
-                    >Surveyor<SortIcon col="surveyorName" /></div>
+                      onClick={() => handleSortKeySelect("surveyor_name")}
+                    >Surveyor<SortIcon col="surveyor_name" /></div>
                     <div
                       className="text-left p-3 font-semibold text-sm flex-1 cursor-pointer select-none transition-colors"
                     >GPS</div>
@@ -926,24 +914,24 @@ export default function SurveyUpload() {
               {totalPages > 1 && (
                 <div className="flex items-center justify-between px-4 py-3">
                   <div className="text-sm text-muted-foreground">
-                    Showing {(currentPage - 1) * PAGE_SIZE + 1} - {Math.min(currentPage * PAGE_SIZE, sortedVideos.length)} of {sortedVideos.length} videos
+                    Showing {(currentPage - 1) * pageSize + 1} - {Math.min(currentPage * pageSize, total)} of {total} videos
                   </div>
                   <div className="flex items-center gap-2">
                     <Button
                       variant="outline" size="sm"
-                      onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                      disabled={currentPage === 1}
+                      onClick={() => setPage(currentPage - 1)}
+                      disabled={currentPage === 1 || paginating}
                       className="h-8 w-8"
                     >
                       <ChevronLeft className="h-4 w-4 mr-1" />
                     </Button>
-                    {/* <span className="text-sm font-medium px-3">
-                      Page {currentPage} of {totalPages}
-                    </span> */}
+                    <span className="text-sm font-medium px-2 text-muted-foreground">
+                      {paginating ? <Loader2 className="h-3 w-3 inline animate-spin" /> : `Page ${currentPage} of ${totalPages}`}
+                    </span>
                     <Button
                       variant="outline" size="sm"
-                      onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                      disabled={currentPage === totalPages}
+                      onClick={() => setPage(currentPage + 1)}
+                      disabled={currentPage >= totalPages || paginating}
                       className="h-8 w-8"
                     >
                       <ChevronRight className="h-4 w-4" />

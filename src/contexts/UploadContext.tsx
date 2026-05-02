@@ -33,6 +33,22 @@ export interface LibraryVideoItem {
     last_modified?: string;
 }
 
+export type VideoSortField =
+    | "created_at"
+    | "survey_display_id"
+    | "route_id"
+    | "survey_date"
+    | "surveyor_name"
+    | "gpx_file_url"
+    | "status";
+
+export interface VideoKpis {
+    total: number;
+    completed: number;
+    queued: number;
+    processing: number;
+}
+
 interface UploadContextType {
     videos: VideoFile[];
     isUploading: boolean;
@@ -45,6 +61,18 @@ interface UploadContextType {
     cancelUpload: (videoId: string) => Promise<void>;
     resetVideoStatus: (videoId: string) => void;
     loading: boolean;
+    paginating: boolean;
+    // Server-side pagination + sort
+    currentPage: number;
+    totalPages: number;
+    total: number;
+    pageSize: number;
+    sortBy: VideoSortField | null;
+    sortOrder: "asc" | "desc" | null;
+    setPage: (page: number) => void;
+    setSort: (field: VideoSortField | null, order: "asc" | "desc" | null) => void;
+    // KPI summary across the whole collection
+    kpis: VideoKpis;
 }
 
 
@@ -102,10 +130,20 @@ const extractThumbnail = (videoFile: File): Promise<Blob> => {
     });
 };
 
+const PAGE_SIZE = 20;
+
 export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     const [videos, setVideos] = useState<VideoFile[]>([]);
     const [isUploading, setIsUploading] = useState(false);
     const [loading, setLoading] = useState(true);
+
+    // Server-side pagination + sort state
+    const [currentPage, setCurrentPage] = useState(1);
+    const [totalPages, setTotalPages] = useState(1);
+    const [total, setTotal] = useState(0);
+    const [sortBy, setSortBy] = useState<VideoSortField | null>(null);
+    const [sortOrder, setSortOrder] = useState<"asc" | "desc" | null>(null);
+    const [kpis, setKpis] = useState<VideoKpis>({ total: 0, completed: 0, queued: 0, processing: 0 });
 
     // Helper function to build full URL
     const buildUrl = (path: string | undefined) => {
@@ -121,58 +159,104 @@ export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     // Ref to store active XHR instances keyed by video id, so they can be aborted
     const xhrRefs = useRef<Map<string, XMLHttpRequest>>(new Map());
 
-    // Load initial videos from API (survey data is embedded via backend join)
+    const getIdString = (id: any): string => {
+        if (!id) return '';
+        if (typeof id === 'string') return id;
+        if (id.$oid) return id.$oid;
+        return String(id);
+    };
+
+    const mapVideoItem = (v: any): VideoFile => {
+        const videoIdStr = getIdString(v._id);
+        const surveyIdStr = getIdString(v.survey_id);
+        return {
+            id: videoIdStr,
+            backendId: videoIdStr,
+            name: v.title || 'Untitled Video',
+            size: v.size_bytes || 0,
+            duration: v.duration_seconds || 0,
+            status: (v.status || 'queue') as VideoStatus,
+            progress: v.progress || 0,
+            url: buildUrl(v.storage_url),
+            eta: v.eta,
+            routeId: v.route_id,
+            surveyDate: v.survey_date || '',
+            surveyorName: v.surveyor_name || '',
+            gpxFile: v.gpx_file_url ? v.gpx_file_url.split('/').pop() : undefined,
+            surveyId: surveyIdStr,
+            surveyDisplayId: v.survey_display_id,
+            thumbnailUrl: v.thumbnail_url,
+        };
+    };
+
+    // `loading` = first-ever load (drives the full-page spinner).
+    // `paginating` = page/sort refetch (lighter — disables pagination buttons,
+    // keeps current rows on screen so the table doesn't flicker).
+    const hasLoadedRef = useRef(false);
+    const [paginating, setPaginating] = useState(false);
+
     useEffect(() => {
         let cancelled = false;
         (async () => {
+            if (!hasLoadedRef.current) setLoading(true);
+            else setPaginating(true);
             try {
-                // Fetch all videos in one call; backend joins survey_date/surveyor_name/survey_display_id
-                const videosResp = await api.videos.list({ per_page: 100 });
-
+                const params: any = { page: currentPage, per_page: PAGE_SIZE };
+                if (sortBy && sortOrder) {
+                    params.sort_by = sortBy;
+                    params.sort_order = sortOrder;
+                }
+                const resp = await api.videos.list(params);
                 if (cancelled) return;
-
-                const videoItems = videosResp.items as any[];
-
-                const getIdString = (id: any): string => {
-                    if (!id) return '';
-                    if (typeof id === 'string') return id;
-                    if (id.$oid) return id.$oid;
-                    return String(id);
-                };
-
-                const mappedVideos: VideoFile[] = videoItems.map(v => {
-                    const videoIdStr = getIdString(v._id);
-                    const surveyIdStr = getIdString(v.survey_id);
-
-                    return {
-                        id: videoIdStr,
-                        backendId: videoIdStr,
-                        name: v.title || 'Untitled Video',
-                        size: v.size_bytes || 0,
-                        duration: v.duration_seconds || 0,
-                        status: (v.status || 'queue') as VideoStatus,
-                        progress: v.progress || 0,
-                        url: buildUrl(v.storage_url),
-                        eta: v.eta,
-                        routeId: v.route_id,
-                        surveyDate: v.survey_date || '',
-                        surveyorName: v.surveyor_name || '',
-                        gpxFile: v.gpx_file_url ? v.gpx_file_url.split('/').pop() : undefined,
-                        surveyId: surveyIdStr,
-                        surveyDisplayId: v.survey_display_id,
-                        thumbnailUrl: v.thumbnail_url,
-                    };
-                });
-
-                setVideos(mappedVideos);
+                setVideos((resp.items as any[]).map(mapVideoItem));
+                setTotal(resp.total ?? 0);
+                setTotalPages(resp.total_pages ?? 1);
             } catch (err: any) {
                 console.error("Failed to load videos:", err);
             } finally {
-                setLoading(false);
+                if (!cancelled) {
+                    setLoading(false);
+                    setPaginating(false);
+                    hasLoadedRef.current = true;
+                }
             }
         })();
         return () => { cancelled = true; };
+    }, [currentPage, sortBy, sortOrder]);
+
+    // KPI counts cover the full collection — keep fresh on a 5s interval so cards
+    // reflect background status transitions on pages we're not viewing.
+    useEffect(() => {
+        let cancelled = false;
+        const fetchKpis = async () => {
+            try {
+                const resp = await api.videos.kpiStats();
+                if (cancelled) return;
+                setKpis({
+                    total: resp.total ?? 0,
+                    completed: resp.completed ?? 0,
+                    queued: resp.queued ?? 0,
+                    processing: resp.processing ?? 0,
+                });
+            } catch (err) {
+                console.error("Failed to load video KPIs:", err);
+            }
+        };
+        fetchKpis();
+        const interval = setInterval(fetchKpis, 5000);
+        return () => { cancelled = true; clearInterval(interval); };
     }, []);
+
+    const setPage = (page: number) => {
+        const clamped = Math.max(1, Math.min(totalPages || 1, page));
+        setCurrentPage(clamped);
+    };
+
+    const setSort = (field: VideoSortField | null, order: "asc" | "desc" | null) => {
+        setSortBy(field);
+        setSortOrder(order);
+        setCurrentPage(1);
+    };
 
     // Batch-poll active videos — one request per interval instead of one per video
     useEffect(() => {
@@ -327,9 +411,7 @@ export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
             const surveyId: string = surveyResp.item._id;
             const surveyDisplayId: string | undefined = surveyResp.item.survey_display_id;
-            const id = `video-${Date.now()}`;
-            // activeUploads.current.add(id); // for skipping polling 
-            const filename = videoPath.split('/').pop() || `${id}.mp4`;
+            const filename = videoPath.split('/').pop() || `video-${Date.now()}.mp4`;
             const duration = Math.floor(Math.random() * 600) + 60; // until we can probe
 
             // create DB row
@@ -351,6 +433,10 @@ export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             const backendId: string = typeof videoDoc._id === 'object' && videoDoc._id.$oid
                 ? videoDoc._id.$oid
                 : String(videoDoc._id);
+            // Use backendId as the local id too — keeps the row stable across server
+            // refetches (page navigation), so XHR aborts and status updates by id keep
+            // hitting the same row.
+            const id = backendId;
 
             // Create initial video object in queue
             const videoObj: VideoFile = {
@@ -413,7 +499,6 @@ export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
             for (let idx = 0; idx < files.length; idx++) {
                 const file = files[idx];
-                const id = `video-${Date.now()}-${idx}`;
                 const duration = Math.floor(Math.random() * 600) + 60; // until we can probe
 
                 toast.info(`Queuing ${file.name}...`);
@@ -437,6 +522,10 @@ export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                 const backendId: string = typeof videoDoc._id === 'object' && videoDoc._id.$oid
                     ? videoDoc._id.$oid
                     : String(videoDoc._id);
+                // Use backendId as the local id too — keeps the row stable across server
+                // refetches (page navigation), so XHR aborts and status updates by id keep
+                // hitting the same row.
+                const id = backendId;
 
                 // Create initial video object in queue
                 const videoObj: VideoFile = {
@@ -599,7 +688,29 @@ export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     };
 
     return (
-        <UploadContext.Provider value={{ videos, isUploading, uploadFiles, uploadFromLibrary, retryUpload, removeVideo, uploadGpxForVideo, processWithAI, cancelUpload, resetVideoStatus, loading }}>
+        <UploadContext.Provider value={{
+            videos,
+            isUploading,
+            uploadFiles,
+            uploadFromLibrary,
+            retryUpload,
+            removeVideo,
+            uploadGpxForVideo,
+            processWithAI,
+            cancelUpload,
+            resetVideoStatus,
+            loading,
+            paginating,
+            currentPage,
+            totalPages,
+            total,
+            pageSize: PAGE_SIZE,
+            sortBy,
+            sortOrder,
+            setPage,
+            setSort,
+            kpis,
+        }}>
             {children}
         </UploadContext.Provider>
     );
