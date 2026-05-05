@@ -47,6 +47,9 @@ GEO_RADIUS_M = 150
 # distance_threshold=0.15 → similarity must be >= 0.85 to match.
 DEFAULT_DISTANCE_THRESHOLD = 0.15
 
+# CLIP forward-pass batch size. 32 is safe on CPU; bump on GPU.
+EMBED_BATCH_SIZE = 32
+
 # ─── CLIP SINGLETON ──────────────────────────────────────────────────────────
 
 _clip_model: Optional[CLIPModel] = None
@@ -80,6 +83,20 @@ def _get_embedding(model: CLIPModel, processor: CLIPProcessor,
 
     embedding = torch.nn.functional.normalize(embedding, p=2, dim=-1)
     return embedding.squeeze().cpu().numpy()  # shape: (512,)
+
+
+def _get_embeddings_batch(model: CLIPModel, processor: CLIPProcessor,
+                          device: str,
+                          pil_images: list[Image.Image]) -> np.ndarray:
+    """L2-normalised CLIP embeddings for a batch of PIL images.
+    Returns array of shape (N, 512)."""
+    inputs = processor(images=pil_images, return_tensors="pt")
+    pixel_values = inputs["pixel_values"].to(device)
+    with torch.no_grad():
+        vision_output = model.vision_model(pixel_values=pixel_values)
+        embeddings = model.visual_projection(vision_output.pooler_output)
+    embeddings = torch.nn.functional.normalize(embeddings, p=2, dim=-1)
+    return embeddings.cpu().numpy()
 
 
 def _crop_asset(frame: np.ndarray, box: dict,
@@ -139,47 +156,6 @@ def regenerate_embedding(video_path: Path, frame_number: int,
 def _cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
     """Cosine similarity between two L2-normalised vectors."""
     return float(np.dot(a, b))
-
-
-def _generate_embedding_for_asset(asset_doc: dict,
-                                  video_path: Path) -> Optional[np.ndarray]:
-    """
-    Open the asset's video, extract the frame, crop the bbox, return embedding.
-    Returns None on any failure so the caller can skip gracefully.
-    """
-    frame_number = asset_doc.get("frame_number")
-    box = asset_doc.get("box")
-
-    if frame_number is None or not box:
-        log.warning("[LINKER] Asset %s missing frame_number/box — skipping",
-                    asset_doc.get("_id"))
-        return None
-
-    if not video_path.exists():
-        log.warning("[LINKER] Video not found at %s", video_path)
-        return None
-
-    cap = cv2.VideoCapture(str(video_path))
-    if not cap.isOpened():
-        log.warning("[LINKER] Cannot open video: %s", video_path)
-        return None
-
-    try:
-        cap.set(cv2.CAP_PROP_POS_FRAMES, int(frame_number))
-        ret, frame = cap.read()
-        if not ret:
-            log.warning("[LINKER] Cannot read frame %d from %s", frame_number, video_path)
-            return None
-
-        crop = _crop_asset(frame, box)
-        model, processor, device = _get_clip()
-        return _get_embedding(model, processor, device, crop)
-
-    except Exception as exc:
-        log.warning("[LINKER] Embedding failed for asset %s: %s", asset_doc.get("_id"), exc)
-        return None
-    finally:
-        cap.release()
 
 
 # ─── MASTER ASSET HELPERS ────────────────────────────────────────────────────
@@ -421,33 +397,93 @@ def link_assets_for_video(
     # Pre-compute the survey ObjectId once for the exclusion filter
     current_survey_oid = ObjectId(survey_id) if survey_id else None
 
-    embedding_ops: list[UpdateOne] = []
+    embedding_ops: list[UpdateOne] = []   # writes new embeddings to assets
+    master_id_ops: list[UpdateOne] = []   # writes master_asset_id to assets
 
+    # ── Phase A+B: stream through the video, embedding crops in batches ───
+    # Decoding all frames into memory would blow up on long videos
+    # (9k frames × ~6MB BGR ≈ 54GB). Instead we keep at most one decoded
+    # frame plus EMBED_BATCH_SIZE small crops in memory at a time.
+    by_frame: dict[int, list[int]] = {}
+    for i, a in enumerate(assets):
+        if a.get("embedding") is not None:
+            continue
+        if a.get("frame_number") is None or not a.get("box"):
+            continue
+        by_frame.setdefault(int(a["frame_number"]), []).append(i)
+
+    if by_frame:
+        model, processor, device = _get_clip()
+        pending: list[tuple[int, Image.Image]] = []  # (asset index, crop)
+
+        def _flush_pending() -> None:
+            if not pending:
+                return
+            pil_imgs = [c for _, c in pending]
+            try:
+                embs = _get_embeddings_batch(model, processor, device, pil_imgs)
+            except Exception as exc:
+                log.warning("[LINKER] Batch embed failed (size=%d): %s",
+                            len(pending), exc)
+                pending.clear()
+                return
+            for (idx, _), emb_row in zip(pending, embs):
+                emb_np = emb_row.astype(np.float32)
+                assets[idx]["_embedding_np"] = emb_np
+                embedding_ops.append(
+                    UpdateOne({"_id": assets[idx]["_id"]},
+                              {"$set": {"embedding": emb_np.tolist()}})
+                )
+            pending.clear()
+
+        cap = cv2.VideoCapture(str(video_path)) if video_path.exists() else None
+        if cap is None or not cap.isOpened():
+            log.warning("[LINKER] Cannot open video: %s — skipping embed phase",
+                        video_path)
+            if cap is not None:
+                cap.release()
+        else:
+            try:
+                for fn in sorted(by_frame):
+                    cap.set(cv2.CAP_PROP_POS_FRAMES, fn)
+                    ret, frame = cap.read()
+                    if not ret:
+                        log.warning("[LINKER] Cannot read frame %d from %s",
+                                    fn, video_path)
+                        continue
+                    for i in by_frame[fn]:
+                        try:
+                            crop = _crop_asset(frame, assets[i]["box"])
+                        except Exception as exc:
+                            log.warning("[LINKER] Crop failed for asset %s: %s",
+                                        assets[i]["_id"], exc)
+                            continue
+                        pending.append((i, crop))
+                        if len(pending) >= EMBED_BATCH_SIZE:
+                            _flush_pending()
+                    # frame dropped at end of loop iteration — GC reclaims
+                _flush_pending()
+            finally:
+                cap.release()
+
+    # ── Phase C: per-asset geo filter + cosine match + link/create ────────
     for asset_doc in assets:
         asset_id = asset_doc["_id"]
 
-        # ── 1. Get or generate embedding ──────────────────────────────────
         emb = asset_doc.get("embedding")
         if emb is not None:
             emb_np = np.array(emb, dtype=np.float32)
         else:
-            emb_np = _generate_embedding_for_asset(asset_doc, video_path)
+            emb_np = asset_doc.get("_embedding_np")
             if emb_np is None:
                 skipped += 1
                 continue
-            # Queue a db write for the embedding on the asset doc
-            embedding_ops.append(
-                UpdateOne({"_id": asset_id}, {"$set": {"embedding": emb_np.tolist()}})
-            )
 
-        # ── 2. Geospatial + route pre-filter against PAST surveys ─────────
+        # Geospatial + route pre-filter against PAST surveys
         location = asset_doc.get("location")
         candidates = []
 
         if location and location.get("coordinates"):
-            # Only match master assets on the SAME route from PAST surveys.
-            # Exclude master assets whose latest_survey_id is the CURRENT survey —
-            # those were created/updated in this same run and are not from a past survey.
             geo_filter = {
                 "route_id": route_id,
                 "asset_type": asset_doc.get("asset_type") or asset_doc.get("type"),
@@ -467,7 +503,7 @@ def link_assets_for_video(
                  "embedding": 1},
             ).limit(10))
 
-        # ── 3. Cosine similarity matching using master_assets.embedding ───
+        # Cosine similarity matching using master_assets.embedding
         best_master = None
         best_similarity = -1.0
 
@@ -483,9 +519,8 @@ def link_assets_for_video(
                 best_similarity = sim
                 best_master = candidate
 
-        # ── 4. Link or create ─────────────────────────────────────────────
+        # Link or create
         if best_master is not None and best_similarity >= min_similarity:
-            # Match found — append to existing master asset
             full_master = db.master_assets.find_one({"_id": best_master["_id"]})
             _update_master_asset(
                 db, full_master, asset_doc, emb_np,
@@ -495,7 +530,6 @@ def link_assets_for_video(
             linked += 1
             print(f"[LINKER] Asset {asset_id} → linked to master {master_id} (sim={best_similarity:.3f})")
         else:
-            # No match — create a brand new master asset
             master_id = _create_master_asset(
                 db, asset_doc, emb_np,
                 survey_id, survey_display_id, survey_date,
@@ -507,17 +541,18 @@ def link_assets_for_video(
             created += 1
             print(f"[LINKER] Asset {asset_id} → new master {master_id}")
 
-        # Write master_asset_id back to the raw asset observation
-        db.assets.update_one(
-            {"_id": asset_id},
-            {"$set": {"master_asset_id": master_id}}
+        master_id_ops.append(
+            UpdateOne({"_id": asset_id}, {"$set": {"master_asset_id": master_id}})
         )
 
-    # ── 5. Flush embedding writes to assets collection ────────────────────
+    # ── Phase D: flush bulk writes ────────────────────────────────────────
     if embedding_ops:
         for i in range(0, len(embedding_ops), 100):
             db.assets.bulk_write(embedding_ops[i:i + 100], ordered=False)
         print(f"[LINKER] Wrote {len(embedding_ops)} new embeddings to assets")
+    if master_id_ops:
+        for i in range(0, len(master_id_ops), 100):
+            db.assets.bulk_write(master_id_ops[i:i + 100], ordered=False)
 
     summary = {"linked": linked, "created": created, "skipped": skipped}
     print(f"[LINKER] Done for video {video_id}: {summary}")

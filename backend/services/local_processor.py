@@ -368,7 +368,21 @@ class LocalVideoProcessor:
         """
         print(f"[LOCAL] Processing video: {video_path}")
         print(f"[LOCAL] Route ID: {route_id}, Video ID: {video_id}")
-        
+
+        # Coerce survey_id to ObjectId once at boundary so frame and asset
+        # writes match the type queried by _recompute_survey_totals and
+        # asset_linker. MongoDB does not coerce types, so storing as string
+        # silently zeros the totals aggregation.
+        survey_oid: Optional[ObjectId] = None
+        if survey_id:
+            try:
+                survey_oid = (
+                    survey_id if isinstance(survey_id, ObjectId)
+                    else ObjectId(survey_id)
+                )
+            except Exception as e:
+                print(f"[LOCAL] Warning: invalid survey_id {survey_id!r}: {e}")
+
         # Load label map for resolving class names to asset_id and category_id
         self.label_map = self._load_label_map(db)
 
@@ -573,7 +587,7 @@ class LocalVideoProcessor:
                             if db is not None:
                                 frame_record = {
                                     "video_id": video_id,
-                                    "survey_id": survey_id,
+                                    "survey_id": survey_oid,
                                     "route_id": route_id,
                                     "frame_number": frame_num,
                                     "timestamp": timestamp,
@@ -611,7 +625,7 @@ class LocalVideoProcessor:
                     gpx_data=gpx_data,
                     total_frames=total_frames,
                     video_id=video_id,
-                    survey_id=survey_id,
+                    survey_id=survey_oid,
                     route_id=route_id,
                     width=width,
                     summary=summary,
@@ -645,7 +659,7 @@ class LocalVideoProcessor:
         gpx_data: Dict,
         total_frames: int,
         video_id: str,
-        survey_id: Optional[str],
+        survey_id: Optional[ObjectId],
         route_id: Optional[int],
         width: int,
         summary: Dict,

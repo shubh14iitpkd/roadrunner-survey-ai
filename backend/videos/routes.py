@@ -1,4 +1,5 @@
-from services.local_processor import LocalVideoProcessor
+# from services.local_processor import LocalVideoProcessor
+from services.engine_processor import EngineVideoProcessor
 import pymongo
 import os
 import shutil
@@ -138,6 +139,7 @@ def _run_local_anonymization(app, video_id: str, save_path: Path, upload_root: P
                     {"$set": {"progress": pct, "updated_at": get_now_iso()}},
                 )
 
+        anon_start = time.time()
         try:
             svc = _get_anonymizer()
             if svc is None:
@@ -150,9 +152,17 @@ def _run_local_anonymization(app, video_id: str, save_path: Path, upload_root: P
             )
             # Replace original with anonymized file (storage_url stays the same)
             shutil.move(str(anon_path), str(save_path))
-            print(f"[ANON] local anonymization done for video {video_id}")
+            elapsed = time.time() - anon_start
+            print(
+                f"[ANON] local anonymization done for video {video_id} "
+                f"in {elapsed:.2f}s ({elapsed / 60:.2f} min)"
+            )
         except Exception as e:
-            print(f"[ANON] local anonymization failed for video {video_id}: {e}")
+            elapsed = time.time() - anon_start
+            print(
+                f"[ANON] local anonymization failed for video {video_id} "
+                f"after {elapsed:.2f}s: {e}"
+            )
             # Don't block the user — fall through to mark uploaded anyway
         finally:
             db.videos.find_one_and_update(
@@ -186,6 +196,7 @@ def _run_library_anonymization(app, video_id: str, full_path: Path, upload_root:
                     {"$set": {"progress": pct, "updated_at": get_now_iso()}},
                 )
 
+        anon_start = time.time()
         try:
             # checking if blurred video already exists
             anon_dir = upload_root / "anonymized" / "video_library"
@@ -218,9 +229,17 @@ def _run_library_anonymization(app, video_id: str, full_path: Path, upload_root:
                     "updated_at": get_now_iso(),
                 }},
             )
-            print(f"[ANON] library anonymization done for video {video_id}, url={new_storage_url}")
+            elapsed = time.time() - anon_start
+            print(
+                f"[ANON] library anonymization done for video {video_id}, "
+                f"url={new_storage_url} in {elapsed:.2f}s ({elapsed / 60:.2f} min)"
+            )
         except Exception as e:
-            print(f"[ANON] library anonymization failed for video {video_id}: {e}")
+            elapsed = time.time() - anon_start
+            print(
+                f"[ANON] library anonymization failed for video {video_id} "
+                f"after {elapsed:.2f}s: {e}"
+            )
             db.videos.find_one_and_update(
                 {"_id": ObjectId(video_id)},
                 {"$set": {"status": "uploaded", "progress": 100, "updated_at": get_now_iso()}},
@@ -289,7 +308,8 @@ def _run_real_ai_processing(app, video_id: str, payload: dict):
 
             print(f"[PROCESS] Starting local processing for video {video_id}")
 
-            processor = LocalVideoProcessor()
+            # processor = LocalVideoProcessor()
+            processor = EngineVideoProcessor()
 
             def update_progress(progress: int, message: str):
                 mongo_db.videos.update_one(
@@ -463,6 +483,7 @@ def _run_asset_linking(app, video_id: str, payload: dict):
         mongo_client = MongoClient(app.config["MONGO_URI"])
         mongo_db = mongo_client[app.config["MONGO_DB_NAME"]]
 
+        link_start = time.time()
         try:
             survey_doc = None
             if survey_id:
@@ -482,9 +503,17 @@ def _run_asset_linking(app, video_id: str, payload: dict):
                 survey_date=survey_date_val,
                 video_path=Path(video_path_str) if video_path_str else None,
             )
-            print(f"[QUEUE] Asset linking complete for video {video_id}: {linker_summary}")
+            elapsed = time.time() - link_start
+            print(
+                f"[QUEUE] Asset linking complete for video {video_id} "
+                f"in {elapsed:.2f}s ({elapsed / 60:.2f} min): {linker_summary}"
+            )
         except Exception as link_err:
-            print(f"[QUEUE] Warning: asset linking failed for video {video_id}: {link_err}")
+            elapsed = time.time() - link_start
+            print(
+                f"[QUEUE] Warning: asset linking failed for video {video_id} "
+                f"after {elapsed:.2f}s: {link_err}"
+            )
             _tb.print_exc()
 
         # Always mark completed — linking failure is non-fatal
