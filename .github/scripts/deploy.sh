@@ -64,7 +64,7 @@ if pm2 describe backend > /dev/null 2>&1; then
     echo -e "${GREEN}✅ Backend restarted successfully${NC}"
 else
     # Use gunicorn for production (matching Dockerfile)
-    pm2 start "gunicorn -w 4 -b 0.0.0.0:5000 --timeout 900 --graceful-timeout 120 --keep-alive 5 app:app" --name backend --interpreter bash
+    pm2 start "gunicorn -c gunicorn.conf.py app:app" --name backend --interpreter bash
     echo -e "${GREEN}✅ Backend started successfully on port 5000${NC}"
 fi
 

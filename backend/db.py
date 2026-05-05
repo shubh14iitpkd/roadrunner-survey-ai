@@ -97,11 +97,6 @@ def init_app_db(app: Flask) -> None:
 	# Geo index (2dsphere)
 	db["assets"].create_index([("location", "2dsphere")], name="idx_assets_geo")
 
-	# Master data
-	db["asset_categories"].create_index([("key", ASCENDING)], unique=True, name="uniq_category_key")
-	db["asset_master"].create_index([("code", ASCENDING)], unique=True, name="uniq_asset_code")
-	db["asset_master"].create_index([("category_key", ASCENDING)], name="idx_asset_category_key")
-
 	# Dashboard cache (optional)
 	db["dashboard_cache"].create_index([("key", ASCENDING), ("timeframe", ASCENDING)], unique=True, name="uniq_cache_key_timeframe")
 

@@ -78,3 +78,8 @@ db_dock
 **/*.md
 !**/README.md
 public/assets.json
+**/*.onnx
+**/*.engine
+**/nohup.out
+**/.coverage
+backend/services/export.py

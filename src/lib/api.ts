@@ -388,12 +388,6 @@ export const api = {
 			apiFetch(`/api/assets/${asset_id}/issue`, { method: "PATCH", body: JSON.stringify({ issue }) }),
 		getAvailableIcons: () => apiFetch("/api/assets/available-icons"),
 	},
-	categories: {
-		list: () => apiFetch("/api/categories/"),
-		create: (payload: { key: string; name: string }) => apiFetch("/api/categories/", { method: "POST", body: JSON.stringify(payload) }),
-		update: (key: string, payload: any) => apiFetch(`/api/categories/${key}`, { method: "PUT", body: JSON.stringify(payload) }),
-		delete: (key: string) => apiFetch(`/api/categories/${key}`, { method: "DELETE" }),
-	},
 	dashboard: {
 		kpis: (timeframe: string = "week") => apiFetch(`/api/dashboard/kpis?timeframe=${timeframe}`),
 		assetsByCategory: () => apiFetch("/api/dashboard/charts/assets-by-category"),
