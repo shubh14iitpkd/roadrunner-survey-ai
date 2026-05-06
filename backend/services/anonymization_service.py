@@ -146,6 +146,15 @@ class AnonymizationService:
         write_queue = queue.Queue(maxsize=self._writer_q_depth)
         error_bucket: list[Exception] = []
 
+        # Stage timers — each key written by exactly one thread (no lock).
+        # Pipelined: wall ≈ max(stage), so the dominant stage is the bottleneck.
+        timing = {
+            "read": 0.0,     # reader thread: cv2 read
+            "infer": 0.0,    # GPU thread: model.predict
+            "blur": 0.0,     # GPU thread: cv2.GaussianBlur loop
+            "encode": 0.0,   # GPU thread: ffmpeg stdin.write blocking
+        }
+
         # ── writer thread — pipes BGR frames into FFmpeg (H.264/MP4) ──
         if shutil.which("ffmpeg") is None:
             raise RuntimeError("[ANON] ffmpeg not found on PATH — required for H.264 encoding")
@@ -158,9 +167,14 @@ class AnonymizationService:
             "-s", f"{width}x{height}",
             "-r", str(fps),
             "-i", "pipe:0",
-            "-c:v", "libx264",
-            "-preset", "veryfast",
-            "-crf", "28",
+            "-c:v", "h264_nvenc",
+            "-preset", "p4",
+            "-tune", "hq",
+            "-rc", "vbr",
+            "-cq", "28",
+            "-profile:v", "high",
+            # No -level pin: 4.1 caps at 1920x1080, but source can be 1440p+.
+            # NVENC auto-picks the lowest level that fits resolution × fps.
             "-pix_fmt", "yuv420p",
             "-movflags", "+faststart",
             str(out_path),
@@ -172,19 +186,58 @@ class AnonymizationService:
             stderr=subprocess.PIPE,
         )
 
+        # Drain stderr continuously so ffmpeg can't block on a full stderr
+        # pipe, and so we have its output ready when stdin.write hits
+        # BrokenPipeError (ffmpeg already died — no point reading after).
+        ffmpeg_stderr_chunks: list[bytes] = []
+
+        def _stderr_reader():
+            try:
+                for line in iter(ffmpeg_proc.stderr.readline, b""):
+                    ffmpeg_stderr_chunks.append(line)
+                    # Live-print so a hung ffmpeg surfaces immediately
+                    # (encoder init failures, "no NVENC capable devices",
+                    # session-cap errors, etc.). Strip trailing \r/\n once.
+                    try:
+                        print(f"[ANON][ffmpeg] {line.decode(errors='replace').rstrip()}")
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+        st = threading.Thread(target=_stderr_reader, daemon=True, name="anon-ffmpeg-stderr")
+        st.start()
+
         def _writer_thread():
             try:
                 while True:
                     item = write_queue.get()
                     if item is _DONE:
                         break
-                    ffmpeg_proc.stdin.write(item.tobytes())
+                    t0 = time.perf_counter()
+                    try:
+                        ffmpeg_proc.stdin.write(item.tobytes())
+                    except BrokenPipeError:
+                        # ffmpeg died early — surface its stderr instead of
+                        # the opaque broken pipe.
+                        err = b"".join(ffmpeg_stderr_chunks).decode(errors="replace")
+                        error_bucket.append(RuntimeError(
+                            f"[ANON] FFmpeg pipe closed (rc={ffmpeg_proc.poll()}):\n{err}"
+                        ))
+                        break
+                    timing["encode"] += time.perf_counter() - t0
             finally:
-                ffmpeg_proc.stdin.close()
+                try:
+                    ffmpeg_proc.stdin.close()
+                except BrokenPipeError:
+                    pass
             ffmpeg_proc.wait()
-            if ffmpeg_proc.returncode != 0:
-                err = ffmpeg_proc.stderr.read().decode(errors="replace")
-                error_bucket.append(RuntimeError(f"[ANON] FFmpeg failed:\n{err}"))
+            st.join(timeout=5)
+            if ffmpeg_proc.returncode != 0 and not error_bucket:
+                err = b"".join(ffmpeg_stderr_chunks).decode(errors="replace")
+                error_bucket.append(RuntimeError(
+                    f"[ANON] FFmpeg failed (rc={ffmpeg_proc.returncode}):\n{err}"
+                ))
 
         wt = threading.Thread(target=_writer_thread, daemon=True, name="anon-writer")
         wt.start()
@@ -194,7 +247,9 @@ class AnonymizationService:
             cap_r = cv2.VideoCapture(str(video_path))
             try:
                 while True:
+                    t0 = time.perf_counter()
                     ret, frame = cap_r.read()
+                    timing["read"] += time.perf_counter() - t0
                     if not ret:
                         break
                     frame_queue.put(frame)
@@ -230,6 +285,7 @@ class AnonymizationService:
                     break
 
                 # YOLO batch inference ─────────────────────────────────
+                t_inf = time.perf_counter()
                 results = self.model.predict(
                     batch_frames,
                     conf=self.confidence,
@@ -239,13 +295,18 @@ class AnonymizationService:
                     verbose=False,
                     stream=False,
                 )
+                timing["infer"] += time.perf_counter() - t_inf
 
                 # apply blurs & enqueue for writing ───────────────────
+                # Time blur separately from put() — back-pressure from ffmpeg
+                # shows up under timing["encode"] (writer thread), not blur.
                 for frame, result in zip(batch_frames, results):
+                    t_blur = time.perf_counter()
                     if result.boxes is not None and len(result.boxes):
                         boxes_xyxy = result.boxes.xyxy.cpu().numpy().astype(int)
                         for box in boxes_xyxy:
                             _blur_region(frame, box[0], box[1], box[2], box[3], self.blur_strength)
+                    timing["blur"] += time.perf_counter() - t_blur
                     write_queue.put(frame)
 
                 processed += len(batch_frames)
@@ -269,6 +330,15 @@ class AnonymizationService:
         elapsed = time.perf_counter() - t0
         speed   = processed / elapsed if elapsed > 0 else 0
         print(f"[ANON] Done - {processed} frames in {elapsed:.1f}s  ({speed:.1f} fps)")
+        # Pipelined: wall ≈ max(stage). Stage ≈ wall is the bottleneck.
+        print(
+            f"[ANON] Stage breakdown (pipelined, sum != wall): "
+            f"read={timing['read']:.2f}s "
+            f"infer={timing['infer']:.2f}s "
+            f"blur={timing['blur']:.2f}s "
+            f"encode={timing['encode']:.2f}s "
+            f"wall={elapsed:.2f}s"
+        )
 
         if progress_callback:
             progress_callback(100, "Anonymization complete")
