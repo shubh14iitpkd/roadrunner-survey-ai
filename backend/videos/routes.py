@@ -106,10 +106,15 @@ def _get_anonymizer():
         with _anonymization_lock:
             if _anonymization_service is None:
                 try:
-                    from services.anonymization_service import AnonymizationService
-                    _anonymization_service = AnonymizationService()
+                    # TensorRT engine variant — face_and_plate_blur.engine,
+                    # dynamic batch max=48. Keep the .pt fallback below in
+                    # case the engine file is missing on a given host.
+                    from services.anonymization_service_engine import EngineAnonymizationService
+                    _anonymization_service = EngineAnonymizationService()
+                    # from services.anonymization_service import AnonymizationService
+                    # _anonymization_service = AnonymizationService()
                 except Exception as e:
-                    print(f"[ANON] Failed to initialize AnonymizationService: {e}")
+                    print(f"[ANON] Failed to initialize EngineAnonymizationService: {e}")
                     return None
     return _anonymization_service
 
