@@ -517,8 +517,8 @@ export default function AssetLibrary() {
             created_at: h.created_at,
           })),
           totalSurveysDetected: raw.total_surveys_detected ?? history.length,
-          issue: raw.issue || '',
-          ...((raw.description ?? raw.latest_description) && typeof (raw.description ?? raw.latest_description) === 'object' ? { description: raw.description ?? raw.latest_description } : {}),
+          // issue + description live on the asset doc now (not denormalized on master);
+          // fetched separately via fetchAssetLatestDetail and merged after this resolves.
           // Fields that map-point assets lack — fill from the full document
           // so clicking a map point loads the frame image just like a table click.
           id: raw._id ? String(raw._id) : undefined,
@@ -540,19 +540,36 @@ export default function AssetLibrary() {
     });
   }, [qc]);
 
+  const fetchAssetLatestDetail = useCallback(async (masterDisplayId: string): Promise<Partial<AssetRecord> | null> => {
+    return qc.fetchQuery({
+      queryKey: qk.assets.latestDetail(masterDisplayId),
+      queryFn: async (): Promise<Partial<AssetRecord> | null> => {
+        const resp = await api.assets.getMasterLatestDetail(masterDisplayId);
+        if (!resp) return null;
+        return {
+          issue: resp.issue || '',
+          ...(resp.description && typeof resp.description === 'object' ? { description: resp.description } : {}),
+        };
+      },
+      staleTime: Infinity,
+    });
+  }, [qc]);
+
   const fetchAndMergeDetail = useCallback(async (asset: AssetRecord) => {
     if (!asset.masterDisplayId) return;
-    try {
-      const detail = await fetchAssetDetail(asset.masterDisplayId);
-      if (detail) {
-        setSelectedAsset(prev =>
-          mergeDetailIntoSelection(prev, asset.masterDisplayId!, detail)
-        );
-      }
-    } catch {
-      // silently ignore — user still sees slim data (type, location, condition, road)
-    }
-  }, [fetchAssetDetail, mergeDetailIntoSelection]);
+    const masterId = asset.masterDisplayId;
+    // Master doc (survey history, frame/box, etc) and latest asset detail
+    // (issue + description, now sourced from the asset collection) fetch in
+    // parallel — both merge into selectedAsset as they resolve.
+    const merge = (detail: Partial<AssetRecord> | null) => {
+      if (!detail) return;
+      setSelectedAsset(prev => mergeDetailIntoSelection(prev, masterId, detail));
+    };
+    await Promise.all([
+      fetchAssetDetail(masterId).then(merge).catch(() => {}),
+      fetchAssetLatestDetail(masterId).then(merge).catch(() => {}),
+    ]);
+  }, [fetchAssetDetail, fetchAssetLatestDetail, mergeDetailIntoSelection]);
 
   useEffect(() => {
     const typeParam = searchParams.get("type");

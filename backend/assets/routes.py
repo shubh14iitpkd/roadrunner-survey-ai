@@ -344,6 +344,46 @@ def get_master_asset_by_display_id(master_display_id: str):
 	return fast_mongo_response({"item": master})
 
 
+@assets_bp.get("/master/<master_display_id>/latest-detail", endpoint="assets_master_latest_detail")
+@role_required(["super_admin","admin", "surveyor", "viewer"])
+def get_master_latest_detail(master_display_id: str):
+	"""
+	Get latest asset's issue and description for a master asset.
+	issue and description now live on the asset doc (not denormalized on master),
+	so the detail sidebar pulls them with this call when opened.
+	---
+	tags:
+	  - Assets
+	security:
+	  - Bearer: []
+	parameters:
+	  - name: master_display_id
+	    in: path
+	    type: string
+	    required: true
+	responses:
+	  200:
+	    description: '{ issue, description }'
+	  404:
+	    description: Not found
+	"""
+	db = get_db()
+	master = db["master_assets"].find_one(
+		{"master_display_id": master_display_id},
+		{"_id": 1, "latest_survey_id": 1},
+	)
+	if not master:
+		return mongo_response({"error": "Master asset not found"}, 404)
+	query = {"master_asset_id": master["_id"]}
+	if master.get("latest_survey_id"):
+		query["survey_id"] = master["latest_survey_id"]
+	asset = db.assets.find_one(query, {"issue": 1, "description": 1})
+	return fast_mongo_response({
+		"issue": (asset or {}).get("issue"),
+		"description": (asset or {}).get("description"),
+	})
+
+
 @assets_bp.post("/master", endpoint="assets_master_lib")
 @role_required(["super_admin","admin", "surveyor", "viewer"])
 def get_master_assets():

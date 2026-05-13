@@ -22,6 +22,8 @@ export const qk = {
     search: (q: string) => ["assets", "search", q] as const,
     detail: (masterDisplayId: string) =>
       ["assets", "detail", masterDisplayId] as const,
+    latestDetail: (masterDisplayId: string) =>
+      ["assets", "latestDetail", masterDisplayId] as const,
     facets: (filters: Record<string, unknown>) =>
       ["assets", "facets", filters] as const,
     // Page-of resolves which paginated page a given master_display_id sits on.
