@@ -214,18 +214,15 @@ def _get_date_range(period: str) -> tuple[str, str]:
 # =============================================================================
 
 
-@tool
+@tool(description="""List uploaded videos, optionally filtered by route_id.
+Use when user asks about videos on a route.
+
+Args:
+    route_id: Optional route number to filter by
+
+Returns:
+    JSON array of videos""")
 def list_videos(route_id: Optional[int] = None) -> str:
-    """
-    List uploaded videos, optionally filtered by route_id.
-    Use when user asks about videos on a route.
-
-    Args:
-        route_id: Optional route number to filter by
-
-    Returns:
-        JSON array of videos
-    """
     db = get_db()
     query = {}
     if route_id is not None:
@@ -244,19 +241,16 @@ def list_videos(route_id: Optional[int] = None) -> str:
     return json.dumps({"count": len(data), "videos": data})
 
 
-@tool
+@tool(description="""List surveys, optionally filtered by status and route.
+Use when user asks for surveys or survey list.
+
+Args:
+    status: Optional — "completed", "processing", "uploaded"
+    route_id: Optional route number
+
+Returns:
+    JSON array of surveys""")
 def list_surveys(status: str = "", route_id: Optional[int] = None) -> str:
-    """
-    List surveys, optionally filtered by status and route.
-    Use when user asks for surveys or survey list.
-
-    Args:
-        status: Optional — "completed", "processing", "uploaded"
-        route_id: Optional route number
-
-    Returns:
-        JSON array of surveys
-    """
     db = get_db()
     query = {}
     if status and status.strip():
@@ -279,19 +273,16 @@ def list_surveys(status: str = "", route_id: Optional[int] = None) -> str:
     return json.dumps({"count": len(data), "surveys": data})
 
 
-@tool
+@tool(description="""Get survey statistics: count by time period and top surveyors.
+Use for "How many surveys this month?", "Who did the most surveys?", etc.
+
+Args:
+    period: "today", "week", "month", "year", or "all"
+    route_id: Optional route to filter by
+
+Returns:
+    JSON with survey count, period, and surveyor rankings""")
 def get_survey_stats(period: str = "all", route_id: Optional[int] = None) -> str:
-    """
-    Get survey statistics: count by time period and top surveyors.
-    Use for "How many surveys this month?", "Who did the most surveys?", etc.
-
-    Args:
-        period: "today", "week", "month", "year", or "all"
-        route_id: Optional route to filter by
-
-    Returns:
-        JSON with survey count, period, and surveyor rankings
-    """
     db = get_db()
     query: dict = {}
     if route_id is not None:
@@ -329,18 +320,15 @@ def get_survey_stats(period: str = "all", route_id: Optional[int] = None) -> str
     })
 
 
-@tool
+@tool(description="""Get details about a specific route.
+Use when user asks "Describe route 258", "Tell me about this route", etc.
+
+Args:
+    route_id: The route number
+
+Returns:
+    JSON with route metadata (name, distance, endpoints, type, survey count, asset count)""")
 def describe_route(route_id: int) -> str:
-    """
-    Get details about a specific route.
-    Use when user asks "Describe route 258", "Tell me about this route", etc.
-
-    Args:
-        route_id: The route number
-
-    Returns:
-        JSON with route metadata (name, distance, endpoints, type, survey count, asset count)
-    """
     db = get_db()
     road = db.roads.find_one({"route_id": route_id})
     if not road:
@@ -368,18 +356,15 @@ def describe_route(route_id: int) -> str:
     })
 
 
-@tool
+@tool(description="""Overall good vs damaged summary for all assets on a route.
+Use for general asset health / condition overview.
+
+Args:
+    route_id: Optional route ID
+
+Returns:
+    JSON with total, good, damaged counts and percentages""")
 def get_asset_condition_summary(route_id: Optional[int] = None) -> str:
-    """
-    Overall good vs damaged summary for all assets on a route.
-    Use for general asset health / condition overview.
-
-    Args:
-        route_id: Optional route ID
-
-    Returns:
-        JSON with total, good, damaged counts and percentages
-    """
     db = get_db()
 
     query: dict = {}
@@ -409,18 +394,15 @@ def get_asset_condition_summary(route_id: Optional[int] = None) -> str:
     })
 
 
-@tool
+@tool(description="""List all asset categories, optionally with the labels under each.
+Use for "What are the asset categories?" or "What labels are in category X?".
+
+Args:
+    with_labels: Include the list of labels per category
+
+Returns:
+    JSON array of categories""")
 def list_asset_categories(with_labels: bool = False) -> str:
-    """
-    List all asset categories, optionally with the labels under each.
-    Use for "What are the asset categories?" or "What labels are in category X?".
-
-    Args:
-        with_labels: Include the list of labels per category
-
-    Returns:
-        JSON array of categories
-    """
     rm = get_resolved_map()
 
     cat_labels: dict[str, set[str]] = {}
@@ -444,19 +426,16 @@ def list_asset_categories(with_labels: bool = False) -> str:
     return json.dumps({"total_categories": len(categories), "categories": categories})
 
 
-@tool
+@tool(description="""Detected assets within a category with good/damaged counts.
+Use for "List assets in Roadway Lighting", "Show pavement assets".
+
+Args:
+    category_name: Category display name (e.g. "Roadway Lighting")
+    route_id: Optional route ID to filter by
+
+Returns:
+    JSON array of detected asset types with condition counts""")
 def list_assets_in_category(category_name: str, route_id: Optional[int] = None) -> str:
-    """
-    Detected assets within a category with good/damaged counts.
-    Use for "List assets in Roadway Lighting", "Show pavement assets".
-
-    Args:
-        category_name: Category display name (e.g. "Roadway Lighting")
-        route_id: Optional route ID to filter by
-
-    Returns:
-        JSON array of detected asset types with condition counts
-    """
     cid = _resolve_category_id(category_name)
     if not cid:
         return json.dumps({"error": f"Category '{category_name}' not found"})
@@ -498,19 +477,16 @@ def list_assets_in_category(category_name: str, route_id: Optional[int] = None) 
     })
 
 
-@tool
+@tool(description="""Good vs damaged breakdown for a specific category.
+Use for "Condition of traffic signs", "How are pavement assets?".
+
+Args:
+    category_name: Category display name (e.g. "Directional Signage")
+    route_id: Optional route ID
+
+Returns:
+    JSON with good/damaged counts and percentages for the category""")
 def get_category_condition_breakdown(category_name: str, route_id: Optional[int] = None) -> str:
-    """
-    Good vs damaged breakdown for a specific category.
-    Use for "Condition of traffic signs", "How are pavement assets?".
-
-    Args:
-        category_name: Category display name (e.g. "Directional Signage")
-        route_id: Optional route ID
-
-    Returns:
-        JSON with good/damaged counts and percentages for the category
-    """
     cid = _resolve_category_id(category_name)
     if not cid:
         return json.dumps({"error": f"Category '{category_name}' not found"})
@@ -544,19 +520,16 @@ def get_category_condition_breakdown(category_name: str, route_id: Optional[int]
     })
 
 
-@tool
+@tool(description="""Condition breakdown for a specific asset type (not category).
+Use for "Condition of street lights", "How many guardrails are damaged?".
+
+Args:
+    asset_name: Asset type display name (e.g. "Street Light Pole", "Guardrail", "Traffic Sign")
+    route_id: Optional route ID
+
+Returns:
+    JSON with good/damaged counts for that specific asset type""")
 def get_asset_type_condition(asset_name: str, route_id: Optional[int] = None) -> str:
-    """
-    Condition breakdown for a specific asset type (not category).
-    Use for "Condition of street lights", "How many guardrails are damaged?".
-
-    Args:
-        asset_name: Asset type display name (e.g. "Street Light Pole", "Guardrail", "Traffic Sign")
-        route_id: Optional route ID
-
-    Returns:
-        JSON with good/damaged counts for that specific asset type
-    """
     aids = _resolve_asset_ids(asset_name)
     if not aids:
         return json.dumps({"error": f"Asset type '{asset_name}' not found. Use list_asset_categories(with_labels=True) to see valid asset types."})
@@ -594,18 +567,15 @@ def get_asset_type_condition(asset_name: str, route_id: Optional[int] = None) ->
     })
 
 
-@tool
+@tool(description="""All detected asset types with counts and condition, grouped by category.
+Use for "What assets were detected?", "Show all assets on this route".
+
+Args:
+    route_id: Optional route ID
+
+Returns:
+    JSON with assets grouped by category""")
 def list_detected_assets(route_id: Optional[int] = None) -> str:
-    """
-    All detected asset types with counts and condition, grouped by category.
-    Use for "What assets were detected?", "Show all assets on this route".
-
-    Args:
-        route_id: Optional route ID
-
-    Returns:
-        JSON with assets grouped by category
-    """
     db = get_db()
     query: dict = {}
     if route_id is not None:
@@ -650,26 +620,23 @@ def list_detected_assets(route_id: Optional[int] = None) -> str:
     return json.dumps({"route_id": route_id, "road_name": _road_name(route_id), "categories": categories, "grand_total": grand_total})
 
 
-@tool
+@tool(description="""Get locations (lat/lng) where assets were detected and listing assets.
+Use for "Where were traffic signs detected?", "Show locations of guardrails",
+"Show damaged sign locations", "Map all damaged ITS assets", "List of all street lights".
+
+Args:
+    asset_name: Optional specific asset type name (e.g. "Guardrail")
+    category_name: Optional category name (e.g. "Roadway Lighting")
+    route_id: Optional route ID
+    condition: Optional condition filter — pass "damaged" to return only damaged assets,
+               or "good" for good assets. Leave empty for all.
+    limit: Max results (default 20)
+
+Returns:
+    JSON array of assets with lat/lng and condition
+
+Instruction: if response contains list of data, format result in tabular form and include the message if provided.""")
 def get_asset_locations(asset_name: str = "", category_name: str = "", route_id: Optional[int] = None, condition: str = "", limit: int = 20) -> str:
-    """
-    Get locations (lat/lng) where assets were detected and listing assets.
-    Use for "Where were traffic signs detected?", "Show locations of guardrails",
-    "Show damaged sign locations", "Map all damaged ITS assets", "List of all street lights".
-
-    Args:
-        asset_name: Optional specific asset type name (e.g. "Guardrail")
-        category_name: Optional category name (e.g. "Roadway Lighting")
-        route_id: Optional route ID
-        condition: Optional condition filter — pass "damaged" to return only damaged assets,
-                   or "good" for good assets. Leave empty for all.
-        limit: Max results (default 20)
-
-    Returns:
-        JSON array of assets with lat/lng and condition
-
-    Instruction: if response contains list of data, format result in tabular form and include the message if provided.
-    """
     db = get_db()
     query: dict = {"canonical_location": {"$exists": True}}
 
@@ -730,19 +697,16 @@ def get_asset_locations(asset_name: str = "", category_name: str = "", route_id:
     return json.dumps(result)
 
 
-@tool
+@tool(description="""Find locations with the highest concentration of damaged assets.
+Use for "Where are the damage hotspots?", "Where are most defects?", "Which areas have most defects".
+
+Args:
+    route_id: Route to analyze
+    top_n: Number of hotspot clusters to return (default 5)
+
+Returns:
+    JSON array of hotspot areas with damage counts and center coordinates""")
 def get_damage_hotspots(route_id: int, top_n: int = 5) -> str:
-    """
-    Find locations with the highest concentration of damaged assets.
-    Use for "Where are the damage hotspots?", "Where are most defects?", "Which areas have most defects".
-
-    Args:
-        route_id: Route to analyze
-        top_n: Number of hotspot clusters to return (default 5)
-
-    Returns:
-        JSON array of hotspot areas with damage counts and center coordinates
-    """
     db = get_db()
     query: dict = {
         "route_id": route_id,
@@ -797,24 +761,21 @@ def get_damage_hotspots(route_id: int, top_n: int = 5) -> str:
     })
 
 
-@tool
+@tool(description="""Get condition (good/damaged/total) for every distinct asset type on a route,
+sorted and capped at top_n for chart visualization.
+Use INSTEAD of list_detected_assets when the user asks for a chart of
+asset type conditions, e.g. "bar chart of all asset conditions on route X",
+"condition of all asset types as a chart".
+
+Args:
+    route_id: Optional route ID to filter by
+    top_n: Maximum number of asset types to return (default 10). Capped at 15.
+    sort_by: Sort order — "total" (most assets first) or "damaged" (most damaged first)
+
+Returns:
+    JSON with flat list of asset types with good/damaged/total counts,
+    total_types in the DB, and a truncation message if results were capped.""")
 def get_asset_type_conditions_for_chart(route_id: Optional[int] = None, top_n: int = 10, sort_by: str = "total") -> str:
-    """
-    Get condition (good/damaged/total) for every distinct asset type on a route,
-    sorted and capped at top_n for chart visualization.
-    Use INSTEAD of list_detected_assets when the user asks for a chart of
-    asset type conditions, e.g. "bar chart of all asset conditions on route X",
-    "condition of all asset types as a chart".
-
-    Args:
-        route_id: Optional route ID to filter by
-        top_n: Maximum number of asset types to return (default 10). Capped at 15.
-        sort_by: Sort order — "total" (most assets first) or "damaged" (most damaged first)
-
-    Returns:
-        JSON with flat list of asset types with good/damaged/total counts,
-        total_types in the DB, and a truncation message if results were capped.
-    """
     top_n = min(top_n, 15)  # hard cap to prevent chart overflow
 
     db = get_db()
@@ -871,19 +832,16 @@ def get_asset_type_conditions_for_chart(route_id: Optional[int] = None, top_n: i
     return json.dumps(result)
 
 
-@tool
+@tool(description="""Asset types ranked by damage count/rate.
+Use for "Which assets have the most defects?", "Most damaged asset types".
+
+Args:
+    route_id: Optional route ID
+    limit: Max asset types to return (default 10)
+
+Returns:
+    JSON array of asset types sorted by damage rate""")
 def get_most_damaged_types(route_id: Optional[int] = None, limit: int = 10) -> str:
-    """
-    Asset types ranked by damage count/rate.
-    Use for "Which assets have the most defects?", "Most damaged asset types".
-
-    Args:
-        route_id: Optional route ID
-        limit: Max asset types to return (default 10)
-
-    Returns:
-        JSON array of asset types sorted by damage rate
-    """
     db = get_db()
     query: dict = {}
     if route_id is not None:
@@ -920,18 +878,15 @@ def get_most_damaged_types(route_id: Optional[int] = None, limit: int = 10) -> s
     return json.dumps({"route_id": route_id, "road_name": _road_name(route_id), "assets": ranked[:limit]})
 
 
-@tool
+@tool(description="""List all routes that have been surveyed, with survey count and latest survey date.
+Use for "How many routes have we surveyed?", "Which routes have surveys?", "List surveyed routes".
+
+Args:
+    period: "today", "week", "month", "year", or "all"
+
+Returns:
+    JSON with list of surveyed routes and their survey counts""")
 def list_surveyed_routes(period: str = "all") -> str:
-    """
-    List all routes that have been surveyed, with survey count and latest survey date.
-    Use for "How many routes have we surveyed?", "Which routes have surveys?", "List surveyed routes".
-
-    Args:
-        period: "today", "week", "month", "year", or "all"
-
-    Returns:
-        JSON with list of surveyed routes and their survey counts
-    """
     db = get_db()
     match_query: dict = {}
 
@@ -976,18 +931,15 @@ def list_surveyed_routes(period: str = "all") -> str:
     })
 
 
-@tool
+@tool(description="""Rank all routes by number of damaged assets to find which route has the most damage.
+Use for "Which route has the most damage?", "Route with most defects", "Compare damage across routes".
+
+Args:
+    limit: Max routes to return (default 10)
+
+Returns:
+    JSON array of routes ranked by damage count, with good/damaged/total and damage percentage""")
 def rank_routes_by_damage(limit: int = 10) -> str:
-    """
-    Rank all routes by number of damaged assets to find which route has the most damage.
-    Use for "Which route has the most damage?", "Route with most defects", "Compare damage across routes".
-
-    Args:
-        limit: Max routes to return (default 10)
-
-    Returns:
-        JSON array of routes ranked by damage count, with good/damaged/total and damage percentage
-    """
     db = get_db()
 
     pipeline = [
@@ -1026,20 +978,17 @@ def rank_routes_by_damage(limit: int = 10) -> str:
     return json.dumps({"routes": ranked[:limit]})
 
 
-@tool
+@tool(description="""Get surveys conducted within a specific time range or period.
+Use for "Which routes were surveyed this month?", "Surveys conducted today", "Surveys from Jan to March".
+
+Args:
+    start_date: Optional start date as YYYY-MM-DD
+    end_date: Optional end date as YYYY-MM-DD
+    period: Alternative to dates — "today", "week", "month", "year"
+
+Returns:
+    JSON with surveys grouped by route, including surveyor info and dates""")
 def get_surveys_in_time_range(start_date: str = "", end_date: str = "", period: str = "") -> str:
-    """
-    Get surveys conducted within a specific time range or period.
-    Use for "Which routes were surveyed this month?", "Surveys conducted today", "Surveys from Jan to March".
-
-    Args:
-        start_date: Optional start date as YYYY-MM-DD
-        end_date: Optional end date as YYYY-MM-DD
-        period: Alternative to dates — "today", "week", "month", "year"
-
-    Returns:
-        JSON with surveys grouped by route, including surveyor info and dates
-    """
     db = get_db()
     query: dict = {}
 
@@ -1091,22 +1040,19 @@ def get_surveys_in_time_range(start_date: str = "", end_date: str = "", period: 
     })
 
 
-@tool
+@tool(description="""Comprehensive condition report for a route, including damage breakdown by category,
+most damaged asset types, and damage hotspot summary.
+Use for "Condition of route 258", "What should we improve on this route?",
+"Advice for improving route", "What's wrong with this route?".
+
+The agent should use this data to provide actionable improvement recommendations.
+
+Args:
+    route_id: The route to analyze
+
+Returns:
+    JSON with overall condition, damage by category, top damaged assets, and hotspot info""")
 def get_route_condition_report(route_id: int) -> str:
-    """
-    Comprehensive condition report for a route, including damage breakdown by category,
-    most damaged asset types, and damage hotspot summary.
-    Use for "Condition of route 258", "What should we improve on this route?",
-    "Advice for improving route", "What's wrong with this route?".
-
-    The agent should use this data to provide actionable improvement recommendations.
-
-    Args:
-        route_id: The route to analyze
-
-    Returns:
-        JSON with overall condition, damage by category, top damaged assets, and hotspot info
-    """
     db = get_db()
 
     # Overall condition
@@ -1189,20 +1135,17 @@ def get_route_condition_report(route_id: int) -> str:
     })
 
 
-@tool
+@tool(description="""Aggregate summary of what was found during surveys — total assets detected
+grouped by category, with good/damaged counts.
+Use for "What did we find in surveys?", "Show survey findings", "Survey results summary".
+
+Args:
+    route_id: Optional route to filter by
+    period: "today", "week", "month", "year", or "all"
+
+Returns:
+    JSON with asset aggregates from surveyed routes""")
 def get_survey_findings(route_id: Optional[int] = None, period: str = "all") -> str:
-    """
-    Aggregate summary of what was found during surveys — total assets detected
-    grouped by category, with good/damaged counts.
-    Use for "What did we find in surveys?", "Show survey findings", "Survey results summary".
-
-    Args:
-        route_id: Optional route to filter by
-        period: "today", "week", "month", "year", or "all"
-
-    Returns:
-        JSON with asset aggregates from surveyed routes
-    """
     db = get_db()
 
     # Get survey scope for metadata
@@ -1272,32 +1215,29 @@ def get_survey_findings(route_id: Optional[int] = None, period: str = "all") -> 
 # =============================================================================
 
 
-@tool
+@tool(description="""Get the master catalog info for a category: how many asset label types exist
+and the full list of label display names. Queries system_asset_labels — this
+is NOT about detected assets, it is the full inventory catalog.
+
+Use for:
+- "How many asset labels exist under Signage?"
+- "List all labels under Roadway Lighting"
+- "List all ITS asset types"
+- "Name three asset types under Pavement"
+- "Which assets are in category X?"
+- Semantic questions like "Identify assets installed at regular intervals",
+  "Identify assets related to pedestrian movement", or
+  "Identify assets supporting traffic flow" — call this tool for EACH
+  relevant category and pick matching labels from the results.
+
+Args:
+    category_name: Category display name, e.g. "Directional Signage",
+                   "Roadway Lighting", "ITS", "Pavement",
+                   "Other Infrastructure Assets", "Structures", "Beautification"
+
+Returns:
+    JSON with label_count and full labels list from the master catalog""")
 def get_catalog_category_info(category_name: str) -> str:
-    """
-    Get the master catalog info for a category: how many asset label types exist
-    and the full list of label display names. Queries system_asset_labels — this
-    is NOT about detected assets, it is the full inventory catalog.
-
-    Use for:
-    - "How many asset labels exist under Signage?"
-    - "List all labels under Roadway Lighting"
-    - "List all ITS asset types"
-    - "Name three asset types under Pavement"
-    - "Which assets are in category X?"
-    - Semantic questions like "Identify assets installed at regular intervals",
-      "Identify assets related to pedestrian movement", or
-      "Identify assets supporting traffic flow" — call this tool for EACH
-      relevant category and pick matching labels from the results.
-
-    Args:
-        category_name: Category display name, e.g. "Directional Signage",
-                       "Roadway Lighting", "ITS", "Pavement",
-                       "Other Infrastructure Assets", "Structures", "Beautification"
-
-    Returns:
-        JSON with label_count and full labels list from the master catalog
-    """
     cid = _resolve_category_id(category_name)
     if not cid:
         return json.dumps({"error": f"Category '{category_name}' not found in catalog"})
@@ -1317,24 +1257,21 @@ def get_catalog_category_info(category_name: str) -> str:
     })
 
 
-@tool
+@tool(description="""Identify which asset category a given asset type belongs to.
+Looks up the master catalog (system_asset_labels).
+
+Use for:
+- "What category is CCTV?"
+- "Identify asset category for Guardrail"
+- "Which category does Kerb belong to?"
+- "What category is Tunnel in?"
+
+Args:
+    asset_name: Asset display name to look up, e.g. "CCTV", "Guardrail", "Kerb", "Tunnel"
+
+Returns:
+    JSON with the asset name and its category""")
 def find_asset_category(asset_name: str) -> str:
-    """
-    Identify which asset category a given asset type belongs to.
-    Looks up the master catalog (system_asset_labels).
-
-    Use for:
-    - "What category is CCTV?"
-    - "Identify asset category for Guardrail"
-    - "Which category does Kerb belong to?"
-    - "What category is Tunnel in?"
-
-    Args:
-        asset_name: Asset display name to look up, e.g. "CCTV", "Guardrail", "Kerb", "Tunnel"
-
-    Returns:
-        JSON with the asset name and its category
-    """
     rm = get_resolved_map()
     name_lower = asset_name.strip().lower()
 
@@ -1369,25 +1306,22 @@ def find_asset_category(asset_name: str) -> str:
     })
 
 
-@tool
+@tool(description="""Count detected assets by label and condition for a category.
+
+Use for:
+- "Count Signage assets by label and condition"
+- "Count Roadway Lighting assets by label and condition"
+- "Count ITS assets by label and condition"
+- "Count Pavement assets by label and condition"
+- Any per-category breakdown of detected counts
+
+Args:
+    category_name: Category display name (e.g. "Directional Signage", "ITS")
+    route_id: Optional route ID to restrict to a single route
+
+Returns:
+    JSON with per-label good/damaged counts""")
 def get_inventory_counts_by_category(category_name: str, route_id: Optional[int] = None) -> str:
-    """
-    Count detected assets by label and condition for a category.
-
-    Use for:
-    - "Count Signage assets by label and condition"
-    - "Count Roadway Lighting assets by label and condition"
-    - "Count ITS assets by label and condition"
-    - "Count Pavement assets by label and condition"
-    - Any per-category breakdown of detected counts
-
-    Args:
-        category_name: Category display name (e.g. "Directional Signage", "ITS")
-        route_id: Optional route ID to restrict to a single route
-
-    Returns:
-        JSON with per-label good/damaged counts
-    """
     cid = _resolve_category_id(category_name)
     if not cid:
         return json.dumps({"error": f"Category '{category_name}' not found"})
@@ -1444,31 +1378,28 @@ def get_inventory_counts_by_category(category_name: str, route_id: Optional[int]
 # =============================================================================
 
 
-@tool
+@tool(description="""Rank routes by damaged asset count within a specific category.
+Use for risk corridor / risk location / risk zone questions per category.
+
+Use for:
+- "Identify top 3 risk corridors based on Signage condition"
+- "Identify top risk locations due to poor lighting conditions"
+- "Identify top 5 pavement risk zones"
+- "Identify highest risk locations based on missing protective assets"
+- "Identify top 5 safety risks in ITS network"
+- "Identify highest risk structure type by route"
+- "Identify top 5 locations with degraded beautification"
+- Any question asking for worst routes/locations for a specific category
+
+Args:
+    category_name: Category display name (e.g. "Directional Signage", "Roadway Lighting",
+                   "ITS", "Pavement", "Other Infrastructure Assets", "Structures", "Beautification")
+    top_n: Number of top risk routes to return (default 5)
+
+Returns:
+    JSON with routes ranked by damaged count for the given category.
+    Each entry includes damaged count, total count, damage rate %, and road name.""")
 def get_category_route_risk(category_name: str, top_n: int = 5) -> str:
-    """
-    Rank routes by damaged asset count within a specific category.
-    Use for risk corridor / risk location / risk zone questions per category.
-
-    Use for:
-    - "Identify top 3 risk corridors based on Signage condition"
-    - "Identify top risk locations due to poor lighting conditions"
-    - "Identify top 5 pavement risk zones"
-    - "Identify highest risk locations based on missing protective assets"
-    - "Identify top 5 safety risks in ITS network"
-    - "Identify highest risk structure type by route"
-    - "Identify top 5 locations with degraded beautification"
-    - Any question asking for worst routes/locations for a specific category
-
-    Args:
-        category_name: Category display name (e.g. "Directional Signage", "Roadway Lighting",
-                       "ITS", "Pavement", "Other Infrastructure Assets", "Structures", "Beautification")
-        top_n: Number of top risk routes to return (default 5)
-
-    Returns:
-        JSON with routes ranked by damaged count for the given category.
-        Each entry includes damaged count, total count, damage rate %, and road name.
-    """
     cid = _resolve_category_id(category_name)
     if not cid:
         return json.dumps({"error": f"Category '{category_name}' not found"})
@@ -1519,31 +1450,28 @@ def get_category_route_risk(category_name: str, top_n: int = 5) -> str:
     })
 
 
-@tool
+@tool(description="""Rank corridors by damaged count for a SPECIFIC asset type (not just a category).
+Use when the user asks about a specific asset label rather than an entire category.
+
+Use for:
+- "Identify top 5 corridors with damaged Guardrails"
+- "Identify corridors with highest faded road markings"
+- "Identify corridors with most damaged Street Light Poles"
+- "Identify top risk corridors for Road Marking Line damage"
+- Any corridor risk question mentioning a specific asset type by name
+
+Prefer get_category_route_risk when the question mentions an entire category
+(e.g. "Lighting", "Pavement", "ITS").
+
+Args:
+    asset_name: Specific asset label (e.g. "Guardrail", "Road Marking Line",
+                "Street Light Pole", "CCTV Camera")
+    top_n: Number of top risk corridors to return (default 5)
+
+Returns:
+    JSON with corridors ranked by damaged count for the specific asset type.
+    Each entry includes road name, damaged count, total count, and damage rate %.""")
 def get_asset_type_route_risk(asset_name: str, top_n: int = 5) -> str:
-    """
-    Rank corridors by damaged count for a SPECIFIC asset type (not just a category).
-    Use when the user asks about a specific asset label rather than an entire category.
-
-    Use for:
-    - "Identify top 5 corridors with damaged Guardrails"
-    - "Identify corridors with highest faded road markings"
-    - "Identify corridors with most damaged Street Light Poles"
-    - "Identify top risk corridors for Road Marking Line damage"
-    - Any corridor risk question mentioning a specific asset type by name
-
-    Prefer get_category_route_risk when the question mentions an entire category
-    (e.g. "Lighting", "Pavement", "ITS").
-
-    Args:
-        asset_name: Specific asset label (e.g. "Guardrail", "Road Marking Line",
-                    "Street Light Pole", "CCTV Camera")
-        top_n: Number of top risk corridors to return (default 5)
-
-    Returns:
-        JSON with corridors ranked by damaged count for the specific asset type.
-        Each entry includes road name, damaged count, total count, and damage rate %.
-    """
     db = get_db()
     aids = _resolve_asset_ids(asset_name)
     if not aids:
@@ -1602,20 +1530,17 @@ def get_asset_type_route_risk(asset_name: str, top_n: int = 5) -> str:
 # GAP #1: SURVEY COMPARISON (TEMPORAL CHANGE)
 # =============================================================================
 
-@tool
+@tool(description="""Compare asset condition between surveys on the same route.
+Shows what changed: new assets, condition changes, overall trend.
+Use for "How has route X changed?", "Compare surveys on route X",
+"What's different since last survey?", "Show changes over time on this route".
+
+Args:
+    route_id: The route to compare surveys on
+
+Returns:
+    JSON with survey-by-survey comparison, condition changes, and new detections""")
 def compare_surveys_on_route(route_id: int) -> str:
-    """
-    Compare asset condition between surveys on the same route.
-    Shows what changed: new assets, condition changes, overall trend.
-    Use for "How has route X changed?", "Compare surveys on route X",
-    "What's different since last survey?", "Show changes over time on this route".
-
-    Args:
-        route_id: The route to compare surveys on
-
-    Returns:
-        JSON with survey-by-survey comparison, condition changes, and new detections
-    """
     db = get_db()
 
     surveys = list(db.surveys.find({"route_id": route_id}).sort("survey_date", 1))
@@ -1710,47 +1635,44 @@ def compare_surveys_on_route(route_id: int) -> str:
     })
 
 
-@tool
-def compare_surveys(survey_display_ids: Optional[list[str]] = None, route_id: Optional[int] = None, top_k: int = 3) -> str:
-    """
-    Compare two or more surveys side-by-side using their stored totals
-    (total_assets / good / damaged) plus the top-k most damaged and top-k
-    most common good asset types for each survey.
+@tool(description="""Compare two or more surveys side-by-side using their stored totals
+(total_assets / good / damaged) plus the top-k most damaged and top-k
+most common good asset types for each survey.
 
-    Call this whenever the user asks to compare surveys — by survey IDs
-    ("compare SURV-000005 and SURV-000012"), by route ("compare all surveys
-    on route 216"), or by timeframe phrasing like "how did route X change
-    between surveys".
+Call this whenever the user asks to compare surveys — by survey IDs
+("compare SURV-000005 and SURV-000012"), by route ("compare all surveys
+on route 216"), or by timeframe phrasing like "how did route X change
+between surveys".
 
-    Args:
-        survey_display_ids: Optional list of survey_display_id strings (e.g.
-            ["SURV-000005", "SURV-000012"]). If given, ONLY these surveys are
-            compared, ignoring route_id.
-        route_id: Optional route to pull all surveys from (sorted by date).
-            Used only if survey_display_ids is not provided.
-        top_k: Number of top damaged and top good asset types to return per
-            survey. Default 3. Hard-capped at 10.
+Args:
+    survey_display_ids: Optional list of survey_display_id strings (e.g.
+        ["SURV-000005", "SURV-000012"]). If given, ONLY these surveys are
+        compared, ignoring route_id.
+    route_id: Optional route to pull all surveys from (sorted by date).
+        Used only if survey_display_ids is not provided.
+    top_k: Number of top damaged and top good asset types to return per
+        survey. Default 3. Hard-capped at 10.
 
-    Returns:
-        JSON:
+Returns:
+    JSON:
+    {
+      "surveys": [
         {
-          "surveys": [
-            {
-              "survey_display_id": str,
-              "survey_date": str,
-              "route_id": int,
-              "road_name": str,
-              "totals": {"total_assets": int, "good": int, "damaged": int, "damage_rate_pct": float},
-              "top_damaged_types": [{"asset_type": str, "damaged": int, "total": int}, ...],
-              "top_good_types":    [{"asset_type": str, "good":    int, "total": int}, ...]
-            },
-            ...
-          ],
-          "deltas": {  # present when exactly 2 surveys compared (older → newer)
-            "total_assets": int, "good": int, "damaged": int, "damage_rate_pct": float
-          }
-        }
-    """
+          "survey_display_id": str,
+          "survey_date": str,
+          "route_id": int,
+          "road_name": str,
+          "totals": {"total_assets": int, "good": int, "damaged": int, "damage_rate_pct": float},
+          "top_damaged_types": [{"asset_type": str, "damaged": int, "total": int}, ...],
+          "top_good_types":    [{"asset_type": str, "good":    int, "total": int}, ...]
+        },
+        ...
+      ],
+      "deltas": {  # present when exactly 2 surveys compared (older → newer)
+        "total_assets": int, "good": int, "damaged": int, "damage_rate_pct": float
+      }
+    }""")
+def compare_surveys(survey_display_ids: Optional[list[str]] = None, route_id: Optional[int] = None, top_k: int = 3) -> str:
     db = get_db()
     top_k = max(1, min(int(top_k), 10))
 
@@ -1845,19 +1767,16 @@ def compare_surveys(survey_display_ids: Optional[list[str]] = None, route_id: Op
 # GAP #2: INDIVIDUAL ASSET DETAILS / HISTORY
 # =============================================================================
 
-@tool
+@tool(description="""Get full details of a specific master asset by its display ID.
+Use for "Show me asset MAST-000125", "Details of MAST-000125",
+"What is the condition history of MAST-000125?".
+
+Args:
+    master_display_id: The master display ID (e.g. "MAST-000125")
+
+Returns:
+    JSON with asset details, location, survey history, and condition logs""")
 def get_asset_details(master_display_id: str) -> str:
-    """
-    Get full details of a specific master asset by its display ID.
-    Use for "Show me asset MAST-000125", "Details of MAST-000125",
-    "What is the condition history of MAST-000125?".
-
-    Args:
-        master_display_id: The master display ID (e.g. "MAST-000125")
-
-    Returns:
-        JSON with asset details, location, survey history, and condition logs
-    """
     db = get_db()
     ma = db.master_assets.find_one({"master_display_id": master_display_id.upper().strip()})
     if not ma:
@@ -1912,21 +1831,18 @@ def get_asset_details(master_display_id: str) -> str:
 # GAP #3: VIDEO & FRAME DATA
 # =============================================================================
 
-@tool
+@tool(description="""Get detailed information about a video including processing status,
+frame count, and detection statistics.
+Use for "Show me video details", "What's the status of the latest video?",
+"How many frames had detections?", "Video processing status for route X".
+
+Args:
+    video_id: Optional specific video ID
+    route_id: Optional route ID to get the latest video for
+
+Returns:
+    JSON with video metadata, processing status, and frame/detection stats""")
 def get_video_details(video_id: str = "", route_id: Optional[int] = None) -> str:
-    """
-    Get detailed information about a video including processing status,
-    frame count, and detection statistics.
-    Use for "Show me video details", "What's the status of the latest video?",
-    "How many frames had detections?", "Video processing status for route X".
-
-    Args:
-        video_id: Optional specific video ID
-        route_id: Optional route ID to get the latest video for
-
-    Returns:
-        JSON with video metadata, processing status, and frame/detection stats
-    """
     db = get_db()
 
     if video_id:
@@ -1968,16 +1884,13 @@ def get_video_details(video_id: str = "", route_id: Optional[int] = None) -> str
 # GAP #4: USER & WORKFLOW DATA
 # =============================================================================
 
-@tool
-def get_surveyor_stats() -> str:
-    """
-    Get statistics about surveyors: who surveyed what, how many surveys each did.
-    Use for "Who surveyed route X?", "Which surveyor did the most surveys?",
-    "Show me surveyor activity", "List all surveyors".
+@tool(description="""Get statistics about surveyors: who surveyed what, how many surveys each did.
+Use for "Who surveyed route X?", "Which surveyor did the most surveys?",
+"Show me surveyor activity", "List all surveyors".
 
-    Returns:
-        JSON with surveyor statistics
-    """
+Returns:
+    JSON with surveyor statistics""")
+def get_surveyor_stats() -> str:
     db = get_db()
 
     pipeline = [
@@ -2011,23 +1924,20 @@ def get_surveyor_stats() -> str:
 # GAP #5: GEOGRAPHIC / SPATIAL QUERIES (zone, side)
 # =============================================================================
 
-@tool
+@tool(description="""Filter and count assets by zone and/or side of the road.
+Use for "Defects in zone 3", "Assets on the left side", "What's on the RHS?",
+"Condition by zone", "Which zone has the most defects?",
+"List assets on the left side of route 235".
+
+Args:
+    route_id: Optional route ID
+    zone: Optional zone filter (e.g. "overhead", "roadside", "pavement")
+    side: Optional side filter (e.g. "LHS", "RHS", "median", "center")
+    condition: Optional "good" or "damaged"
+
+Returns:
+    JSON with asset counts grouped by zone and side""")
 def get_assets_by_zone_and_side(route_id: Optional[int] = None, zone: str = "", side: str = "", condition: str = "") -> str:
-    """
-    Filter and count assets by zone and/or side of the road.
-    Use for "Defects in zone 3", "Assets on the left side", "What's on the RHS?",
-    "Condition by zone", "Which zone has the most defects?",
-    "List assets on the left side of route 235".
-
-    Args:
-        route_id: Optional route ID
-        zone: Optional zone filter (e.g. "overhead", "roadside", "pavement")
-        side: Optional side filter (e.g. "LHS", "RHS", "median", "center")
-        condition: Optional "good" or "damaged"
-
-    Returns:
-        JSON with asset counts grouped by zone and side
-    """
     db = get_db()
     query: dict = {}
     if route_id is not None:
@@ -2100,23 +2010,20 @@ def get_assets_by_zone_and_side(route_id: Optional[int] = None, zone: str = "", 
 # GAP #7: SPECIFIC CONDITION TYPES
 # =============================================================================
 
-@tool
+@tool(description="""Find assets by condition. The platform exposes only two conditions:
+"good" and "defective". Any other value is normalized to one of these two —
+do NOT promise data for narrower defect sub-types (broken, bent, missing,
+etc.); the platform does not expose those externally.
+
+Args:
+    condition_type: "good" or "defective" (other values coerced to "defective").
+    route_id: Optional route filter
+    asset_name: Optional asset type filter (e.g. "Guardrail", "Traffic Sign")
+    limit: Max results (default 20)
+
+Returns:
+    JSON with count and list of assets matching the condition.""")
 def get_assets_by_specific_condition(condition_type: str, route_id: Optional[int] = None, asset_name: str = "", limit: int = 20) -> str:
-    """
-    Find assets by condition. The platform exposes only two conditions:
-    "good" and "defective". Any other value is normalized to one of these two —
-    do NOT promise data for narrower defect sub-types (broken, bent, missing,
-    etc.); the platform does not expose those externally.
-
-    Args:
-        condition_type: "good" or "defective" (other values coerced to "defective").
-        route_id: Optional route filter
-        asset_name: Optional asset type filter (e.g. "Guardrail", "Traffic Sign")
-        limit: Max results (default 20)
-
-    Returns:
-        JSON with count and list of assets matching the condition.
-    """
     db = get_db()
     norm = (condition_type or "").strip().lower()
     wants_good = norm == "good"
@@ -2163,23 +2070,20 @@ def get_assets_by_specific_condition(condition_type: str, route_id: Optional[int
 # GAP #8: CROSS-ROUTE AGGREGATION WITH ASSET/CATEGORY FILTER
 # =============================================================================
 
-@tool
+@tool(description="""Rank routes by damage count filtered by a specific asset type or category.
+Use for "Which routes have the most defective traffic signs?",
+"Compare guardrail condition across routes",
+"Rank routes by defective street lights",
+"Routes with most defective pavement assets".
+
+Args:
+    asset_name: Optional specific asset type (e.g. "Guardrail", "Street Light Pole")
+    category_name: Optional category (e.g. "Roadway Lighting", "Signage")
+    limit: Max routes to return (default 10)
+
+Returns:
+    JSON with routes ranked by damaged count for the filtered asset type/category""")
 def rank_routes_by_asset_damage(asset_name: str = "", category_name: str = "", limit: int = 10) -> str:
-    """
-    Rank routes by damage count filtered by a specific asset type or category.
-    Use for "Which routes have the most defective traffic signs?",
-    "Compare guardrail condition across routes",
-    "Rank routes by defective street lights",
-    "Routes with most defective pavement assets".
-
-    Args:
-        asset_name: Optional specific asset type (e.g. "Guardrail", "Street Light Pole")
-        category_name: Optional category (e.g. "Roadway Lighting", "Signage")
-        limit: Max routes to return (default 10)
-
-    Returns:
-        JSON with routes ranked by damaged count for the filtered asset type/category
-    """
     db = get_db()
     query: dict = {}
 
@@ -2238,20 +2142,17 @@ def rank_routes_by_asset_damage(asset_name: str = "", category_name: str = "", l
 # GAP #9: TREND / TIME-SERIES ANALYSIS
 # =============================================================================
 
-@tool
+@tool(description="""Show asset detection trend over time — how many assets were detected per time period.
+Use for "Detection trend over last 6 months", "How many assets detected each month?",
+"Are we finding more defects over time?", "Show monthly survey activity".
+
+Args:
+    route_id: Optional route filter
+    group_by: Time bucket — "day", "week", or "month" (default "month")
+
+Returns:
+    JSON with time-series data of asset detections""")
 def get_detection_trend(route_id: Optional[int] = None, group_by: str = "month") -> str:
-    """
-    Show asset detection trend over time — how many assets were detected per time period.
-    Use for "Detection trend over last 6 months", "How many assets detected each month?",
-    "Are we finding more defects over time?", "Show monthly survey activity".
-
-    Args:
-        route_id: Optional route filter
-        group_by: Time bucket — "day", "week", or "month" (default "month")
-
-    Returns:
-        JSON with time-series data of asset detections
-    """
     db = get_db()
     query: dict = {}
     if route_id is not None:
@@ -2331,23 +2232,20 @@ def get_detection_trend(route_id: Optional[int] = None, group_by: str = "month")
 # GAP #10: MAP OUTPUT FOR SPATIAL QUERIES
 # =============================================================================
 
-@tool
+@tool(description="""Get asset locations formatted for map display. Returns data with a ```map code block.
+Use for "Show guardrails on the map", "Map all defective assets on route 235",
+"Show me defects on a map", "Map all assets in this category".
+
+Args:
+    asset_name: Optional specific asset type name
+    category_name: Optional category name
+    route_id: Optional route filter
+    condition: Optional "good" or "damaged"
+    limit: Max markers (default 50)
+
+Returns:
+    Markdown with a map code block containing markers""")
 def get_assets_for_map(asset_name: str = "", category_name: str = "", route_id: Optional[int] = None, condition: str = "", limit: int = 50) -> str:
-    """
-    Get asset locations formatted for map display. Returns data with a ```map code block.
-    Use for "Show guardrails on the map", "Map all defective assets on route 235",
-    "Show me defects on a map", "Map all assets in this category".
-
-    Args:
-        asset_name: Optional specific asset type name
-        category_name: Optional category name
-        route_id: Optional route filter
-        condition: Optional "good" or "damaged"
-        limit: Max markers (default 50)
-
-    Returns:
-        Markdown with a map code block containing markers
-    """
     db = get_db()
     query: dict = {"canonical_location": {"$exists": True}}
 
@@ -2416,29 +2314,26 @@ def get_assets_for_map(asset_name: str = "", category_name: str = "", route_id: 
     map_data = json.dumps({"type": "circle", "markers": markers}, indent=2)
     return f"{intro}\n\n```map\n{map_data}\n```"
 
-@tool
+@tool(description="""Resolve a road/route NAME (e.g. "Al Wakrah", "Corniche", "D-Ring") to one or
+more route_ids using fuzzy matching against the roads collection.
+
+ALWAYS call this first when the user references a road by name instead of by
+route_id. If the result contains multiple matches, call the relevant data
+tool ONCE PER route_id and combine the results in your final answer —
+present per-route sections so the user can see each matching road.
+
+Args:
+    name: Road name or partial name from the user's question.
+
+Returns JSON:
+    {
+      "query": <input>,
+      "matches": [{"route_id": int, "road_name": str, "score": int}, ...],
+      "match_count": int
+    }
+    If no road name scores above the fuzzy threshold, "matches" is empty —
+    inform the user no road with that name was found.""")
 def find_routes_by_name(name: str) -> str:
-    """
-    Resolve a road/route NAME (e.g. "Al Wakrah", "Corniche", "D-Ring") to one or
-    more route_ids using fuzzy matching against the roads collection.
-
-    ALWAYS call this first when the user references a road by name instead of by
-    route_id. If the result contains multiple matches, call the relevant data
-    tool ONCE PER route_id and combine the results in your final answer —
-    present per-route sections so the user can see each matching road.
-
-    Args:
-        name: Road name or partial name from the user's question.
-
-    Returns JSON:
-        {
-          "query": <input>,
-          "matches": [{"route_id": int, "road_name": str, "score": int}, ...],
-          "match_count": int
-        }
-        If no road name scores above the fuzzy threshold, "matches" is empty —
-        inform the user no road with that name was found.
-    """
     matches = _resolve_route_ids_from_name(name)
     return json.dumps({
         "query": name,
