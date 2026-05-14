@@ -32,6 +32,9 @@ import capitalize from "@/helpers/capitalize";
 // ── Description keys to exclude from the detailed view ──────────
 const DESCRIPTION_KEY_FILTER = new Set([
   'Asset condition',
+  'Damaged',
+  'Chainage Start',
+  'Chainage End',
 ]);
 
 // ── DAMAGED condition set (mirrors backend) ─────────────────

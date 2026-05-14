@@ -83,3 +83,7 @@ public/assets.json
 **/nohup.out
 **/.coverage
 backend/services/export.py
+armor
+.pyarmor
+dist_backend
+pyarmor-*
