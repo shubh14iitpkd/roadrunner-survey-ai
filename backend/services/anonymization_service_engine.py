@@ -123,16 +123,23 @@ class EngineAnonymizationService:
     def process_video(
         self,
         video_path: str | Path,
-        upload_dir: str | Path,
+        upload_dir: str | Path | None = None,
         upload_type: UploadType = "local",
         progress_callback=None,
+        output_path: str | Path | None = None,
     ) -> Path:
         video_path = Path(video_path)
-        upload_dir = Path(upload_dir)
 
-        out_dir = upload_dir / "anonymized" / upload_type
-        out_dir.mkdir(parents=True, exist_ok=True)
-        out_path = out_dir / video_path.name
+        if output_path is not None:
+            out_path = Path(output_path)
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+        elif upload_dir is not None:
+            upload_dir = Path(upload_dir)
+            out_dir = upload_dir / "anonymized" / upload_type
+            out_dir.mkdir(parents=True, exist_ok=True)
+            out_path = out_dir / video_path.name
+        else:
+            raise ValueError("[ANON-ENG] Provide either output_path or upload_dir")
 
         print(f"[ANON-ENG] Input : {video_path}")
         print(f"[ANON-ENG] Output: {out_path}")

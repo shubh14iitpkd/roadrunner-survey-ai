@@ -78,7 +78,7 @@ class EngineVideoProcessor:
     def __init__(self, model_path: str = None):
         self.config = self._load_endpoint_config()
 
-        model_file_name = self.config.get("model_file_name", "model.engine")
+        model_file_name = self.config.get("model_file_name", "multistage.engine")
         services_dir = Path(__file__).parent
         self.model_path = model_path or str(services_dir / model_file_name)
 
