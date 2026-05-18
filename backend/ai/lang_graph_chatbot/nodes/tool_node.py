@@ -201,7 +201,8 @@ def agent_node(state: AgentState) -> dict:
         "(if data is needed and a listed tool fits) OR a direct natural-language "
         "answer. Do not return empty content."
     )
-
+    
+    # pyarmor: no-bcc
     def _is_empty(resp) -> bool:
         if resp is None:
             return True
