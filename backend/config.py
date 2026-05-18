@@ -14,9 +14,6 @@ class Config:
 		self.JWT_HEADER_TYPE = "Bearer"
 		# Allow large file uploads (10GB limit for videos)
 		self.MAX_CONTENT_LENGTH = 10 * 1024 * 1024 * 1024  # 10GB in bytes
-		self.AWS_REGION = os.getenv("AWS_REGION", "ap-south-1")
-		self.AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID", "")
-		self.AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY", "")
 		# ── Job queue concurrency limits ──────────────────────────────────────
 		# Set these env vars to control how many jobs of each type run in parallel.
 		# Default is 1 for all (single GPU / single machine).

@@ -87,3 +87,5 @@ armor
 .pyarmor
 dist_backend
 pyarmor-*
+bdist
+.claude
