@@ -959,6 +959,7 @@ _SORT_KEY_MAP = {
 	"roadName": "route_name",
 	"road": "route_name",
 	"side": "side",
+	"issue": "issue",
 	"zone": "zone",
 	"lastSurveyDate": "last_seen_date",
 	"survey": "last_seen_date",
@@ -1520,14 +1521,32 @@ def update_asset_issue(asset_id: str):
 	db = get_db()
 	now = get_now_iso()
 
+	# Keep the master `issue`, its latest survey_history entry, and the
+	# underlying asset observation aligned — otherwise filters/sorts that hit
+	# different collections see inconsistent values for the same asset.
+	master_oid = ObjectId(asset_id)
 	res = db.master_assets.find_one_and_update(
-		{"_id": ObjectId(asset_id)},
+		{"_id": master_oid},
 		{"$set": {"issue": issue, "updated_at": now}},
 	)
-	if not res:
+	if res:
+		history = res.get("survey_history") or []
+		if history:
+			last_idx = len(history) - 1
+			db.master_assets.update_one(
+				{"_id": master_oid},
+				{"$set": {f"survey_history.{last_idx}.issue": issue}},
+			)
+			latest_obs_id = history[last_idx].get("asset_observation_id")
+			if latest_obs_id:
+				db.assets.update_one(
+					{"_id": latest_obs_id},
+					{"$set": {"issue": issue}},
+				)
+	else:
 		# Fallback: try as a raw asset _id
 		res = db.assets.find_one_and_update(
-			{"_id": ObjectId(asset_id)},
+			{"_id": master_oid},
 			{"$set": {"issue": issue}},
 		)
 		if not res:
