@@ -1,3 +1,4 @@
+altgraph==0.17.5
 annotated-doc==0.0.3
 annotated-types==0.7.0
 antlr4-python3-runtime==4.9.3
@@ -135,6 +136,8 @@ pyasn1_modules==0.4.2
 pydantic==2.12.3
 pydantic_core==2.41.4
 Pygments==2.19.2
+pyinstaller==6.20.0
+pyinstaller-hooks-contrib==2026.5
 PyJWT==2.10.1
 pymongo==4.16.0
 pymongo-search-utils==0.2.1

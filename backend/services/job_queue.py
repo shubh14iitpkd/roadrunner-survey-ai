@@ -51,10 +51,18 @@ class VideoJobQueue:
     # ── Public API ────────────────────────────────────────────────────────────
 
     def init_app(self, app):
-        """Bind to Flask app and start background poller."""
+        """Bind to Flask app + ensure indexes + recover stuck jobs.
+
+        Does NOT start the poller thread — call start_worker() post-fork
+        from a single worker (e.g. gunicorn post_fork hook gated on
+        worker.age == 0) so concurrency limits aren't multiplied N times.
+        """
         self._app = app
         self._ensure_indexes()
         self._recover_stuck_jobs()
+
+    def start_worker(self):
+        """Start the background poller thread. Call once per process."""
         t = threading.Thread(target=self._worker_loop, daemon=True, name="job-queue-worker")
         t.start()
         print("[QUEUE] Job queue worker started")
@@ -163,19 +171,24 @@ class VideoJobQueue:
         return self._app.config.get(key, 1)
 
     def _ensure_indexes(self):
-        with self._app.app_context():
-            from db import get_client
-            db = get_client(self._app)[self._app.config["MONGO_DB_NAME"]]
+        # Temp client — runs pre-fork; don't open the shared global pool here
+        from pymongo import MongoClient
+        tmp = MongoClient(self._app.config["MONGO_URI"], uuidRepresentation="standard")
+        try:
+            db = tmp[self._app.config["MONGO_DB_NAME"]]
             db.processing_queue.create_index(
                 [("job_type", 1), ("status", 1), ("created_at", 1)],
                 name="idx_queue_dispatch",
             )
+        finally:
+            tmp.close()
 
     def _recover_stuck_jobs(self):
         """Reset jobs that were left 'running' due to a previous crash."""
-        with self._app.app_context():
-            from db import get_client
-            db = get_client(self._app)[self._app.config["MONGO_DB_NAME"]]
+        from pymongo import MongoClient
+        tmp = MongoClient(self._app.config["MONGO_URI"], uuidRepresentation="standard")
+        try:
+            db = tmp[self._app.config["MONGO_DB_NAME"]]
             stuck = list(db.processing_queue.find({"status": "running"}))
             for job in stuck:
                 db.processing_queue.update_one(
@@ -190,6 +203,8 @@ class VideoJobQueue:
                 )
             if stuck:
                 print(f"[QUEUE] Recovered {len(stuck)} stuck jobs on startup")
+        finally:
+            tmp.close()
 
 
 # Module-level singleton

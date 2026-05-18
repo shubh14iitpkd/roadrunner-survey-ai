@@ -1,3 +1,5 @@
+import os
+
 from flask import Flask, jsonify, send_from_directory
 from flask_compress import Compress
 from flask_cors import CORS
@@ -9,9 +11,27 @@ from dotenv import load_dotenv
 from config import Config
 from db import init_app_db
 from cache import init_cache
+from gunicorn.app.wsgiapp import WSGIApplication
+# import os
+
+class StandaloneApplication(WSGIApplication):
+	def __init__(self, app, options=None):
+		self.options = options or {}
+		self.app = app
+		super().__init__()
+	
+	def load_config(self):
+		config = {
+			k: v for k, v in self.options.items() if k in self.cfg.settings and v is not None
+		}
+		for k, v in config.items():
+			self.cfg.set(k.lower(), v)
+	
+	def load(self):
+		return self.app
+
 
 def create_app() -> Flask:
-	import os
 	env = os.getenv("ENV", "dev")
 	if env == "dev":
 		load_dotenv(".env.development")
@@ -52,7 +72,6 @@ def create_app() -> Flask:
 	# from tiles.routes import tiles_bp
 	from frames.routes import frames_bp
 	from user.routes import user_bp
-	from model_test.routes import model_test_bp
 
 	app.register_blueprint(auth_bp, url_prefix="/api/auth")
 	app.register_blueprint(roads_bp, url_prefix="/api/roads")
@@ -68,7 +87,6 @@ def create_app() -> Flask:
 	# app.register_blueprint(tiles_bp, url_prefix="/api/tiles")
 	app.register_blueprint(frames_bp, url_prefix="/api/frames")
 	app.register_blueprint(user_bp, url_prefix="/api/users")
-	app.register_blueprint(model_test_bp, url_prefix="/api/model-test")
 
 	def pr(rule):
 		# print(rule.endpoint)
@@ -163,7 +181,6 @@ def create_app() -> Flask:
 			return response, 204
 
 	# Serve uploaded files statically from /uploads
-	import os
 	upload_dir = os.getenv("UPLOAD_DIR") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "uploads")
 	print(f"[UPLOADS] Upload directory: {upload_dir}")
 	print(f"[UPLOADS] Upload directory exists: {os.path.exists(upload_dir)}")
@@ -268,8 +285,32 @@ def create_app() -> Flask:
 
 	return app
 
-app = create_app()
 
 if __name__ == "__main__":
-	app.run(host="0.0.0.0", port=5050, debug=True, use_reloader=False)
+	app = create_app()
+	if os.getenv("ENV", "dev") == "dev":
+		# Dev = single process, no fork. Start poller before app.run() blocks.
+		from services.job_queue import job_queue
+		job_queue.start_worker()
+		app.run(host="0.0.0.0", port=5050, debug=True, use_reloader=False)
+	else:
+		def post_fork(server, worker):
+			# Run job-queue poller in only ONE worker so concurrency limits
+			# (MAX_CONCURRENT_*) aren't multiplied by worker count.
+			# worker.age == 1 = first worker spawned. If it dies, no poller
+			# until full restart — enqueue() still dispatches inline.
+			if worker.age == 1:
+				from services.job_queue import job_queue
+				job_queue.start_worker()
+
+		opts = {
+			"bind": "0.0.0.0:5050",
+			"workers": 4,
+			"timeout": 900,
+			"graceful_timeout": 120,
+			"keepalive": 5,
+			"post_fork": post_fork,
+		}
+
+		StandaloneApplication(app, opts).run()
 
