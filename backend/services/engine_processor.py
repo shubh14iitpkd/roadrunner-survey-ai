@@ -207,30 +207,30 @@ class EngineVideoProcessor:
             print(f"[ENGINE] Warning: Failed to load label map: {e}")
             return {}
 
-    def _load_endpoint_config(self):
-        possible_paths = [
-            Path(__file__).parent / "endpoint_config.json",
-            Path(__file__).parent.parent / "endpoint_config.json",
-            Path(__file__).parent.parent.parent / "endpoint_config.json",
-        ]
+    # def _load_endpoint_config(self):
+    #     possible_paths = [
+    #         Path(__file__).parent / "endpoint_config.json",
+    #         Path(__file__).parent.parent / "endpoint_config.json",
+    #         Path(__file__).parent.parent.parent / "endpoint_config.json",
+    #     ]
 
-        for config_path in possible_paths:
-            if config_path.exists():
-                try:
-                    with open(config_path, "r") as f:
-                        return json.load(f)
-                except json.JSONDecodeError as e:
-                    print(f"[ENGINE] Warning: Invalid JSON in {config_path}: {e}")
-                    continue
-                except Exception as e:
-                    print(f"[ENGINE] Warning: Failed to load {config_path}: {e}")
-                    continue
+    #     for config_path in possible_paths:
+    #         if config_path.exists():
+    #             try:
+    #                 with open(config_path, "r") as f:
+    #                     return json.load(f)
+    #             except json.JSONDecodeError as e:
+    #                 print(f"[ENGINE] Warning: Invalid JSON in {config_path}: {e}")
+    #                 continue
+    #             except Exception as e:
+    #                 print(f"[ENGINE] Warning: Failed to load {config_path}: {e}")
+    #                 continue
 
-        print(
-            f"[ENGINE] No endpoint_config.json found in: "
-            f"{[str(p) for p in possible_paths]}"
-        )
-        return {}
+    #     print(
+    #         f"[ENGINE] No endpoint_config.json found in: "
+    #         f"{[str(p) for p in possible_paths]}"
+    #     )
+    #     return {}
 
     def _run_batched_inference(
         self, frames: List[np.ndarray]
