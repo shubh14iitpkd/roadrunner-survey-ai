@@ -41,7 +41,10 @@ from services.LatLongEstimator import LatLongEstimator
 from services.ZoneMapper import ZoneMapper
 
 from deep_sort_realtime.deepsort_tracker import DeepSort
-from ultralytics import YOLO
+# from ultralytics import YOLO  # replaced by services.sattu.TRTYolo
+import gc
+from services.ram_ladoo import decrypt_blob
+from services.sattu import TRTYolo
 
 # Single-source helpers/constants — keep parity with LocalVideoProcessor.
 # from services.local_processor import (
@@ -62,6 +65,19 @@ from services.processor_helpers import (
     SIDED_OFFSET_M,
     BEARING_SMOOTH_FRAMES,
 )
+
+
+# ---------------------------------------------------------------------------
+# Scrambled AES-GCM key + AAD for malai_kofta.ns.
+#
+# Real 32-byte key + AAD are reconstructed only inside ram_ladoo.decrypt_blob,
+# in mutable bytearrays that are zeroed immediately after AESGCM init.
+# Rotate via services/scramble_key.py.
+# ---------------------------------------------------------------------------
+_PAD = b' \xd7\xa8\xa9\x10\xdd\x8dC\x15l\x0c\xc6\xd1\x05E\xab`r0\x9c\x19\xa3\xeb\xb9)\xc8\x832~\xb6\xc3\x86'
+_XOR = b'J\xfb\xc0\x84g~\xba\xed$\\\x88i\xe1\x00\xee\xd0\xda\xf3\xe9\x13\x06\xd5Po\xad\x87\xc8`#\xc3\xf8j'
+_AAD_PAD = b"<p'\xf8\x0fI\xb1\xfb\x8f\xd2\x06v\xf6\x02(\xc6\xd3*\x9d3\xbe\xc0e/\xea\xd7g\xcc\x7f\xf4$mQ"
+_AAD_XOR = b"r\x15B\x94n'\xc2\x93\xaf\x81n\x17\x84oI\xe6\x81|\xbd`\xd7\xa7\x0bF\x84\xb0G\xa3\x19\x92\x04Qb"
 
 @dataclass
 class _FrameWork:
@@ -84,28 +100,20 @@ class EngineVideoProcessor:
     """Process videos using a TensorRT .engine model with dynamic batching."""
 
     def __init__(self, model_path: str = None):
-        self.config = self._load_endpoint_config()
-
-        model_file_name = self.config.get("model_file_name", "multistage.engine")
+        # Raw key replaced by scrambled module-level _PAD / _XOR / _AAD_*.
+        # Reconstructed only inside ram_ladoo.decrypt_blob, zeroed after use.
+        # self.chole_bhature = b'j,h-w\xa37\xae10\x84\xaf0\x05\xab{\xba\x81\xd9\x8f\x1fv\xbb\xd6\x84OKR]u;\xec'
+        # model_file_name = "malai_kofta.engine"  # plaintext engine replaced by encrypted .ns
+        model_file_name = "malai_kofta.ns"
         services_dir = Path(__file__).parent
         self.model_path = model_path or str(services_dir / model_file_name)
-
+        
         # Inference image size (must match engine build-time imgsz).
-        self.inference_size = int(self.config.get("inference_size", 640))
-
         # Dynamic batch dimension — engine compiled with max=48 by default.
-        self.batch_size = int(os.getenv("TRT_BATCH_SIZE",
-                                        self.config.get("batch_size", 48)))
-
-        # Frame extraction interval (process every Nth frame).
-        self.frame_interval = int(self.config.get("frame_interval", "1"))
-
-        # Confidence threshold.
-        self.confidence_threshold = float(os.getenv("CONFIDENCE_THRESHOLD", "0.25"))
-
-        # Chunk size for memory-bounded video reads.
-        self.chunk_size = int(self.config.get("chunk_size", "500"))
-
+        self.inference_size = 640
+        self.batch_size = 48 # int(os.getenv("TRT_BATCH_SIZE", self.config.get("batch_size", 48)))
+        self.frame_interval = 1 # int(self.config.get("frame_interval", "1"))
+        self.confidence_threshold = 0.25 # float(os.getenv("CONFIDENCE_THRESHOLD", "0.25"))
         self.damaged_conditions = {
             'overgrown', 'fadedpaint', 'dirty', 'missing',
             'broken', 'bent', 'damaged',
@@ -134,14 +142,28 @@ class EngineVideoProcessor:
         print(f"[ENGINE] Inference size: {self.inference_size}")
         print(f"[ENGINE] Confidence threshold: {self.confidence_threshold}")
 
-    def _load_model(self) -> YOLO:
+    def _load_model(self) -> TRTYolo:
         if not os.path.exists(self.model_path):
-            raise FileNotFoundError(f"Engine file not found: {self.model_path}")
+            raise FileNotFoundError(f"Encrypted engine file not found: {self.model_path}")
 
-        print(f"[ENGINE] Loading TensorRT engine from: {self.model_path}")
+        print(f"[ENGINE] Decrypting + loading TensorRT engine in-memory: {self.model_path}")
         try:
-            model = YOLO(self.model_path, task="detect")
-            print(f"[ENGINE] Engine loaded successfully")
+            engine_bytes = decrypt_blob(
+                Path(self.model_path), _PAD, _XOR, _AAD_PAD, _AAD_XOR
+            )
+            try:
+                model = TRTYolo(
+                    engine_bytes=engine_bytes,
+                    max_batch=self.batch_size,
+                    imgsz=self.inference_size,
+                    device="cuda",
+                )
+            finally:
+                # Drop the only Python-side reference to the plaintext engine;
+                # TRT has now deserialized it into GPU memory.
+                del engine_bytes
+                gc.collect()
+            print(f"[ENGINE] Engine deserialized in-memory (no plaintext on disk)")
             print(f"[ENGINE] Model class names: {model.names}")
             return model
         except Exception as e:

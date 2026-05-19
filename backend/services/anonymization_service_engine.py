@@ -23,7 +23,6 @@ match the .pt version.
 """
 
 import gc
-import json
 import os
 import queue
 import shutil
@@ -35,10 +34,10 @@ from typing import Literal
 
 import cv2
 import numpy as np
-import tensorrt as trt
 import torch
-import torchvision
-from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+from services.ram_ladoo import decrypt_blob
+from services.sattu import TRTYolo
 
 
 UploadType = Literal["local", "video_library"]
@@ -49,60 +48,16 @@ _CLS_FACE = 1
 
 
 # ---------------------------------------------------------------------------
-# Scrambled AES-GCM key + AAD for the encrypted engine (.ns) bundle.
+# Scrambled AES-GCM key + AAD for kebab.ns.
 #
-# The real 32-byte AES-256 key is never stored as a single literal. At decrypt
-# time _xor_reconstruct XORs _PAD ^ _XOR into a bytearray, the bytes view is
-# handed to AESGCM, then the bytearray is zeroed and refs dropped. Python's
-# immutable bytes copies still linger until GC, so this is best-effort — but
-# a memory scan won't find a contiguous 32-byte key sitting on the instance
-# for the process lifetime.
-#
-# Regenerate via services/scramble_key.py (holds the source key + AAD).
+# Real 32-byte key + AAD are reconstructed only inside ram_ladoo.decrypt_blob,
+# in mutable bytearrays that are zeroed immediately after AESGCM init.
+# Rotate via services/scramble_key.py.
 # ---------------------------------------------------------------------------
-_PAD = b'P\xf6a9\x99\xf1\xaf_\xd7L.\xadC\xd6v\xd1T\xe8\xcf\x9c\xaf\xddh\x15\xb7\xc3\xa10-2\xb3\xef'
-_XOR = b'o\xba\x84\xcb\x81\xdb\xd9\xc35\xad\x11\x14\x84\xb1\xbdH\xe1p\xcc\x82l/S\x86\xb6\xc1\x82\xb9^oF!'
-_AAD_PAD = b":\xfd\xbd\x14\x04\xed'u\x1f\xd5\xd0\x1c\xf9\x14\x00X\x8e\x9c\x7f\x95\xfa\xcfL\t\x100\xbc[\xbf\xb7\xf4\xfdN"
-_AAD_XOR = b't\x98\xd8xe\x83T\x1d?\x86\xb8}\x8byax\xdc\xca_\xc6\x93\xa8"`~W\x9c4\xd9\xd1\xd4\xc1}'
-
-
-def _xor_reconstruct(pad: bytes, xored: bytes) -> bytearray:
-    """XOR two equal-length byte strings into a mutable bytearray so the caller
-    can zero it after use. Returning bytes would make the secret immutable and
-    un-wipeable."""
-    if len(pad) != len(xored):
-        raise ValueError("scrambled parts length mismatch")
-    out = bytearray(len(pad))
-    for i in range(len(pad)):
-        out[i] = pad[i] ^ xored[i]
-    return out
-
-
-def _zero(ba: bytearray) -> None:
-    for i in range(len(ba)):
-        ba[i] = 0
-
-
-def _decrypt_engine(enc_path: Path) -> bytes:
-    """Read an AES-GCM .ns blob (iv || ct+tag) and return plaintext engine
-    bytes. Key + AAD are reconstructed locally and zeroed before return."""
-    with open(enc_path, "rb") as f:
-        blob = f.read()
-    if len(blob) < 12 + 16:
-        raise ValueError(f"Encrypted engine too small: {enc_path}")
-    iv, ct = blob[:12], blob[12:]
-
-    key_ba = _xor_reconstruct(_PAD, _XOR)
-    aad_ba = _xor_reconstruct(_AAD_PAD, _AAD_XOR)
-    try:
-        aesgcm = AESGCM(bytes(key_ba))
-        plaintext = aesgcm.decrypt(iv, ct, bytes(aad_ba))
-    finally:
-        _zero(key_ba)
-        _zero(aad_ba)
-        del key_ba, aad_ba
-        # gc.collect()
-    return plaintext
+_PAD = b'\xc38\x9e\xee1\n6\r\xd4\xea\xe8/\xc3A\xd1\x1b\xad8\x86\x14Y_\xe8\xe2\x0e\x82\n\xb57Gm\xcd'
+_XOR = b'\xfct{\x1c) @\x916\x0b\xd7\x96\x04&\x1a\x82\x18\xa0\x85\n\x9a\xad\xd3q\x0f\x80)<D\x1a\x98\x03'
+_AAD_PAD = b'b\xfe\xc6\xa1\x84\x00S\x8f\xe8?\xb8\xb9J\x1b\x12o\x07b\x9e1z\xee\x168\xb1\xa1\xe5%L\xb7\xb3iL'
+_AAD_XOR = b',\x9b\xa3\xcd\xe5n \xe7\xc8l\xd0\xd88vsOU4\xbeb\x13\x89xQ\xdf\xc6\xc5J*\xd1\x93U\x7f'
 
 
 def _blur_region(frame: np.ndarray, x1: int, y1: int, x2: int, y2: int, strength: int) -> None:
@@ -113,204 +68,6 @@ def _blur_region(frame: np.ndarray, x1: int, y1: int, x2: int, y2: int, strength
         return
     roi = frame[y1:y2, x1:x2]
     frame[y1:y2, x1:x2] = cv2.GaussianBlur(roi, (strength, strength), 0)
-
-
-class _TRTKebab:
-    """Direct-TensorRT inference wrapper for kebab.engine — replaces the
-    ultralytics YOLO wrapper so we can deserialize from an in-memory bytes
-    object (engine never touches the filesystem after decryption).
-
-    Exposes a callable interface compatible with the subset of ultralytics
-    API used by EngineAnonymizationService:
-
-        results = wrapper(frames, conf=..., imgsz=..., half=True, verbose=False)
-        for result in results:
-            if result.boxes is not None and len(result.boxes):
-                boxes_xyxy = result.boxes.xyxy.cpu().numpy().astype(int)
-
-    Pre/post-processing mirrors YOLOv8: letterbox to imgsz, BGR→RGB, /255,
-    raw output (B, 4+nc, anchors) → confidence filter → class-aware NMS →
-    rescale boxes back to the original frame.
-    """
-
-    # Both values mirror ultralytics' YOLOv8 postprocess defaults so this
-    # wrapper produces results comparable to YOLO(...).__call__ on the same
-    # engine. Don't tweak without a recalibration pass.
-    #   _IOU_THRESH    → ultralytics/utils/nms.py: non_max_suppression(iou_thres=0.45)
-    #   _LETTERBOX_PAD → ultralytics/data/augment.py: gray (114,114,114) fill
-    _IOU_THRESH = 0.45
-    _LETTERBOX_PAD = 114
-
-    class _Boxes:
-        __slots__ = ("xyxy",)
-
-        def __init__(self, xyxy: torch.Tensor):
-            self.xyxy = xyxy
-
-        def __len__(self) -> int:
-            return int(self.xyxy.shape[0])
-
-    class _Result:
-        __slots__ = ("boxes",)
-
-        def __init__(self, xyxy: "torch.Tensor | None"):
-            self.boxes = _TRTKebab._Boxes(xyxy) if xyxy is not None else None
-
-    def __init__(self, engine_bytes: bytes, max_batch: int, imgsz: int, device: str = "cuda"):
-        # Strip optional ultralytics header [4-byte len][JSON metadata] —
-        # ultralytics-exported engines embed metadata, hand-built ones don't.
-        engine_data = engine_bytes
-        if len(engine_bytes) >= 4:
-            meta_len = int.from_bytes(engine_bytes[:4], byteorder="little")
-            if 0 < meta_len < 65536 and len(engine_bytes) > 4 + meta_len:
-                try:
-                    json.loads(engine_bytes[4:4 + meta_len].decode("utf-8"))
-                    engine_data = engine_bytes[4 + meta_len:]
-                except (UnicodeDecodeError, json.JSONDecodeError):
-                    pass
-
-        logger = trt.Logger(trt.Logger.WARNING)
-        runtime = trt.Runtime(logger)
-        self._engine = runtime.deserialize_cuda_engine(engine_data)
-        if self._engine is None:
-            raise RuntimeError("[ANON-ENG] TRT deserialize_cuda_engine failed")
-        self._context = self._engine.create_execution_context()
-        self._device = device
-        self.max_batch = max_batch
-        self.imgsz = imgsz
-
-        # Discover input + output tensor names (TRT 10 API).
-        self._input_name: str | None = None
-        self._output_names: list[str] = []
-        for i in range(self._engine.num_io_tensors):
-            name = self._engine.get_tensor_name(i)
-            mode = self._engine.get_tensor_mode(name)
-            if mode == trt.TensorIOMode.INPUT:
-                self._input_name = name
-            else:
-                self._output_names.append(name)
-        if not self._input_name or not self._output_names:
-            raise RuntimeError("[ANON-ENG] engine missing input or output tensors")
-
-        # Map output names to dtypes once (needed for buffer allocation).
-        self._output_dtypes = {
-            n: torch.from_numpy(np.empty(0, dtype=trt.nptype(self._engine.get_tensor_dtype(n)))).dtype
-            for n in self._output_names
-        }
-        self._input_dtype = torch.from_numpy(
-            np.empty(0, dtype=trt.nptype(self._engine.get_tensor_dtype(self._input_name)))
-        ).dtype
-
-        # Dedicated CUDA stream so TRT enqueue isn't forced to sync on the
-        # default stream every call (warning emitted otherwise).
-        self._stream = torch.cuda.Stream(device=self._device)
-
-        # Output buffer cache keyed by (name, shape). TRT outputs the same
-        # shape for a fixed input shape, so we allocate once and reuse —
-        # avoids torch.empty + cudaMalloc on every batch.
-        self._out_cache: dict[tuple[str, tuple], torch.Tensor] = {}
-
-    def __call__(self, frames, conf: float = 0.25, imgsz: int | None = None,
-                 half: bool = True, verbose: bool = False):
-        if not frames:
-            return []
-        size = imgsz or self.imgsz
-        b = len(frames)
-        if b > self.max_batch:
-            raise ValueError(f"batch {b} > engine max_batch {self.max_batch}")
-
-        # ---- Preprocess: letterbox + assemble one uint8 NHWC array.
-        # One CPU buffer → one upload → GPU dtype/normalize/permute. Avoids
-        # per-frame torch.stack on CPU floats (much larger than uint8 copies).
-        host = np.full((b, size, size, 3), self._LETTERBOX_PAD, dtype=np.uint8)
-        metas: list[tuple[float, int, int, int, int]] = []  # (gain, pad_x, pad_y, h0, w0)
-        for i, fr in enumerate(frames):
-            h0, w0 = fr.shape[:2]
-            gain = min(size / h0, size / w0)
-            new_h, new_w = int(round(h0 * gain)), int(round(w0 * gain))
-            pad_w = (size - new_w) / 2
-            pad_h = (size - new_h) / 2
-            top = int(round(pad_h - 0.1))
-            left = int(round(pad_w - 0.1))
-            resized = cv2.resize(fr, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
-            host[i, top:top + new_h, left:left + new_w] = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
-            metas.append((gain, left, top, h0, w0))
-
-        x_u8 = torch.from_numpy(host).to(self._device, non_blocking=True)
-        x = x_u8.to(self._input_dtype).div_(255.0).permute(0, 3, 1, 2).contiguous()
-
-        # ---- Bind I/O. Reuse cached output buffers per (name, shape).
-        self._context.set_input_shape(self._input_name, tuple(x.shape))
-        self._context.set_tensor_address(self._input_name, int(x.data_ptr()))
-
-        out_buffers: dict[str, torch.Tensor] = {}
-        for name in self._output_names:
-            shape = tuple(self._context.get_tensor_shape(name))
-            key = (name, shape)
-            buf = self._out_cache.get(key)
-            if buf is None:
-                buf = torch.empty(shape, dtype=self._output_dtypes[name], device=self._device)
-                self._out_cache[key] = buf
-            out_buffers[name] = buf
-            self._context.set_tensor_address(name, int(buf.data_ptr()))
-
-        with torch.cuda.stream(self._stream):
-            ok = self._context.execute_async_v3(stream_handle=self._stream.cuda_stream)
-            if not ok:
-                raise RuntimeError("[ANON-ENG] TRT execute_async_v3 failed")
-        self._stream.synchronize()
-
-        # ---- Postprocess: single batched NMS across the whole batch.
-        # Replaces a per-frame loop with B GPU syncs (one .any() + one NMS
-        # call per frame) — main reason the prior version was slow.
-        primary = max(out_buffers.values(), key=lambda t: t.numel())
-        if primary.ndim != 3:
-            raise RuntimeError(f"[ANON-ENG] unexpected output shape {primary.shape}")
-        # YOLOv8 raw output is (B, 4+nc, anchors); 4+nc < anchors.
-        pred = primary.permute(0, 2, 1) if primary.shape[1] < primary.shape[2] else primary
-        pred = pred[:b].float()  # only the valid frames in the batch
-
-        boxes_xywh = pred[..., :4]
-        scores = pred[..., 4:]
-        cls_conf, cls_idx = scores.max(dim=-1)  # (B, A)
-        keep_mask = cls_conf > conf             # (B, A)
-
-        results: list[_TRTKebab._Result] = [_TRTKebab._Result(None) for _ in range(b)]
-        if not bool(keep_mask.any()):
-            return results
-
-        img_idx, anc_idx = keep_mask.nonzero(as_tuple=True)
-        kbox = boxes_xywh[img_idx, anc_idx]      # (K, 4)
-        kconf = cls_conf[img_idx, anc_idx]       # (K,)
-        kcls = cls_idx[img_idx, anc_idx]         # (K,)
-
-        cx, cy, w, h = kbox.unbind(dim=1)
-        kxyxy = torch.stack([cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2], dim=1)
-
-        # batched_nms: separate suppression buckets per (image, class).
-        # nc fits in a small int; cast to long to compose the idx.
-        nc = scores.shape[-1]
-        nms_idx = img_idx * nc + kcls
-        keep = torchvision.ops.batched_nms(kxyxy, kconf, nms_idx, self._IOU_THRESH)
-        kxyxy = kxyxy[keep]
-        img_idx = img_idx[keep]
-
-        # Group by image (one GPU→CPU sync for img_idx, then per-frame slice).
-        img_idx_cpu = img_idx.cpu().numpy()
-        for i in range(b):
-            mask = img_idx_cpu == i
-            if not mask.any():
-                continue
-            sel = torch.from_numpy(np.nonzero(mask)[0]).to(self._device)
-            boxes_i = kxyxy.index_select(0, sel).clone()
-            gain, pad_x, pad_y, h0, w0 = metas[i]
-            boxes_i[:, [0, 2]] -= pad_x
-            boxes_i[:, [1, 3]] -= pad_y
-            boxes_i /= gain
-            boxes_i[:, [0, 2]].clamp_(0, w0 - 1)
-            boxes_i[:, [1, 3]].clamp_(0, h0 - 1)
-            results[i] = _TRTKebab._Result(boxes_i)
-        return results
 
 
 class EngineAnonymizationService:
@@ -359,14 +116,16 @@ class EngineAnonymizationService:
         self._reader_q_depth = reader_queue_depth
         self._writer_q_depth = writer_queue_depth
 
-    def _load_model(self) -> "_TRTKebab":
+    def _load_model(self) -> TRTYolo:
         if not os.path.exists(self.model_path):
             raise FileNotFoundError(f"[ANON-ENG] Encrypted engine not found: {self.model_path}")
         print(f"[ANON-ENG] Decrypting + loading TensorRT engine in-memory: {self.model_path}")
         try:
-            engine_bytes = _decrypt_engine(Path(self.model_path))
+            engine_bytes = decrypt_blob(
+                Path(self.model_path), _PAD, _XOR, _AAD_PAD, _AAD_XOR
+            )
             try:
-                model = _TRTKebab(
+                model = TRTYolo(
                     engine_bytes=engine_bytes,
                     max_batch=self.batch_size,
                     imgsz=self.inference_size,

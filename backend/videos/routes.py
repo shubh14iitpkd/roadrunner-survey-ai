@@ -162,17 +162,19 @@ def _run_local_anonymization(app, video_id: str, save_path: Path, upload_root: P
                 f"[ANON] local anonymization done for video {video_id} "
                 f"in {elapsed:.2f}s ({elapsed / 60:.2f} min)"
             )
+            db.videos.find_one_and_update(
+                {"_id": ObjectId(video_id)},
+                {"$set": {"status": "uploaded", "progress": 100, "updated_at": get_now_iso()}},
+            )
         except Exception as e:
             elapsed = time.time() - anon_start
             print(
                 f"[ANON] local anonymization failed for video {video_id} "
                 f"after {elapsed:.2f}s: {e}"
             )
-            # Don't block the user — fall through to mark uploaded anyway
-        finally:
             db.videos.find_one_and_update(
                 {"_id": ObjectId(video_id)},
-                {"$set": {"status": "uploaded", "progress": 100, "updated_at": get_now_iso()}},
+                {"$set": {"status": "failed", "error": f"Anonymization failed: {e}", "updated_at": get_now_iso()}},
             )
 
 
@@ -247,7 +249,7 @@ def _run_library_anonymization(app, video_id: str, full_path: Path, upload_root:
             )
             db.videos.find_one_and_update(
                 {"_id": ObjectId(video_id)},
-                {"$set": {"status": "uploaded", "progress": 100, "updated_at": get_now_iso()}},
+                {"$set": {"status": "failed", "error": f"Anonymization failed: {e}", "updated_at": get_now_iso()}},
             )
 
 
