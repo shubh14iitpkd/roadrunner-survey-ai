@@ -205,6 +205,11 @@ class _TRTKebab:
         # default stream every call (warning emitted otherwise).
         self._stream = torch.cuda.Stream(device=self._device)
 
+        # Output buffer cache keyed by (name, shape). TRT outputs the same
+        # shape for a fixed input shape, so we allocate once and reuse —
+        # avoids torch.empty + cudaMalloc on every batch.
+        self._out_cache: dict[tuple[str, tuple], torch.Tensor] = {}
+
     def __call__(self, frames, conf: float = 0.25, imgsz: int | None = None,
                  half: bool = True, verbose: bool = False):
         if not frames:
@@ -214,24 +219,38 @@ class _TRTKebab:
         if b > self.max_batch:
             raise ValueError(f"batch {b} > engine max_batch {self.max_batch}")
 
-        # ---- Preprocess: letterbox each frame, build NCHW batch tensor.
-        tensors: list[torch.Tensor] = []
-        meta: list[tuple[float, int, int, int, int]] = []  # (gain, pad_x, pad_y, h0, w0)
-        for fr in frames:
-            t, m = self._letterbox(fr, size)
-            tensors.append(t)
-            meta.append(m)
-        x = torch.stack(tensors, dim=0).to(self._device, dtype=self._input_dtype, non_blocking=True)
-        x = x.contiguous()
+        # ---- Preprocess: letterbox + assemble one uint8 NHWC array.
+        # One CPU buffer → one upload → GPU dtype/normalize/permute. Avoids
+        # per-frame torch.stack on CPU floats (much larger than uint8 copies).
+        host = np.full((b, size, size, 3), self._LETTERBOX_PAD, dtype=np.uint8)
+        metas: list[tuple[float, int, int, int, int]] = []  # (gain, pad_x, pad_y, h0, w0)
+        for i, fr in enumerate(frames):
+            h0, w0 = fr.shape[:2]
+            gain = min(size / h0, size / w0)
+            new_h, new_w = int(round(h0 * gain)), int(round(w0 * gain))
+            pad_w = (size - new_w) / 2
+            pad_h = (size - new_h) / 2
+            top = int(round(pad_h - 0.1))
+            left = int(round(pad_w - 0.1))
+            resized = cv2.resize(fr, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+            host[i, top:top + new_h, left:left + new_w] = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
+            metas.append((gain, left, top, h0, w0))
 
-        # ---- Bind I/O and run TRT.
+        x_u8 = torch.from_numpy(host).to(self._device, non_blocking=True)
+        x = x_u8.to(self._input_dtype).div_(255.0).permute(0, 3, 1, 2).contiguous()
+
+        # ---- Bind I/O. Reuse cached output buffers per (name, shape).
         self._context.set_input_shape(self._input_name, tuple(x.shape))
         self._context.set_tensor_address(self._input_name, int(x.data_ptr()))
 
         out_buffers: dict[str, torch.Tensor] = {}
         for name in self._output_names:
             shape = tuple(self._context.get_tensor_shape(name))
-            buf = torch.empty(shape, dtype=self._output_dtypes[name], device=self._device)
+            key = (name, shape)
+            buf = self._out_cache.get(key)
+            if buf is None:
+                buf = torch.empty(shape, dtype=self._output_dtypes[name], device=self._device)
+                self._out_cache[key] = buf
             out_buffers[name] = buf
             self._context.set_tensor_address(name, int(buf.data_ptr()))
 
@@ -241,82 +260,57 @@ class _TRTKebab:
                 raise RuntimeError("[ANON-ENG] TRT execute_async_v3 failed")
         self._stream.synchronize()
 
-        # ---- Postprocess: pick raw-detection output (largest tensor), decode.
+        # ---- Postprocess: single batched NMS across the whole batch.
+        # Replaces a per-frame loop with B GPU syncs (one .any() + one NMS
+        # call per frame) — main reason the prior version was slow.
         primary = max(out_buffers.values(), key=lambda t: t.numel())
         if primary.ndim != 3:
             raise RuntimeError(f"[ANON-ENG] unexpected output shape {primary.shape}")
+        # YOLOv8 raw output is (B, 4+nc, anchors); 4+nc < anchors.
+        pred = primary.permute(0, 2, 1) if primary.shape[1] < primary.shape[2] else primary
+        pred = pred[:b].float()  # only the valid frames in the batch
 
-        # YOLOv8 raw output is (B, 4+nc, anchors); 4+nc < anchors (e.g. 6 vs 8400).
-        if primary.shape[1] < primary.shape[2]:
-            pred = primary.permute(0, 2, 1).contiguous()  # (B, A, 4+nc)
-        else:
-            pred = primary  # already (B, A, 4+nc)
+        boxes_xywh = pred[..., :4]
+        scores = pred[..., 4:]
+        cls_conf, cls_idx = scores.max(dim=-1)  # (B, A)
+        keep_mask = cls_conf > conf             # (B, A)
 
-        results: list[_TRTKebab._Result] = []
+        results: list[_TRTKebab._Result] = [_TRTKebab._Result(None) for _ in range(b)]
+        if not bool(keep_mask.any()):
+            return results
+
+        img_idx, anc_idx = keep_mask.nonzero(as_tuple=True)
+        kbox = boxes_xywh[img_idx, anc_idx]      # (K, 4)
+        kconf = cls_conf[img_idx, anc_idx]       # (K,)
+        kcls = cls_idx[img_idx, anc_idx]         # (K,)
+
+        cx, cy, w, h = kbox.unbind(dim=1)
+        kxyxy = torch.stack([cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2], dim=1)
+
+        # batched_nms: separate suppression buckets per (image, class).
+        # nc fits in a small int; cast to long to compose the idx.
+        nc = scores.shape[-1]
+        nms_idx = img_idx * nc + kcls
+        keep = torchvision.ops.batched_nms(kxyxy, kconf, nms_idx, self._IOU_THRESH)
+        kxyxy = kxyxy[keep]
+        img_idx = img_idx[keep]
+
+        # Group by image (one GPU→CPU sync for img_idx, then per-frame slice).
+        img_idx_cpu = img_idx.cpu().numpy()
         for i in range(b):
-            results.append(self._decode_one(pred[i].float(), conf, meta[i]))
+            mask = img_idx_cpu == i
+            if not mask.any():
+                continue
+            sel = torch.from_numpy(np.nonzero(mask)[0]).to(self._device)
+            boxes_i = kxyxy.index_select(0, sel).clone()
+            gain, pad_x, pad_y, h0, w0 = metas[i]
+            boxes_i[:, [0, 2]] -= pad_x
+            boxes_i[:, [1, 3]] -= pad_y
+            boxes_i /= gain
+            boxes_i[:, [0, 2]].clamp_(0, w0 - 1)
+            boxes_i[:, [1, 3]].clamp_(0, h0 - 1)
+            results[i] = _TRTKebab._Result(boxes_i)
         return results
-
-    def _decode_one(self, pred: torch.Tensor, conf: float,
-                    meta: tuple[float, int, int, int, int]) -> "_TRTKebab._Result":
-        # pred shape: (A, 4+nc) with box cx,cy,w,h then nc class scores.
-        boxes_xywh = pred[:, :4]
-        scores = pred[:, 4:]
-        cls_conf, cls_idx = scores.max(dim=1)
-        keep = cls_conf > conf
-        if not keep.any():
-            return _TRTKebab._Result(None)
-
-        boxes_xywh = boxes_xywh[keep]
-        cls_conf = cls_conf[keep]
-        cls_idx = cls_idx[keep]
-
-        # cxcywh → xyxy in letterboxed `size` space.
-        cx, cy, w, h = boxes_xywh.unbind(dim=1)
-        x1 = cx - w / 2
-        y1 = cy - h / 2
-        x2 = cx + w / 2
-        y2 = cy + h / 2
-        boxes_xyxy = torch.stack([x1, y1, x2, y2], dim=1)
-
-        # Class-aware NMS: offset boxes by class id so per-class NMS is a single call.
-        max_coord = boxes_xyxy.max()
-        offset = cls_idx.float() * (max_coord + 1)
-        keep_idx = torchvision.ops.nms(
-            boxes_xyxy + offset.unsqueeze(1), cls_conf, self._IOU_THRESH
-        )
-        boxes_xyxy = boxes_xyxy[keep_idx]
-
-        # Undo letterbox: subtract pad, divide by gain, clamp to original frame.
-        gain, pad_x, pad_y, h0, w0 = meta
-        boxes_xyxy[:, [0, 2]] -= pad_x
-        boxes_xyxy[:, [1, 3]] -= pad_y
-        boxes_xyxy /= gain
-        boxes_xyxy[:, [0, 2]].clamp_(0, w0 - 1)
-        boxes_xyxy[:, [1, 3]].clamp_(0, h0 - 1)
-
-        return _TRTKebab._Result(boxes_xyxy)
-
-    def _letterbox(self, frame: np.ndarray, size: int) -> tuple[torch.Tensor, tuple]:
-        h0, w0 = frame.shape[:2]
-        gain = min(size / h0, size / w0)
-        new_h, new_w = int(round(h0 * gain)), int(round(w0 * gain))
-        pad_w = (size - new_w) / 2
-        pad_h = (size - new_h) / 2
-        top = int(round(pad_h - 0.1))
-        bot = int(round(pad_h + 0.1))
-        left = int(round(pad_w - 0.1))
-        right = int(round(pad_w + 0.1))
-
-        resized = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
-        padded = cv2.copyMakeBorder(
-            resized, top, bot, left, right,
-            cv2.BORDER_CONSTANT,
-            value=(self._LETTERBOX_PAD, self._LETTERBOX_PAD, self._LETTERBOX_PAD),
-        )
-        rgb = cv2.cvtColor(padded, cv2.COLOR_BGR2RGB)
-        tensor = torch.from_numpy(rgb).permute(2, 0, 1).contiguous().float() / 255.0
-        return tensor, (gain, left, top, h0, w0)
 
 
 class EngineAnonymizationService:
