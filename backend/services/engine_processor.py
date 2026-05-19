@@ -44,7 +44,16 @@ from deep_sort_realtime.deepsort_tracker import DeepSort
 from ultralytics import YOLO
 
 # Single-source helpers/constants — keep parity with LocalVideoProcessor.
-from services.local_processor import (
+# from services.local_processor import (
+#     classify_group,
+#     _offset_latlng,
+#     _dedupe_polyline,
+#     _vehicle_path_between,
+#     _offset_path_between,
+#     SIDED_OFFSET_M,
+#     BEARING_SMOOTH_FRAMES,
+# )
+from services.processor_helpers import (
     classify_group,
     _offset_latlng,
     _dedupe_polyline,
@@ -53,7 +62,6 @@ from services.local_processor import (
     SIDED_OFFSET_M,
     BEARING_SMOOTH_FRAMES,
 )
-
 
 @dataclass
 class _FrameWork:
